@@ -509,5 +509,6 @@ Tracked here until resolved into ADRs.
 | [0004](adr/0004-query-engine.md) | DuckDB + Arrow for compute |
 | [0005](adr/0005-semantic-layer.md) | Build our own; dbt-compatible |
 | [0006](adr/0006-caching-strategy.md) | Three-tier cache with semantic invalidation |
+| [0007](adr/0007-job-orchestration.md) | River for jobs; Temporal optional at scale |
 | [0008](adr/0008-ai-architecture.md) | Separate Python AI service, semantic grounding |
 | [0009](adr/0009-authorization.md) | OpenFGA, enforced at the query compiler |
