@@ -3,6 +3,9 @@
 This is the design corpus for Pivot. It is written to be read in order the first time,
 and grepped thereafter.
 
+> **Building right now?** The work queue is [../CHECKLIST.md](../CHECKLIST.md) — it tracks
+> what's done, what's next, and how each session picks up where the last left off.
+
 ## Read in this order
 
 ### 1. Why

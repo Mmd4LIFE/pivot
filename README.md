@@ -20,6 +20,7 @@ architecture decisions, and a complete zero-to-one roadmap. Start here:
 
 | Document | What it covers |
 |---|---|
+| **[CHECKLIST.md](CHECKLIST.md)** | **The build checklist — what's done, what's next** |
 | [docs/vision.md](docs/vision.md) | Why Pivot exists, who it's for, how it wins |
 | [docs/architecture/tech-stack.md](docs/architecture/tech-stack.md) | Every technology choice, with rationale and rejected alternatives |
 | [docs/architecture/system-design.md](docs/architecture/system-design.md) | Services, data flow, deployment topologies |
