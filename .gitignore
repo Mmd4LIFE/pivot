@@ -1,0 +1,38 @@
+# Binaries
+/pivot
+/dist/
+/bin/
+*.exe
+
+# Go
+*.test
+*.out
+vendor/
+
+# Node
+node_modules/
+.vite/
+*.tsbuildinfo
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Local data & secrets
+*.db
+*.sqlite
+*.sqlite3
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Editors & OS
+.vscode/
+.idea/
+.DS_Store
