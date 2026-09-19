@@ -1,0 +1,2 @@
+# Deployment artifacts: Helm chart, Docker Compose, Terraform.
+# Compose reference stack lands in Part 15; Helm in Phase 9.

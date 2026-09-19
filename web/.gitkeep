@@ -1,0 +1,2 @@
+# Frontend lives here from Part 9 (Vite + React 19 + TypeScript).
+# Built assets are embedded into the Go binary via embed.FS.

@@ -1,0 +1,134 @@
+# golangci-lint configuration (schema v2).
+#
+# Philosophy: strict about correctness and security, relaxed about style
+# opinions that generate noise without catching bugs. A linter that cries wolf
+# gets disabled by the team, which is worse than never enabling it.
+#
+# Deliberately NOT enabled: wsl, nlreturn, funlen, gocognit, cyclop, varnamelen,
+# ireturn, exhaustruct, godox. They enforce taste, not correctness.
+
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+  # Build tags used by the pure-Go fallback build (see ADR-0004).
+  build-tags:
+    - nocgo
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    # Correctness
+    - errorlint # error wrapping done right — matches our Definition of Done
+    - nilerr # returning nil when err is non-nil
+    - bodyclose # unclosed HTTP response bodies
+    - sqlclosecheck # unclosed sql.Rows / sql.Stmt — matters from Part 3
+    - rowserrcheck # unchecked rows.Err()
+    - durationcheck # accidental duration multiplication
+    - makezero # append to a non-zero-length make()
+    - noctx # HTTP requests without a context
+    - asasalint # passing []any to a variadic any
+    - contextcheck # functions that should take a context but don't
+
+    # Security
+    - gosec
+
+    # Clarity
+    - revive
+    - gocritic
+    - unconvert
+    - misspell
+    - predeclared # shadowing predeclared identifiers
+    - bidichk # dangerous bidirectional unicode
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment # struct field ordering for padding; clarity wins
+
+    gosec:
+      excludes:
+        # G104 duplicates errcheck.
+        - G104
+
+    revive:
+      rules:
+        - name: exported
+          arguments:
+            - disableStutteringCheck
+        - name: package-comments
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: indent-error-flow
+        - name: range-val-in-closure
+        - name: time-naming
+        - name: unreachable-code
+        - name: redefines-builtin-id
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+      disabled-checks:
+        - hugeParam # triggers on value receivers we want for immutability
+        - rangeValCopy
+        - unnamedResult
+
+    staticcheck:
+      checks:
+        - all
+
+    misspell:
+      locale: US
+
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - std-error-handling
+    rules:
+      # Test files get latitude: unchecked errors and hardcoded credentials in
+      # fixtures are normal there, and security linters are noisy about both.
+      - path: _test\.go
+        linters:
+          - gosec
+          - errcheck
+          - contextcheck
+
+      # Generated code (sqlc, OpenAPI clients) is not ours to lint.
+      - path: (.+)\.gen\.go
+        linters:
+          - revive
+          - gocritic
+          - gosec
+          - errcheck
+
+      # doc.go files are package documentation only.
+      - path: doc\.go
+        linters:
+          - revive
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/Mmd4LIFE/pivot
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  # New code must be clean; we are not grandfathering anything in yet.
+  new: false

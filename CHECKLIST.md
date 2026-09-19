@@ -53,22 +53,31 @@ At the end of every part, in this order:
 
 | | |
 |---|---|
-| **Last completed** | Part 0 — Documentation & design corpus |
-| **Next up** | **Part 1 — Repository scaffold & toolchain** |
+| **Last completed** | Part 1 — Repository scaffold & toolchain |
+| **Next up** | **Part 2 — Config, CLI, and a running server** |
 | **Current phase** | Phase 0 — Foundations |
 | **Branch** | `main` |
 | **Blockers** | None |
 | **Repo** | https://github.com/Mmd4LIFE/pivot |
 
-**Where the code stands:** No application code exists yet. The repository contains the
-design corpus only. Part 1 creates the first buildable artifact.
+**Where the code stands:** `make build` produces `./bin/pivot`, which prints its version
+and usage. `internal/version` is the only package with real code; the rest are `doc.go`
+stubs stating each package's role. Tests and lint are green.
+
+**Environment notes for future sessions:**
+- Go 1.27.1 is installed **via snap** (`/snap/bin/go`). `go.mod` targets 1.23 as the floor.
+- **This machine's network is slow and flaky** (~20–80 KB/s; `sum.golang.org` lookups time
+  out under load). Hand the user any command that needs a large download rather than
+  running it in-session. `make tools` is already designed around this — it fetches the
+  golangci-lint release archive instead of building from source.
+- `make tools` must be run once per clone to populate `./bin/golangci-lint`.
 
 ---
 
 ## Progress
 
 ```
-Phase 0  Foundations        [                    ]  0/15
+Phase 0  Foundations        [█▏                  ]  1/15
 Phase 1  Connect & Query    [                    ]  0/12   (detailed at Part 15)
 Phase 2+ ...                                            (expanded as we approach)
 ```
@@ -93,7 +102,7 @@ an 11-phase roadmap.
 
 ---
 
-### - [ ] Part 1 — Repository scaffold & toolchain
+### - [x] Part 1 — Repository scaffold & toolchain ✅ 2026-09-19
 
 **Deliverable:** A Go module that builds, lints, and tests — with the directory structure
 from [README.md](README.md#repository-layout-planned) in place.
@@ -325,6 +334,11 @@ ldd ./bin/pivot                    # no Node runtime anywhere
 Plus: deep-linking to a client route works (SPA fallback), and `make dev` hot-reloads both
 sides.
 
+**Notes:** Node isn't installed on this machine yet, and `npm install` for this dependency
+set is a large download on a slow link (see the environment notes in Current state). Hand
+the user the install commands rather than running them in-session. Consider `pnpm` for a
+smaller, faster install.
+
 **Refs:** `P0-FE-001` … `P0-FE-004`, `P0-API-007`, `P0-PKG-001`
 
 ---
@@ -379,6 +393,10 @@ axe accessibility scan, Playwright E2E.
 
 **Done when:** A PR triggers everything, all gates pass on `main`, a deliberately broken
 PR is correctly blocked, and total wall-clock is under 10 minutes.
+
+**Notes:** Use `make tools` (release archive + checksum verify) for golangci-lint in CI, not
+`go install` — building it from source pulls ~400 modules and would blow the 10-minute
+budget on its own. Cache `~/go/pkg/mod` and `./bin` between runs.
 
 **Refs:** `P0-CI-001` … `P0-CI-006`, plus the gate table in
 [00-principles.md](docs/roadmap/00-principles.md#5-quality-gates-in-ci)
@@ -484,4 +502,5 @@ Newest first. Record what **actually** shipped, including what didn't work.
 
 | Date | Part | Shipped | Notes |
 |---|---|---|---|
+| 2026-09-19 | 1 | Go module + package skeleton, Makefile (14 targets), strict golangci-lint config, `internal/version` with link-time stamping, `pivot version`/`help`, Apache 2.0 license, CONTRIBUTING / CoC / SECURITY / CHANGELOG, PR template with the full DoD | All four `Done when` checks pass from clean. **Go was not installed** — user installed 1.27.1 via snap after a direct download crawled at 18–28 KB/s. **`go install golangci-lint` failed** on `sum.golang.org` timeouts (~400 modules); switched `make tools` to the checksum-verified release archive, which is better for CI anyway. Corrected two planning errors: pinned golangci-lint `v2.6.2` doesn't exist (actual `v2.13.2`, and v2 uses a new config schema), and `run()` took `*os.File` despite its comment promising an injected writer — now `io.Writer`, which is what makes `main_test.go` possible. |
 | 2026-09-19 | 0 | Full design corpus: vision, tech stack, system/security/data architecture, 9 ADRs, 11-phase roadmap, NFRs, feature matrix | 35 docs, ~6.6k lines. All internal links verified. Pushed to GitHub. |

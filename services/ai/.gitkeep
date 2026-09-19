@@ -1,0 +1,2 @@
+# Python AI service lives here from Phase 7 (FastAPI).
+# Optional by design: no core feature may hard-depend on it. See ADR-0008.
