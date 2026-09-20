@@ -83,3 +83,40 @@ and joins. Wrong shape, and it would add a dependency without removing one.
   accumulated irritation.
 - Embedded Postgres matures enough to replace both
 - A feature we genuinely need has no acceptable SQLite degradation
+
+---
+
+## Measurements
+
+### 2026-09-20 — after Parts 3-a and 3-b (schema v1, five tables)
+
+| Cost | PostgreSQL | SQLite | Note |
+|---|---|---|---|
+| sqlc type overrides | 6 (`db_type`) | **34 (per-column)** | SQLite has no db_type to key on |
+| Migration lines | 86 | 86 | A full mirror |
+| Query lines | 120 | 120 | A full mirror |
+| Bridging code | — | 152 (`dbtypes`) | Shared, but exists only because of SQLite |
+
+SQLite-attributable: roughly **460 lines plus 34 config entries**, against ~2,800 lines of
+store code — call it **16%**, marginally over the threshold.
+
+**The decision stands, for now**, because the headline number overstates the ongoing cost
+and the structural risk was eliminated rather than merely absorbed.
+
+Custom column types (`dbtypes.Time`, `Bool`, `JSON`) make the two generated packages
+**byte-identical apart from the package clause** — same models, same Querier, same params
+structs. Two consequences matter more than the line count:
+
+1. Because the structs are structurally identical, Go permits direct conversion between
+   them (`pg.CreateOrganizationParams(p)`). The repository layer in Part 4 therefore needs
+   one conversion per type, not a hand-written field-by-field mapping per engine.
+2. Divergence can no longer be silent. A missing override changes a generated type, and
+   the round-trip tests fail on the engine that drifted.
+
+The marginal cost of a new table is now: mirror the migration, mirror the queries, add
+~7 override lines. That is mechanical and caught by tests when skipped — which is a very
+different risk profile from 16% of effort spent on judgment calls.
+
+**Re-measure at the end of Phase 1**, when the catalog tables land and the schema roughly
+triples. The number to watch is not total lines but whether any override or query mirror
+has ever been forgotten and shipped.

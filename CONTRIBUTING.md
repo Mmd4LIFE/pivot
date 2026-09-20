@@ -117,6 +117,7 @@ follow is how bugs get consensus.
 ## Testing
 
 ```bash
+make gen       # regenerate typed queries after changing SQL
 make test      # race-enabled; SQLite only, Postgres cases skip
 make test-all  # starts the dev Postgres container, runs BOTH engines
 make cover     # HTML coverage report

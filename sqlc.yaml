@@ -1,0 +1,156 @@
+version: "2"
+
+# One generated package per engine. sqlc cannot emit a single package for two
+# dialects — placeholders alone differ ($1 vs ?) — so the repository layer in
+# Part 4 consumes both behind one interface.
+#
+# The schema is read from the goose migrations, so there is exactly one
+# definition of it. sqlc understands goose annotations and ignores Down blocks.
+#
+# Both engines are overridden onto the same Go types (internal/store/dbtypes),
+# so the two generated models are structurally identical. Without that, sqlc
+# emits `string` where the other emits `time.Time`, and every consumer needs
+# two code paths. PostgreSQL can be overridden by db_type because it has real
+# types; SQLite stores everything as TEXT or INTEGER, so it needs one entry per
+# column. That asymmetry is the portability tax ADR-0003 accepted.
+
+sql:
+  - engine: postgresql
+    schema: internal/store/migrations/postgres
+    queries: internal/store/queries/postgres
+    gen:
+      go:
+        package: pg
+        out: internal/store/gen/pg
+        sql_package: database/sql
+        emit_interface: true
+        emit_empty_slices: true
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type:
+              import: github.com/google/uuid
+              type: NullUUID
+          - db_type: timestamptz
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
+          - db_type: timestamptz
+            nullable: true
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.NullTime
+          - db_type: pg_catalog.bool
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Bool
+          - db_type: jsonb
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.JSON
+
+  - engine: sqlite
+    schema: internal/store/migrations/sqlite
+    queries: internal/store/queries/sqlite
+    gen:
+      go:
+        package: lite
+        out: internal/store/gen/lite
+        sql_package: database/sql
+        emit_interface: true
+        emit_empty_slices: true
+        # One entry per column, because every one of these is TEXT or INTEGER
+        # and there is no db_type to key on. A TEXT override would turn every
+        # string column in the schema into a UUID.
+        #
+        # A new column of these kinds needs a line here, or the two models
+        # silently diverge. The round-trip tests in gen_test.go are what catch
+        # an omission.
+        overrides:
+          # -- organizations ------------------------------------------------
+          - column: organizations.id
+            go_type: github.com/google/uuid.UUID
+          - column: organizations.settings
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.JSON
+          - column: organizations.created_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
+          - column: organizations.updated_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
+          - column: organizations.created_by
+            go_type:
+              import: github.com/google/uuid
+              type: NullUUID
+          - column: organizations.updated_by
+            go_type:
+              import: github.com/google/uuid
+              type: NullUUID
+          - column: organizations.deleted_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.NullTime
+
+          # -- users --------------------------------------------------------
+          - column: users.id
+            go_type: github.com/google/uuid.UUID
+          - column: users.org_id
+            go_type: github.com/google/uuid.UUID
+          - column: users.is_active
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Bool
+          - column: users.last_login_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.NullTime
+          - column: users.created_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
+          - column: users.updated_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
+          - column: users.created_by
+            go_type:
+              import: github.com/google/uuid
+              type: NullUUID
+          - column: users.updated_by
+            go_type:
+              import: github.com/google/uuid
+              type: NullUUID
+          - column: users.deleted_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.NullTime
+
+          # -- user_attributes ----------------------------------------------
+          - column: user_attributes.id
+            go_type: github.com/google/uuid.UUID
+          - column: user_attributes.org_id
+            go_type: github.com/google/uuid.UUID
+          - column: user_attributes.user_id
+            go_type: github.com/google/uuid.UUID
+          - column: user_attributes.created_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
+          - column: user_attributes.updated_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
+
+          # -- groups -------------------------------------------------------
+          - column: groups.id
+            go_type: github.com/google/uuid.UUID
+          - column: groups.org_id
+            go_type: github.com/google/uuid.UUID
+          - column: groups.parent_group_id
+            go_type:
+              import: github.com/google/uuid
+              type: NullUUID
+          - column: groups.created_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
+          - column: groups.updated_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
+          - column: groups.created_by
+            go_type:
+              import: github.com/google/uuid
+              type: NullUUID
+          - column: groups.updated_by
+            go_type:
+              import: github.com/google/uuid
+              type: NullUUID
+          - column: groups.deleted_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.NullTime
+
+          # -- group_members ------------------------------------------------
+          - column: group_members.org_id
+            go_type: github.com/google/uuid.UUID
+          - column: group_members.group_id
+            go_type: github.com/google/uuid.UUID
+          - column: group_members.user_id
+            go_type: github.com/google/uuid.UUID
+          - column: group_members.added_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
+          - column: group_members.added_by
+            go_type:
+              import: github.com/google/uuid
+              type: NullUUID

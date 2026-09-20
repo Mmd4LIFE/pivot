@@ -33,6 +33,14 @@ LDFLAGS := -s -w \
 # building golangci-lint from source pulls ~400 modules, and its checksum-db
 # lookups are the first thing to fail on a slow or flaky network. The release
 # archive is one download, and we verify it against the published checksums.
+# sqlc publishes no checksums file, so we pin a hash we verified ourselves.
+# Bumping SQLC_VERSION means recomputing SQLC_SHA256 — deliberately manual, so
+# a new binary is never installed unreviewed.
+SQLC_VERSION := 1.31.1
+SQLC_SHA256  := 497ae4fcdfa64c5b0c311ffe4c2bd991e43991e82e5367792ed78bc2dca27354
+SQLC_DIST    := sqlc_$(SQLC_VERSION)_linux_amd64.tar.gz
+SQLC_URL     := https://github.com/sqlc-dev/sqlc/releases/download/v$(SQLC_VERSION)/$(SQLC_DIST)
+
 GOLANGCI_VERSION  := v2.13.2
 GOLANGCI_SEMVER   := $(patsubst v%,%,$(GOLANGCI_VERSION))
 GOLANGCI_OS       := $(shell go env GOOS)
@@ -125,8 +133,29 @@ vet: ## Run go vet
 check: fmt vet lint test ## Run everything CI runs
 
 # ── Tooling ──────────────────────────────────────────────────────────────────
+.PHONY: gen
+gen: $(TOOLS_DIR)/sqlc ## Generate typed query code from SQL
+	$(TOOLS_DIR)/sqlc generate
+	@echo "generated; run 'git diff --exit-code' to confirm it is committed"
+
+.PHONY: gen-check
+gen-check: gen ## Fail if generated code is out of date (for CI)
+	@git diff --exit-code -- internal/store/ \
+		|| (echo "ERROR: generated code is stale; run 'make gen' and commit" && exit 1)
+
 .PHONY: tools
-tools: $(TOOLS_DIR)/golangci-lint ## Install pinned dev tooling into ./bin
+tools: $(TOOLS_DIR)/golangci-lint $(TOOLS_DIR)/sqlc ## Install pinned dev tooling into ./bin
+
+$(TOOLS_DIR)/sqlc:
+	@mkdir -p $(TOOLS_DIR)
+	@echo "installing sqlc $(SQLC_VERSION)..."
+	@tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && \
+		curl -sSfL --retry 5 --retry-delay 3 --retry-all-errors \
+			-o "$$tmp/$(SQLC_DIST)" "$(SQLC_URL)" && \
+		echo "$(SQLC_SHA256)  $$tmp/$(SQLC_DIST)" | sha256sum -c - && \
+		tar -xzf "$$tmp/$(SQLC_DIST)" -C "$$tmp" && \
+		install -m 0755 "$$tmp/sqlc" "$(TOOLS_DIR)/sqlc"
+	@$(TOOLS_DIR)/sqlc version
 
 $(TOOLS_DIR)/golangci-lint:
 	@mkdir -p $(TOOLS_DIR)
