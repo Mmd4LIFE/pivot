@@ -9,6 +9,7 @@ import (
 
 	"github.com/Mmd4LIFE/pivot/internal/api"
 	"github.com/Mmd4LIFE/pivot/internal/logging"
+	"github.com/Mmd4LIFE/pivot/internal/store"
 	"github.com/Mmd4LIFE/pivot/internal/version"
 )
 
@@ -42,13 +43,30 @@ readiness change before the drain begins, so no request is dropped.`,
 				slog.String("config_file", sourceOrNone(res.SourceFile)),
 			)
 
+			db, err := store.Open(cmd.Context(), cfg.Database, log)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = db.Close() }()
+
+			if cfg.Database.AutoMigrate {
+				if err := store.Migrate(cmd.Context(), db, log); err != nil {
+					return err
+				}
+			} else if err := warnIfBehind(cmd, db, log); err != nil {
+				return err
+			}
+
 			// NotifyContext cancels on the first signal and restores default
 			// behavior on the second, so an impatient operator can still
 			// force-quit a hung drain with a second Ctrl-C.
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 
-			srv := api.New(cfg.Server, log)
+			srv := api.New(cfg.Server, log, api.WithCheck(api.Check{
+				Name: "database",
+				Func: db.HealthCheck,
+			}))
 
 			return srv.Run(ctx)
 		},
@@ -61,4 +79,34 @@ func sourceOrNone(path string) string {
 	}
 
 	return path
+}
+
+// warnIfBehind reports pending migrations when auto-migration is disabled.
+//
+// Starting against a stale schema fails later, in a handler, with a confusing
+// error. Saying so at startup is cheaper. It is a warning rather than a fatal
+// error because a rolling deploy legitimately runs old code against a newer
+// schema for a short window.
+func warnIfBehind(cmd *cobra.Command, db *store.DB, log *slog.Logger) error {
+	statuses, err := store.Status(cmd.Context(), db)
+	if err != nil {
+		return err
+	}
+
+	var pending int
+
+	for _, s := range statuses {
+		if !s.Applied {
+			pending++
+		}
+	}
+
+	if pending > 0 {
+		log.Warn("pending migrations not applied",
+			slog.Int("pending", pending),
+			slog.String("hint", "run `pivot migrate up`, or set database.autoMigrate"),
+		)
+	}
+
+	return nil
 }

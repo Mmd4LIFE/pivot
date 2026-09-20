@@ -12,7 +12,7 @@ are expensive to reverse also have an [ADR](adr/).
 
 | Layer | Choice | Version |
 |---|---|---|
-| Control plane language | **Go** | 1.23+ |
+| Control plane language | **Go** | 1.26+ |
 | Analytical compute | **DuckDB** (embedded) + **Apache Arrow** | 1.1+ / 17+ |
 | AI service language | **Python** | 3.12 |
 | SQL parsing & transpilation | **SQLGlot** (Python sidecar) | latest |
@@ -37,7 +37,7 @@ are expensive to reverse also have an [ADR](adr/).
 
 ## 1. Backend: Go
 
-**Decision: Go 1.23+ for the control plane.** See [ADR-0001](adr/0001-backend-language.md).
+**Decision: Go for the control plane** (floor 1.26+, see the amendment in ADR-0001). See [ADR-0001](adr/0001-backend-language.md).
 
 ### Why
 
@@ -469,9 +469,18 @@ that would otherwise reach production as wrong numbers.
 `./pivot` — embedded SQLite, in-process cache, embedded OpenFGA and DuckDB, no AI. One
 process, one file, no dependencies. This is the on-ramp.
 
+### Container image (the common case)
+A multi-stage, distroless, non-root image published to GHCR as
+`ghcr.io/mmd4life/pivot`, multi-arch for `linux/amd64` and `linux/arm64`, with a
+`HEALTHCHECK` on `/healthz`, an SBOM, and a cosign signature. This is how most real
+deployments run Pivot, and it is what both the Compose stack and the Helm chart consume.
+The image is built on every pull request and published on tags, so a broken `Dockerfile`
+never reaches a release.
+
 ### Docker Compose (50–500 users)
 Pivot + Postgres + Valkey + MinIO + AI service. One `docker compose up`, a reference
-configuration we maintain and test.
+configuration we maintain and test. A separate `docker-compose.dev.yml` brings up only the
+dependencies, for running the binary locally against real services.
 
 ### Kubernetes (500+ users)
 Helm chart with separately scalable deployments: API servers (stateless, HPA on request

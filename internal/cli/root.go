@@ -74,6 +74,7 @@ value came from.`,
 
 	root.AddCommand(
 		newServeCmd(env, &flags),
+		newMigrateCmd(env, &flags),
 		newVersionCmd(env),
 		newConfigCmd(env, &flags),
 	)

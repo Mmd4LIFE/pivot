@@ -97,6 +97,30 @@ func (c *Config) Validate() error {
 		})
 	}
 
+	if strings.TrimSpace(c.Database.URL) == "" {
+		errs = append(errs, FieldError{
+			Field: "database.url",
+			Value: `""`,
+			Want:  "a SQLite path, sqlite://, :memory:, or postgres:// URL",
+		})
+	}
+
+	if c.Database.MaxOpenConns < 0 {
+		errs = append(errs, FieldError{
+			Field: "database.maxOpenConns",
+			Value: c.Database.MaxOpenConns,
+			Want:  "a non-negative count, or 0 for the engine default",
+		})
+	}
+
+	if c.Database.MaxIdleConns < 0 {
+		errs = append(errs, FieldError{
+			Field: "database.maxIdleConns",
+			Value: c.Database.MaxIdleConns,
+			Want:  "a non-negative count, or 0 for the engine default",
+		})
+	}
+
 	if !slices.Contains(LogLevels, c.Log.Level) {
 		errs = append(errs, FieldError{
 			Field: "log.level",

@@ -14,8 +14,46 @@ import (
 // docs/vision.md. Every field added here needs a default, a validation rule,
 // and an entry in the environment binding table in env.go.
 type Config struct {
-	Server ServerConfig `yaml:"server"`
-	Log    LogConfig    `yaml:"log"`
+	Server   ServerConfig   `yaml:"server"`
+	Database DatabaseConfig `yaml:"database"`
+	Log      LogConfig      `yaml:"log"`
+}
+
+// DatabaseConfig points Pivot at its metadata store.
+type DatabaseConfig struct {
+	// URL is the metadata database. Recognized forms:
+	//
+	//	pivot.db                       SQLite file (the default)
+	//	sqlite://data/pivot.db         SQLite file, explicit
+	//	:memory:                       SQLite, in-memory (tests)
+	//	postgres://user:pw@host/db     PostgreSQL
+	//
+	// A bare path with no scheme is treated as a SQLite file, so the
+	// zero-config first run needs no URL at all.
+	URL string `yaml:"url"`
+
+	// MaxOpenConns caps concurrent connections. Zero means the engine default:
+	// 1 for SQLite, 25 for PostgreSQL. SQLite serializes writers, so a pool
+	// larger than one trades "database is locked" errors for throughput that
+	// small deployments do not need — see [DefaultMaxOpenConns].
+	MaxOpenConns int `yaml:"maxOpenConns"`
+
+	// MaxIdleConns caps idle connections. Zero means the engine default.
+	MaxIdleConns int `yaml:"maxIdleConns"`
+
+	// ConnMaxLifetime recycles connections after this long. Bounded lifetimes
+	// keep a connection pool from pinning itself to a failed replica after a
+	// failover.
+	ConnMaxLifetime Duration `yaml:"connMaxLifetime"`
+
+	// ConnMaxIdleTime closes connections idle for this long.
+	ConnMaxIdleTime Duration `yaml:"connMaxIdleTime"`
+
+	// AutoMigrate runs pending migrations on startup. Convenient for the
+	// single-binary install, and deliberately off for anything else: a
+	// clustered rollout wants migrations run once, deliberately, not raced by
+	// every replica as it boots.
+	AutoMigrate bool `yaml:"autoMigrate"`
 }
 
 // ServerConfig controls the HTTP listener.
@@ -90,6 +128,14 @@ func Default() *Config {
 			IdleTimeout:       Duration(90 * time.Second),
 			ShutdownTimeout:   Duration(30 * time.Second),
 			PreShutdownDelay:  0,
+		},
+		Database: DatabaseConfig{
+			URL:             "pivot.db",
+			MaxOpenConns:    0, // engine default
+			MaxIdleConns:    0, // engine default
+			ConnMaxLifetime: Duration(time.Hour),
+			ConnMaxIdleTime: Duration(10 * time.Minute),
+			AutoMigrate:     true,
 		},
 		Log: LogConfig{
 			Level:     "info",

@@ -67,10 +67,36 @@ clean: ## Remove build artifacts and caches
 	@go clean -testcache
 	@echo "cleaned"
 
+# ── Development services ─────────────────────────────────────────────────────
+COMPOSE_DEV := deploy/docker-compose.dev.yml
+DEV_PG_URL  := postgres://pivot:pivot@localhost:5433/pivot?sslmode=disable
+
+.PHONY: dev-db
+dev-db: ## Start the development Postgres container
+	docker compose -f $(COMPOSE_DEV) up -d --wait
+	@echo "postgres ready: $(DEV_PG_URL)"
+
+.PHONY: dev-db-stop
+dev-db-stop: ## Stop the development Postgres container
+	docker compose -f $(COMPOSE_DEV) down
+
+.PHONY: dev-db-reset
+dev-db-reset: ## Destroy and recreate the development Postgres volume
+	docker compose -f $(COMPOSE_DEV) down -v
+	$(MAKE) dev-db
+
+.PHONY: dev-db-url
+dev-db-url: ## Print the development Postgres URL
+	@echo '$(DEV_PG_URL)'
+
 # ── Quality ──────────────────────────────────────────────────────────────────
 .PHONY: test
-test: ## Run all tests with race detection
+test: ## Run all tests with race detection (SQLite only; Postgres tests skip)
 	go test -race -count=1 $(PKG)
+
+.PHONY: test-all
+test-all: dev-db ## Run all tests against BOTH SQLite and Postgres
+	PIVOT_TEST_POSTGRES_URL='$(DEV_PG_URL)' go test -race -count=1 $(PKG)
 
 .PHONY: cover
 cover: ## Run tests and open an HTML coverage report

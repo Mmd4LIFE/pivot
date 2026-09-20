@@ -1,0 +1,56 @@
+# Development dependencies for Pivot.
+#
+# This brings up the services Pivot talks to, NOT Pivot itself — during
+# development you run the binary directly so you get fast rebuilds. The full
+# stack including a containerized Pivot lands in Part 15
+# (deploy/docker-compose.yml).
+#
+#   make dev-db        start Postgres
+#   make dev-db-stop   stop it
+#   make dev-db-reset  destroy the volume and start clean
+#
+# Then:
+#   PIVOT_DATABASE_URL="postgres://pivot:pivot@localhost:5433/pivot?sslmode=disable" ./bin/pivot serve
+#
+# Port 5433 deliberately avoids clashing with a PostgreSQL already listening on
+# the host's 5432.
+
+name: pivot-dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pivot-dev-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pivot
+      POSTGRES_PASSWORD: pivot
+      POSTGRES_DB: pivot
+      # Faster startup for a throwaway development database.
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pivot -d pivot"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 5s
+    command:
+      # Development tuning: durability matters less than speed here, and these
+      # settings make the test suite noticeably faster.
+      - postgres
+      - -c
+      - fsync=off
+      - -c
+      - synchronous_commit=off
+      - -c
+      - full_page_writes=off
+      - -c
+      - max_connections=200
+
+volumes:
+  postgres-data:
+    name: pivot-dev-postgres-data

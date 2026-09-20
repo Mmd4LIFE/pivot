@@ -170,14 +170,24 @@ Self-hosted users are suspicious of phone-home behavior, correctly.
 | P0-PKG-002 | Zero-config first-run: SQLite created, admin setup wizard | P0 | M |
 | P0-PKG-003 | Config precedence: flags > env > file > defaults | P0 | S |
 | P0-PKG-004 | `pivot` CLI: `serve`, `migrate`, `admin`, `config`, `version`, `doctor` | P0 | M |
-| P0-PKG-005 | Docker Compose reference stack | P0 | S |
+| P0-PKG-005 | Docker Compose reference stack (Pivot + Postgres + Valkey + MinIO) | P0 | S |
 | P0-PKG-006 | Helm chart with sane production defaults | P1 | M |
+| P0-PKG-009 | `Dockerfile` — multi-stage, distroless, non-root, `HEALTHCHECK` | P0 | S |
+| P0-PKG-010 | `deploy/docker-compose.dev.yml` — dependencies for local development | P0 | XS |
 | P0-PKG-007 | Envelope encryption for secrets (local key; KMS in Phase 9) | P0 | M |
 | P0-PKG-008 | Automatic backup of the SQLite metadata file | P1 | S |
 
 `pivot doctor` (part of P0-PKG-004) diagnoses a broken install: connectivity, migration
 state, disk, permissions, config. Support burden for self-hosted software is dominated by
 "it doesn't work and I don't know why," and this is the cheapest possible answer.
+
+**Containerization is a first-class delivery target, not an afterthought.** Pivot ships
+two supported install paths and both are tested every release: the single static binary,
+and a container image. The binary is the 30-second on-ramp; the image is how nearly every
+real deployment actually runs, and it is what the Compose stack and the Helm chart consume.
+A release where `docker run ghcr.io/mmd4life/pivot` does not serve a working instance is a
+failed release. The image is built on every PR (Part 12) so a broken `Dockerfile` is caught
+before it reaches a tag.
 
 ---
 

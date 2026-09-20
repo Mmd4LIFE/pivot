@@ -13,10 +13,19 @@ into one product — without forcing you to choose between "easy" and "serious".
 
 ## Status
 
-**Pre-alpha — documentation and design phase.**
+**Pre-alpha — Phase 0 (Foundations), building.**
 
-No code has been written yet. This repository currently contains the product vision,
-architecture decisions, and a complete zero-to-one roadmap. Start here:
+Working today: `pivot serve` runs an HTTP server with structured logging, health and
+readiness probes, and a graceful drain on SIGTERM; `pivot migrate` manages the metadata
+schema on **both** PostgreSQL and SQLite; `pivot config show` reports the resolved
+configuration. Not yet: authentication, authorization, the web UI, and everything in
+Phase 1 onward.
+
+```bash
+make build && ./bin/pivot serve     # SQLite, zero configuration
+```
+
+[CHECKLIST.md](CHECKLIST.md) tracks exactly what is done and what is next. Start here:
 
 | Document | What it covers |
 |---|---|
@@ -33,7 +42,7 @@ architecture decisions, and a complete zero-to-one roadmap. Start here:
 
 | Layer | Choice |
 |---|---|
-| **Backend** | Go 1.23+ (control plane, API, connectors, scheduler) |
+| **Backend** | Go 1.26+ (control plane, API, connectors, scheduler) |
 | **Compute** | DuckDB embedded + Apache Arrow (acceleration, federation, cache) |
 | **AI service** | Python 3.12 (FastAPI) — NL→SQL, insights, agentic analyst |
 | **Frontend** | React 19 + TypeScript + Vite |

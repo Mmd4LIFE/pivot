@@ -114,3 +114,29 @@ single-artifact story.
   mitigation proves insufficient
 - We need query optimization sophistication we cannot replicate without Calcite
 - CGo build complexity from DuckDB exceeds the value of embedded compute
+
+---
+
+## Amendments
+
+ADRs are immutable once accepted, and the decision above — Go for the control plane — is
+unchanged. This section records factual changes to its parameters.
+
+### 2026-09-20 — minimum Go version raised from 1.23 to 1.26
+
+**What changed.** `go.mod` now declares `go 1.26.0`.
+
+**Why.** Part 3-a added the metadata store. `modernc.org/sqlite` requires `go 1.25.0` in
+every published version, and `github.com/pressly/goose/v3` v3.28.0 requires `go 1.26.0`.
+Neither is optional: modernc is the pure-Go SQLite driver that keeps the Part 13
+cross-compilation matrix a single build, and goose is the migration runner.
+
+**What we gave up.** The original rationale for 1.23 was a low contributor barrier. That
+cost is real but small: Go 1.26 and 1.27 are both current, and Go's support policy covers
+the last two releases, so 1.26 is not an unusual ask in late 2026.
+
+**The alternative we rejected.** Pinning goose to an older release would have bought
+1.25 instead of 1.26 — a one-version difference not worth running a dependency behind
+upstream. Dropping modernc for a CGo SQLite driver would have cost far more: CGo turns
+six-platform cross-compilation into a cross-toolchain problem, which is a much larger
+price than a version floor.

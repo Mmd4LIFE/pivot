@@ -83,6 +83,50 @@ func bindings() []binding {
 			},
 		},
 		{
+			key:  EnvPrefix + "DATABASE_URL",
+			help: "Metadata database: a SQLite path, sqlite://, :memory:, or postgres://",
+			apply: func(c *Config, v string) error {
+				c.Database.URL = v
+
+				return nil
+			},
+		},
+		{
+			key:  EnvPrefix + "DATABASE_MAX_OPEN_CONNS",
+			help: "Max concurrent connections; 0 uses the engine default",
+			apply: func(c *Config, v string) error {
+				return setInt(&c.Database.MaxOpenConns, v)
+			},
+		},
+		{
+			key:  EnvPrefix + "DATABASE_MAX_IDLE_CONNS",
+			help: "Max idle connections; 0 uses the engine default",
+			apply: func(c *Config, v string) error {
+				return setInt(&c.Database.MaxIdleConns, v)
+			},
+		},
+		{
+			key:  EnvPrefix + "DATABASE_CONN_MAX_LIFETIME",
+			help: "Recycle connections after this long",
+			apply: func(c *Config, v string) error {
+				return setDuration(&c.Database.ConnMaxLifetime, v)
+			},
+		},
+		{
+			key:  EnvPrefix + "DATABASE_CONN_MAX_IDLE_TIME",
+			help: "Close connections idle for this long",
+			apply: func(c *Config, v string) error {
+				return setDuration(&c.Database.ConnMaxIdleTime, v)
+			},
+		},
+		{
+			key:  EnvPrefix + "DATABASE_AUTO_MIGRATE",
+			help: "Run pending migrations on startup",
+			apply: func(c *Config, v string) error {
+				return setBool(&c.Database.AutoMigrate, v)
+			},
+		},
+		{
 			key:  EnvPrefix + "LOG_LEVEL",
 			help: "debug, info, warn, or error",
 			apply: func(c *Config, v string) error {

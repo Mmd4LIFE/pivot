@@ -11,7 +11,7 @@ environment, what we expect from a change, and how decisions get made.
 
 ## Getting set up
 
-**Prerequisites:** Go 1.23+, Git, Make. (Node 20+ and Python 3.12 arrive with
+**Prerequisites:** Go 1.26+, Git, Make. (Node 20+ and Python 3.12 arrive with
 Parts 9 and Phase 7 respectively — not needed yet.)
 
 ```bash
@@ -117,9 +117,21 @@ follow is how bugs get consensus.
 ## Testing
 
 ```bash
-make test      # race-enabled, no cache
+make test      # race-enabled; SQLite only, Postgres cases skip
+make test-all  # starts the dev Postgres container, runs BOTH engines
 make cover     # HTML coverage report
 make check     # everything CI runs
+```
+
+**`make test` alone is not sufficient before pushing store changes.** Without
+`PIVOT_TEST_POSTGRES_URL` the PostgreSQL half of the suite skips, and a green
+run means only that SQLite is happy. Use `make test-all`, which brings up the
+development Postgres container for you:
+
+```bash
+make dev-db        # start Postgres on :5433
+make dev-db-reset  # destroy the volume and start clean
+make dev-db-stop   # stop it
 ```
 
 Two areas get more rigor than the rest, because they're where wrong numbers
