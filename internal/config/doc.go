@@ -7,7 +7,10 @@
 //
 // Validation happens once, at startup, with errors that name the offending
 // key and say what a valid value looks like. Nothing downstream should have
-// to defend against a malformed config.
+// to defend against a malformed config, and every problem is reported in one
+// pass rather than one per restart.
 //
-// Built in Part 2.
+// Adding a field means four things: a struct tag, a default in Default(), a
+// binding in env.go, and a rule in Validate. Skipping any of them leaves a
+// field that cannot be set, cannot be discovered, or cannot be trusted.
 package config

@@ -53,31 +53,37 @@ At the end of every part, in this order:
 
 | | |
 |---|---|
-| **Last completed** | Part 1 — Repository scaffold & toolchain |
-| **Next up** | **Part 2 — Config, CLI, and a running server** |
+| **Last completed** | Part 2 — Config, CLI, and a running server |
+| **Next up** | **Part 3 — Metadata layer: migrations & schema v1** |
 | **Current phase** | Phase 0 — Foundations |
 | **Branch** | `main` |
 | **Blockers** | None |
 | **Repo** | https://github.com/Mmd4LIFE/pivot |
 
-**Where the code stands:** `make build` produces `./bin/pivot`, which prints its version
-and usage. `internal/version` is the only package with real code; the rest are `doc.go`
-stubs stating each package's role. Tests and lint are green.
+**Where the code stands:** `./bin/pivot serve` runs a real HTTP server with structured
+JSON logging, `/healthz` and `/readyz`, and a graceful drain on SIGTERM. `pivot config
+show` prints the resolved configuration; `pivot config env` lists supported variables.
+Packages with real code: `version`, `config`, `logging`, `api`, `cli`. Still `doc.go`
+stubs: `store`, `authz`, `connectors`, `semantic`, `query`.
+
+**Dependencies so far:** cobra, pflag, mousetrap, yaml.v3. Kept deliberately few —
+configuration precedence is hand-rolled rather than delegated to viper.
 
 **Environment notes for future sessions:**
 - Go 1.27.1 is installed **via snap** (`/snap/bin/go`). `go.mod` targets 1.23 as the floor.
-- **This machine's network is slow and flaky** (~20–80 KB/s; `sum.golang.org` lookups time
-  out under load). Hand the user any command that needs a large download rather than
-  running it in-session. `make tools` is already designed around this — it fetches the
-  golangci-lint release archive instead of building from source.
+- **This machine's network is slow and flaky** (~20–80 KB/s). Large dependency trees fail
+  on `sum.golang.org` timeouts; small ones (4 modules in Part 2) go through fine. Hand the
+  user any command with a big download rather than running it in-session.
 - `make tools` must be run once per clone to populate `./bin/golangci-lint`.
+- **Lint enforces US spelling** (`misspell` with `locale: US`). Write "canceled",
+  "behavior", "defense", not the British forms.
 
 ---
 
 ## Progress
 
 ```
-Phase 0  Foundations        [█▏                  ]  1/15
+Phase 0  Foundations        [██▋                 ]  2/15
 Phase 1  Connect & Query    [                    ]  0/12   (detailed at Part 15)
 Phase 2+ ...                                            (expanded as we approach)
 ```
@@ -130,7 +136,7 @@ make test    # passes (even with no tests yet)
 
 ---
 
-### - [ ] Part 2 — Config, CLI, and a running server
+### - [x] Part 2 — Config, CLI, and a running server ✅ 2026-09-20
 
 **Deliverable:** `./pivot serve` starts an HTTP server with structured logging and shuts
 down gracefully.
@@ -502,5 +508,6 @@ Newest first. Record what **actually** shipped, including what didn't work.
 
 | Date | Part | Shipped | Notes |
 |---|---|---|---|
+| 2026-09-20 | 2 | cobra CLI (`serve`, `version`, `config show`, `config env`), hand-rolled config precedence with YAML + `PIVOT_*` env table, slog JSON/text logging, HTTP server with health/readiness and graceful drain | All `Done when` checks verified live, including SIGTERM → exit 0. **A test caught a real design gap:** flipping readiness before `http.Shutdown` is decorative, because Shutdown stops accepting immediately, so a load balancer polling `/readyz` gets a connection refusal rather than a 503. Added `server.preShutdownDelay` (lame-duck period, default 0 so local Ctrl-C stays instant; set ~5s behind a load balancer) and verified 200 → SIGTERM → 503-while-accepting → clean exit. Also fixed `Duration` YAML parsing — yaml.v3 renders the scalar `120` as the string `"120"`, so the tag must be checked rather than attempting a string decode first. Chose cobra + yaml.v3 over viper: 4 modules instead of dozens, which matters on this network, and precedence is the property the tests must prove. |
 | 2026-09-19 | 1 | Go module + package skeleton, Makefile (14 targets), strict golangci-lint config, `internal/version` with link-time stamping, `pivot version`/`help`, Apache 2.0 license, CONTRIBUTING / CoC / SECURITY / CHANGELOG, PR template with the full DoD | All four `Done when` checks pass from clean. **Go was not installed** — user installed 1.27.1 via snap after a direct download crawled at 18–28 KB/s. **`go install golangci-lint` failed** on `sum.golang.org` timeouts (~400 modules); switched `make tools` to the checksum-verified release archive, which is better for CI anyway. Corrected two planning errors: pinned golangci-lint `v2.6.2` doesn't exist (actual `v2.13.2`, and v2 uses a new config schema), and `run()` took `*os.File` despite its comment promising an injected writer — now `io.Writer`, which is what makes `main_test.go` possible. |
 | 2026-09-19 | 0 | Full design corpus: vision, tech stack, system/security/data architecture, 9 ADRs, 11-phase roadmap, NFRs, feature matrix | 35 docs, ~6.6k lines. All internal links verified. Pushed to GitHub. |
