@@ -233,15 +233,34 @@ func TestEveryMethodRefusesAnUnscopedContext(t *testing.T) {
 		repos := repo.New(db)
 		bare := context.Background() // deliberately no scope
 
-		targets := map[string]any{
-			"Users":         repos.Users,
-			"Organizations": repos.Organizations,
+		// Discover the repositories by walking Repositories' exported fields
+		// rather than listing them. A hand-written list goes stale exactly when
+		// it matters most — the moment someone adds a repository — so a new one
+		// is covered the instant it is registered in the struct.
+		targets := map[string]reflect.Value{}
+
+		rv := reflect.ValueOf(repos).Elem()
+		for i := range rv.NumField() {
+			field := rv.Type().Field(i)
+			if !field.IsExported() {
+				continue
+			}
+
+			value := rv.Field(i)
+			if value.Kind() != reflect.Pointer || value.IsNil() {
+				continue
+			}
+
+			targets[field.Name] = value
+		}
+
+		if len(targets) < 4 {
+			t.Fatalf("found %d repositories on Repositories, want at least 4", len(targets))
 		}
 
 		var checked int
 
-		for name, target := range targets {
-			v := reflect.ValueOf(target)
+		for name, v := range targets {
 			typ := v.Type()
 
 			for i := range typ.NumMethod() {
@@ -291,9 +310,15 @@ func TestEveryMethodRefusesAnUnscopedContext(t *testing.T) {
 
 		// Guard against the test silently checking nothing — a refactor that
 		// renamed the repositories would otherwise make this pass vacuously.
-		if checked < 10 {
-			t.Errorf("only %d methods were checked; the reflection walk is not finding them", checked)
+		// The floor rises as repositories are added; it is a tripwire, not a
+		// target.
+		const minMethods = 30
+		if checked < minMethods {
+			t.Errorf("only %d methods were checked across %d repositories, want at least %d; "+
+				"the reflection walk is not finding them", checked, len(targets), minMethods)
 		}
+
+		t.Logf("checked %d methods across %d repositories", checked, len(targets))
 	})
 }
 

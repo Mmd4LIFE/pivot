@@ -53,8 +53,8 @@ At the end of every part, in this order:
 
 | | |
 |---|---|
-| **Last completed** | Part 4-a — Tenant scoping, orgs & users repositories |
-| **Next up** | **Part 4-b — Groups, membership, and request scoping** |
+| **Last completed** | Part 4-b — Groups, membership, and request scoping |
+| **Next up** | **Part 5 — HTTP API foundations** |
 | **Current phase** | Phase 0 — Foundations |
 | **Branch** | `main` |
 | **Blockers** | None |
@@ -74,8 +74,16 @@ Part 13's six-platform cross-compile stays a single build matrix), google/uuid.
 value. Repositories take **no org parameter at all** — they read the scope from the
 context — so a caller cannot pass the wrong tenant because there is nothing to pass.
 `OrganizationRepo` acts on the caller's own org; unscoped provisioning lives on
-`SystemRepo`, named so every call site says what it is doing. A reflection test asserts
-every repository method refuses an unscoped context, and it is mutation-verified.
+`SystemRepo`, named so every call site says what it is doing. A reflection test walks
+`Repositories`' exported fields, so **a repository is covered the moment it is registered
+in that struct** — it asserts all 30 methods refuse an unscoped context, and it is
+mutation-verified. `api.WithTenant` rejects an unresolvable request with 401 before any
+handler runs; swap `SingleTenantResolver` for a session-backed one in Part 6.
+
+**Schema is at v2.** Migration 00002 made the `group_members` and `user_attributes`
+foreign keys composite on `(id, org_id)`. The v1 single-column keys let a row name one
+organization while pointing at another's user — **a real cross-tenant write hole**, found
+by a test. Any new child table must use composite keys for the same reason.
 
 **Generated code:** `make gen` runs sqlc; output in `internal/store/gen/{pg,lite}` is
 committed. The two packages are byte-identical apart from the package clause, so Go allows
@@ -102,7 +110,7 @@ needs an entry in `sqlc.yaml`'s SQLite override list**, or the packages silently
 ## Progress
 
 ```
-Phase 0  Foundations        [██████              ]  5/17   (Parts 3 and 4 each split)
+Phase 0  Foundations        [███████             ]  6/17   (Parts 3 and 4 each split)
 Phase 1  Connect & Query    [                    ]  0/12   (detailed at Part 15)
 Phase 2+ ...                                            (expanded as we approach)
 ```
@@ -266,7 +274,7 @@ impossible — not merely unlikely.
 
 ---
 
-### - [ ] Part 4-b — Groups, membership, and request scoping
+### - [x] Part 4-b — Groups, membership, and request scoping ✅ 2026-09-20
 
 **Deliverable:** The remaining repositories, and a real `tenant.Scope` on every request.
 
@@ -594,6 +602,7 @@ Newest first. Record what **actually** shipped, including what didn't work.
 
 | Date | Part | Shipped | Notes |
 |---|---|---|---|
+| 2026-09-20 | 4-b | `GroupRepo` (CRUD, nesting, membership), `UserAttributeRepo` (provenance-aware upsert), 34 adapter methods, `api.WithTenant` middleware, audit subscriber, **schema v2** | **A test found a real cross-tenant write hole.** The v1 foreign keys on `group_members` and `user_attributes` referenced `groups(id)` and `users(id)` alone, so each key was satisfied independently and `(org_id=A, group_id=A's, user_id=B's)` was accepted — every ID existed, nothing tied the user to the organization the row claimed. Migration 00002 makes the keys composite on `(id, org_id)`; SQLite needed full table rebuilds since it cannot alter a constraint. Fixed at the database level rather than with a check in Go, because "structural, not conventional" is the whole point of Part 4. **Also corrected fiction in this checklist:** the reflection test claimed to pick up new repositories automatically but hardcoded its target list. It now walks `Repositories`' exported fields — 30 methods across 4 repositories — and was mutation-verified on a *newly added* method (`GroupRepo.IsMember`) to prove the discovery works. |
 | 2026-09-20 | 4-a | `internal/tenant` scope, `internal/store/model` domain types, `repo` package with both engine adapters, base (scoping + soft delete + version + change events), organizations and users repositories, isolation suite | **Split Part 4** — scoping machinery plus two repositories is a session; groups and HTTP wiring is another. All four `Done when` criteria verified on both engines, 19 Postgres subtests with 0 skips. **The key test was mutation-verified:** removing the scope check from `UserRepo.Get` made `TestEveryMethodRefusesAnUnscopedContext` fail by name on both engines, so the reflection walk genuinely catches drift rather than passing vacuously. Three Go subtleties cost time: struct conversion requires field types to be *identical*, so `model.NullString` had to become an alias for `sql.NullString` rather than an equivalent struct; the limit/offset field-order difference I called cosmetic in 3-b actually **breaks** conversion, so those two adapter methods construct params by name; and `sqlc`'s `rename:` was needed to emit `AvatarURL`, since staticcheck rejects `AvatarUrl` but renaming only in `model` would have broken every conversion. |
 | 2026-09-20 | 3-b | sqlc wired for both dialects: 22 queries x 2, generated packages in `internal/store/gen/{pg,lite}`, `dbtypes` custom column types, `make gen` / `gen-check`, round-trip tests on both engines | **Two sqlc bugs cost most of the session.** (1) A literal `?` inside a SQL *comment* is counted as a placeholder, shifting substitution offsets and corrupting output into tokens like `RETURNINid` — the comment explaining the placeholder rule was itself breaking generation. (2) A placeholder in a SQLite `DO UPDATE` clause is emitted in the SQL but *omitted from the bound arguments*, so the upsert would have failed at runtime with an argument-count mismatch; fixed by routing `updated_at` through the INSERT column list and reading it back via `excluded`. Also: numbered params are mis-substituted, and `LIMIT` infers `int32` on Postgres vs `int64` on SQLite (fixed with `sqlc.arg(...)::bigint`). **Portability tax measured: ~16%**, marginally over ADR-0003's threshold — recorded as a dated measurement in the ADR with the reasoning for keeping SQLite. The `dbtypes` overrides make both generated packages byte-identical apart from the package clause, so Go permits direct struct conversion and Part 4 needs one conversion per type rather than a per-engine mapping. |
 | 2026-09-20 | 3-a | Store package with engine detection, goose migrations for both dialects, schema v1 (5 tables), `pivot migrate up/status/version/create`, DB readiness check on `/readyz`, portability harness, dev Postgres compose + `make test-all` | **Split Part 3** — migrations and sqlc codegen are a session each. Verified on both engines: SQLite and Postgres migrate from scratch, idempotent on re-run, 12 Postgres subtests ran with **0 skips**. **`go mod tidy` failed on geoblocking** — `proxy.golang.org` returned HTTP 403 *"this service is not available in your location"* for `modernc.org/sqlite` while serving cobra/goose fine; the user changed location and it worked at 420 KB/s (vs 20–80 before). **Go floor raised 1.23 → 1.26** (goose needs 1.26, modernc needs 1.25); recorded as an amendment in ADR-0001 rather than a new ADR, since the decision (Go) is unchanged. Guessed the goose v3 API wrong in three places — read the actual structs in the module cache to fix. **Portability tax so far: low** — one extra schema file and a `rebind` test helper; the real test is 3-b's type overrides. Docker made explicit across Parts 12/13/15 and the Phase 0 spec at the user's request. |

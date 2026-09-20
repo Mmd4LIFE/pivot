@@ -9,6 +9,20 @@ breaking API changes bump major, no exceptions.
 ## [Unreleased]
 
 ### Added
+- Group repository with nesting and membership, and a user-attribute
+  repository that tracks provenance so an identity-provider sync can replace
+  what it owns without disturbing manual assignments — *Part 4-b*
+- `api.WithTenant` middleware: a request whose tenant cannot be resolved is
+  rejected with 401 before any handler runs
+- Audit subscriber on the change event bus, recording actor, entity and kind
+
+### Fixed
+- **Cross-tenant write hole in the v1 schema.** Foreign keys on
+  `group_members` and `user_attributes` referenced `groups(id)` and `users(id)`
+  alone, so a row could name one organization while pointing at another's user
+  — every key was satisfied independently. Migration 00002 makes them
+  composite on `(id, org_id)`, closing it at the database level on both
+  engines
 - Tenant-scoped repository layer. Repositories take no organization parameter:
   the tenant comes from `tenant.Scope` in the request context, so a caller
   cannot pass the wrong one. A context without a scope is an error before any

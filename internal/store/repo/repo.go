@@ -32,9 +32,15 @@ var (
 )
 
 // Repositories is the full data access surface, constructed once per database.
+// Every scoped repository must be registered here. The reflection test in
+// isolation_test.go walks these fields, so a repository added to the struct is
+// covered by the unscoped-context check automatically — and one that is not
+// registered is not covered.
 type Repositories struct {
-	Organizations *OrganizationRepo
-	Users         *UserRepo
+	Organizations  *OrganizationRepo
+	Users          *UserRepo
+	Groups         *GroupRepo
+	UserAttributes *UserAttributeRepo
 
 	q      Querier
 	events *EventBus
@@ -50,11 +56,16 @@ func New(db *store.DB) *Repositories {
 func NewWithQuerier(q Querier) *Repositories {
 	events := NewEventBus()
 
-	r := &Repositories{q: q, events: events}
-	r.Organizations = &OrganizationRepo{base: base{q: q, events: events}}
-	r.Users = &UserRepo{base: base{q: q, events: events}}
+	b := base{q: q, events: events}
 
-	return r
+	return &Repositories{
+		q:              q,
+		events:         events,
+		Organizations:  &OrganizationRepo{base: b},
+		Users:          &UserRepo{base: b},
+		Groups:         &GroupRepo{base: b},
+		UserAttributes: &UserAttributeRepo{base: b},
+	}
 }
 
 // Events returns the change event bus. Part 4-b's audit log and the search

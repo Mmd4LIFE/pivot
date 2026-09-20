@@ -45,4 +45,26 @@ type Querier interface {
 	RecordUserLogin(context.Context, model.RecordUserLoginParams) (int64, error)
 	SoftDeleteUser(context.Context, model.SoftDeleteUserParams) (int64, error)
 	CountUsers(context.Context, uuid.UUID) (int64, error)
+
+	// Groups, including nesting and membership.
+	CreateGroup(context.Context, model.CreateGroupParams) (model.Group, error)
+	GetGroup(context.Context, model.GetGroupParams) (model.Group, error)
+	GetGroupByName(context.Context, model.GetGroupByNameParams) (model.Group, error)
+	ListGroups(context.Context, model.ListGroupsParams) ([]model.Group, error)
+	ListChildGroups(context.Context, model.ListChildGroupsParams) ([]model.Group, error)
+	UpdateGroup(context.Context, model.UpdateGroupParams) (model.Group, error)
+	SoftDeleteGroup(context.Context, model.SoftDeleteGroupParams) (int64, error)
+	AddGroupMember(context.Context, model.AddGroupMemberParams) error
+	RemoveGroupMember(context.Context, model.RemoveGroupMemberParams) (int64, error)
+	ListGroupMembers(context.Context, model.ListGroupMembersParams) ([]model.User, error)
+	ListUserGroups(context.Context, model.ListUserGroupsParams) ([]model.Group, error)
+	IsGroupMember(context.Context, model.IsGroupMemberParams) (bool, error)
+
+	// User attributes. These feed row-level security in Phase 4, which is why
+	// their provenance is carried explicitly rather than inferred.
+	UpsertUserAttribute(context.Context, model.UpsertUserAttributeParams) (model.UserAttribute, error)
+	GetUserAttribute(context.Context, model.GetUserAttributeParams) (model.UserAttribute, error)
+	ListUserAttributes(context.Context, model.ListUserAttributesParams) ([]model.UserAttribute, error)
+	DeleteUserAttribute(context.Context, model.DeleteUserAttributeParams) (int64, error)
+	DeleteUserAttributesBySource(context.Context, model.DeleteUserAttributesBySourceParams) (int64, error)
 }

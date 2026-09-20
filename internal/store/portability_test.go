@@ -409,3 +409,52 @@ func equalStrings(a, b []string) bool {
 
 	return true
 }
+
+// Composite foreign keys must make a cross-tenant child row impossible.
+//
+// The v1 schema referenced groups(id) and users(id) alone, so each key was
+// satisfied independently and a row claiming one organization could point at
+// another's user. Migration 00002 makes the keys composite on (id, org_id).
+// This asserts the hole is closed on both engines, at the SQL level — below
+// the repository layer, so it holds regardless of what any caller does.
+func TestCompositeForeignKeysBlockCrossTenantRows(t *testing.T) {
+	t.Parallel()
+
+	eachEngine(t, func(t *testing.T, db *store.DB) {
+		migrated(t, db)
+
+		const (
+			orgA    = "aaaaaaaa-0000-0000-0000-00000000000a"
+			orgB    = "bbbbbbbb-0000-0000-0000-00000000000b"
+			userB   = "cccccccc-0000-0000-0000-00000000000c"
+			groupA  = "dddddddd-0000-0000-0000-00000000000d"
+			attrRow = "eeeeeeee-0000-0000-0000-00000000000e"
+		)
+
+		mustExec(t, db, rebind(db, `INSERT INTO organizations (id, name, slug) VALUES (?, ?, ?)`),
+			orgA, "A", "a")
+		mustExec(t, db, rebind(db, `INSERT INTO organizations (id, name, slug) VALUES (?, ?, ?)`),
+			orgB, "B", "b")
+		mustExec(t, db, rebind(db, `INSERT INTO users (id, org_id, email) VALUES (?, ?, ?)`),
+			userB, orgB, "b@example.com")
+		mustExec(t, db, rebind(db, `INSERT INTO groups (id, org_id, name) VALUES (?, ?, ?)`),
+			groupA, orgA, "A Group")
+
+		// org A's group, org B's user. Every single-column key is satisfied.
+		_, err := db.ExecContext(context.Background(), rebind(db,
+			`INSERT INTO group_members (org_id, group_id, user_id) VALUES (?, ?, ?)`),
+			orgA, groupA, userB)
+		if err == nil {
+			t.Errorf("group_members accepted a cross-tenant row on %s; "+
+				"the composite foreign key is not enforced", db.Engine())
+		}
+
+		// Same hole in user_attributes.
+		_, err = db.ExecContext(context.Background(), rebind(db,
+			`INSERT INTO user_attributes (id, org_id, user_id, key, value) VALUES (?, ?, ?, ?, ?)`),
+			attrRow, orgA, userB, "region", "EU")
+		if err == nil {
+			t.Errorf("user_attributes accepted a cross-tenant row on %s", db.Engine())
+		}
+	})
+}

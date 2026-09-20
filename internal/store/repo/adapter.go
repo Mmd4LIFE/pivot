@@ -273,3 +273,267 @@ func (a *liteQuerier) SoftDeleteUser(ctx context.Context, p model.SoftDeleteUser
 func (a *liteQuerier) CountUsers(ctx context.Context, orgID uuid.UUID) (int64, error) {
 	return a.q.CountUsers(ctx, orgID)
 }
+
+// --- groups and attributes: PostgreSQL ------------------------------------
+
+func (a *pgQuerier) CreateGroup(ctx context.Context, p model.CreateGroupParams) (model.Group, error) {
+	row, err := a.q.CreateGroup(ctx, pg.CreateGroupParams(p))
+
+	return model.Group(row), err
+}
+
+func (a *pgQuerier) GetGroup(ctx context.Context, p model.GetGroupParams) (model.Group, error) {
+	row, err := a.q.GetGroup(ctx, pg.GetGroupParams(p))
+
+	return model.Group(row), err
+}
+
+func (a *pgQuerier) GetGroupByName(ctx context.Context, p model.GetGroupByNameParams) (model.Group, error) {
+	row, err := a.q.GetGroupByName(ctx, pg.GetGroupByNameParams(p))
+
+	return model.Group(row), err
+}
+
+func (a *pgQuerier) ListGroups(ctx context.Context, p model.ListGroupsParams) ([]model.Group, error) {
+	rows, err := a.q.ListGroups(ctx, pg.ListGroupsParams(p))
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.Group, len(rows))
+	for i, r := range rows {
+		out[i] = model.Group(r)
+	}
+
+	return out, nil
+}
+
+func (a *pgQuerier) ListChildGroups(ctx context.Context, p model.ListChildGroupsParams) ([]model.Group, error) {
+	rows, err := a.q.ListChildGroups(ctx, pg.ListChildGroupsParams(p))
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.Group, len(rows))
+	for i, r := range rows {
+		out[i] = model.Group(r)
+	}
+
+	return out, nil
+}
+
+func (a *pgQuerier) UpdateGroup(ctx context.Context, p model.UpdateGroupParams) (model.Group, error) {
+	row, err := a.q.UpdateGroup(ctx, pg.UpdateGroupParams(p))
+
+	return model.Group(row), err
+}
+
+func (a *pgQuerier) SoftDeleteGroup(ctx context.Context, p model.SoftDeleteGroupParams) (int64, error) {
+	return a.q.SoftDeleteGroup(ctx, pg.SoftDeleteGroupParams(p))
+}
+
+func (a *pgQuerier) AddGroupMember(ctx context.Context, p model.AddGroupMemberParams) error {
+	return a.q.AddGroupMember(ctx, pg.AddGroupMemberParams(p))
+}
+
+func (a *pgQuerier) RemoveGroupMember(ctx context.Context, p model.RemoveGroupMemberParams) (int64, error) {
+	return a.q.RemoveGroupMember(ctx, pg.RemoveGroupMemberParams(p))
+}
+
+func (a *pgQuerier) ListGroupMembers(ctx context.Context, p model.ListGroupMembersParams) ([]model.User, error) {
+	rows, err := a.q.ListGroupMembers(ctx, pg.ListGroupMembersParams(p))
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.User, len(rows))
+	for i, r := range rows {
+		out[i] = model.User(r)
+	}
+
+	return out, nil
+}
+
+func (a *pgQuerier) ListUserGroups(ctx context.Context, p model.ListUserGroupsParams) ([]model.Group, error) {
+	rows, err := a.q.ListUserGroups(ctx, pg.ListUserGroupsParams(p))
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.Group, len(rows))
+	for i, r := range rows {
+		out[i] = model.Group(r)
+	}
+
+	return out, nil
+}
+
+func (a *pgQuerier) IsGroupMember(ctx context.Context, p model.IsGroupMemberParams) (bool, error) {
+	return a.q.IsGroupMember(ctx, pg.IsGroupMemberParams(p))
+}
+
+func (a *pgQuerier) UpsertUserAttribute(ctx context.Context, p model.UpsertUserAttributeParams) (model.UserAttribute, error) {
+	row, err := a.q.UpsertUserAttribute(ctx, pg.UpsertUserAttributeParams(p))
+
+	return model.UserAttribute(row), err
+}
+
+func (a *pgQuerier) GetUserAttribute(ctx context.Context, p model.GetUserAttributeParams) (model.UserAttribute, error) {
+	row, err := a.q.GetUserAttribute(ctx, pg.GetUserAttributeParams(p))
+
+	return model.UserAttribute(row), err
+}
+
+func (a *pgQuerier) ListUserAttributes(ctx context.Context, p model.ListUserAttributesParams) ([]model.UserAttribute, error) {
+	rows, err := a.q.ListUserAttributes(ctx, pg.ListUserAttributesParams(p))
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.UserAttribute, len(rows))
+	for i, r := range rows {
+		out[i] = model.UserAttribute(r)
+	}
+
+	return out, nil
+}
+
+func (a *pgQuerier) DeleteUserAttribute(ctx context.Context, p model.DeleteUserAttributeParams) (int64, error) {
+	return a.q.DeleteUserAttribute(ctx, pg.DeleteUserAttributeParams(p))
+}
+
+func (a *pgQuerier) DeleteUserAttributesBySource(ctx context.Context, p model.DeleteUserAttributesBySourceParams) (int64, error) {
+	return a.q.DeleteUserAttributesBySource(ctx, pg.DeleteUserAttributesBySourceParams(p))
+}
+
+// --- groups and attributes: SQLite ----------------------------------------
+
+func (a *liteQuerier) CreateGroup(ctx context.Context, p model.CreateGroupParams) (model.Group, error) {
+	row, err := a.q.CreateGroup(ctx, lite.CreateGroupParams(p))
+
+	return model.Group(row), err
+}
+
+func (a *liteQuerier) GetGroup(ctx context.Context, p model.GetGroupParams) (model.Group, error) {
+	row, err := a.q.GetGroup(ctx, lite.GetGroupParams(p))
+
+	return model.Group(row), err
+}
+
+func (a *liteQuerier) GetGroupByName(ctx context.Context, p model.GetGroupByNameParams) (model.Group, error) {
+	row, err := a.q.GetGroupByName(ctx, lite.GetGroupByNameParams(p))
+
+	return model.Group(row), err
+}
+
+func (a *liteQuerier) ListGroups(ctx context.Context, p model.ListGroupsParams) ([]model.Group, error) {
+	rows, err := a.q.ListGroups(ctx, lite.ListGroupsParams{OrgID: p.OrgID, Limit: p.Limit, Offset: p.Offset})
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.Group, len(rows))
+	for i, r := range rows {
+		out[i] = model.Group(r)
+	}
+
+	return out, nil
+}
+
+func (a *liteQuerier) ListChildGroups(ctx context.Context, p model.ListChildGroupsParams) ([]model.Group, error) {
+	rows, err := a.q.ListChildGroups(ctx, lite.ListChildGroupsParams(p))
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.Group, len(rows))
+	for i, r := range rows {
+		out[i] = model.Group(r)
+	}
+
+	return out, nil
+}
+
+func (a *liteQuerier) UpdateGroup(ctx context.Context, p model.UpdateGroupParams) (model.Group, error) {
+	row, err := a.q.UpdateGroup(ctx, lite.UpdateGroupParams(p))
+
+	return model.Group(row), err
+}
+
+func (a *liteQuerier) SoftDeleteGroup(ctx context.Context, p model.SoftDeleteGroupParams) (int64, error) {
+	return a.q.SoftDeleteGroup(ctx, lite.SoftDeleteGroupParams(p))
+}
+
+func (a *liteQuerier) AddGroupMember(ctx context.Context, p model.AddGroupMemberParams) error {
+	return a.q.AddGroupMember(ctx, lite.AddGroupMemberParams(p))
+}
+
+func (a *liteQuerier) RemoveGroupMember(ctx context.Context, p model.RemoveGroupMemberParams) (int64, error) {
+	return a.q.RemoveGroupMember(ctx, lite.RemoveGroupMemberParams(p))
+}
+
+func (a *liteQuerier) ListGroupMembers(ctx context.Context, p model.ListGroupMembersParams) ([]model.User, error) {
+	rows, err := a.q.ListGroupMembers(ctx, lite.ListGroupMembersParams(p))
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.User, len(rows))
+	for i, r := range rows {
+		out[i] = model.User(r)
+	}
+
+	return out, nil
+}
+
+func (a *liteQuerier) ListUserGroups(ctx context.Context, p model.ListUserGroupsParams) ([]model.Group, error) {
+	rows, err := a.q.ListUserGroups(ctx, lite.ListUserGroupsParams(p))
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.Group, len(rows))
+	for i, r := range rows {
+		out[i] = model.Group(r)
+	}
+
+	return out, nil
+}
+
+func (a *liteQuerier) IsGroupMember(ctx context.Context, p model.IsGroupMemberParams) (bool, error) {
+	return a.q.IsGroupMember(ctx, lite.IsGroupMemberParams(p))
+}
+
+func (a *liteQuerier) UpsertUserAttribute(ctx context.Context, p model.UpsertUserAttributeParams) (model.UserAttribute, error) {
+	row, err := a.q.UpsertUserAttribute(ctx, lite.UpsertUserAttributeParams(p))
+
+	return model.UserAttribute(row), err
+}
+
+func (a *liteQuerier) GetUserAttribute(ctx context.Context, p model.GetUserAttributeParams) (model.UserAttribute, error) {
+	row, err := a.q.GetUserAttribute(ctx, lite.GetUserAttributeParams(p))
+
+	return model.UserAttribute(row), err
+}
+
+func (a *liteQuerier) ListUserAttributes(ctx context.Context, p model.ListUserAttributesParams) ([]model.UserAttribute, error) {
+	rows, err := a.q.ListUserAttributes(ctx, lite.ListUserAttributesParams(p))
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.UserAttribute, len(rows))
+	for i, r := range rows {
+		out[i] = model.UserAttribute(r)
+	}
+
+	return out, nil
+}
+
+func (a *liteQuerier) DeleteUserAttribute(ctx context.Context, p model.DeleteUserAttributeParams) (int64, error) {
+	return a.q.DeleteUserAttribute(ctx, lite.DeleteUserAttributeParams(p))
+}
+
+func (a *liteQuerier) DeleteUserAttributesBySource(ctx context.Context, p model.DeleteUserAttributesBySourceParams) (int64, error) {
+	return a.q.DeleteUserAttributesBySource(ctx, lite.DeleteUserAttributesBySourceParams(p))
+}

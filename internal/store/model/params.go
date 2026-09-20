@@ -113,3 +113,122 @@ type SoftDeleteUserParams struct {
 	ID        uuid.UUID
 	OrgID     uuid.UUID
 }
+
+// --- groups ---------------------------------------------------------------
+
+type CreateGroupParams struct {
+	ID            uuid.UUID
+	OrgID         uuid.UUID
+	Name          string
+	Description   string
+	ParentGroupID uuid.NullUUID
+	ExternalID    NullString
+	CreatedBy     uuid.NullUUID
+	UpdatedBy     uuid.NullUUID
+}
+
+type GetGroupParams struct {
+	ID    uuid.UUID
+	OrgID uuid.UUID
+}
+
+type GetGroupByNameParams struct {
+	OrgID uuid.UUID
+	Name  string
+}
+
+type ListGroupsParams struct {
+	OrgID  uuid.UUID
+	Offset int64
+	Limit  int64
+}
+
+type ListChildGroupsParams struct {
+	OrgID         uuid.UUID
+	ParentGroupID uuid.NullUUID
+}
+
+type UpdateGroupParams struct {
+	Name          string
+	Description   string
+	ParentGroupID uuid.NullUUID
+	ExternalID    NullString
+	UpdatedBy     uuid.NullUUID
+	UpdatedAt     dbtypes.Time
+	ID            uuid.UUID
+	OrgID         uuid.UUID
+	Version       int64
+}
+
+type SoftDeleteGroupParams struct {
+	DeletedAt dbtypes.NullTime
+	UpdatedBy uuid.NullUUID
+	ID        uuid.UUID
+	OrgID     uuid.UUID
+}
+
+// --- group membership -----------------------------------------------------
+
+type AddGroupMemberParams struct {
+	OrgID   uuid.UUID
+	GroupID uuid.UUID
+	UserID  uuid.UUID
+	AddedBy uuid.NullUUID
+}
+
+type RemoveGroupMemberParams struct {
+	OrgID   uuid.UUID
+	GroupID uuid.UUID
+	UserID  uuid.UUID
+}
+
+type ListGroupMembersParams struct {
+	OrgID   uuid.UUID
+	GroupID uuid.UUID
+}
+
+type ListUserGroupsParams struct {
+	OrgID  uuid.UUID
+	UserID uuid.UUID
+}
+
+type IsGroupMemberParams struct {
+	OrgID   uuid.UUID
+	GroupID uuid.UUID
+	UserID  uuid.UUID
+}
+
+// --- user attributes ------------------------------------------------------
+
+type UpsertUserAttributeParams struct {
+	ID        uuid.UUID
+	OrgID     uuid.UUID
+	UserID    uuid.UUID
+	Key       string
+	Value     string
+	Source    string
+	UpdatedAt dbtypes.Time
+}
+
+type GetUserAttributeParams struct {
+	OrgID  uuid.UUID
+	UserID uuid.UUID
+	Key    string
+}
+
+type ListUserAttributesParams struct {
+	OrgID  uuid.UUID
+	UserID uuid.UUID
+}
+
+type DeleteUserAttributeParams struct {
+	OrgID  uuid.UUID
+	UserID uuid.UUID
+	Key    string
+}
+
+type DeleteUserAttributesBySourceParams struct {
+	OrgID  uuid.UUID
+	UserID uuid.UUID
+	Source string
+}
