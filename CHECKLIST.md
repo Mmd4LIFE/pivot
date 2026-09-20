@@ -53,8 +53,8 @@ At the end of every part, in this order:
 
 | | |
 |---|---|
-| **Last completed** | Part 3-b — sqlc typed queries |
-| **Next up** | **Part 4 — Tenant-scoped repository layer** |
+| **Last completed** | Part 4-a — Tenant scoping, orgs & users repositories |
+| **Next up** | **Part 4-b — Groups, membership, and request scoping** |
 | **Current phase** | Phase 0 — Foundations |
 | **Branch** | `main` |
 | **Blockers** | None |
@@ -69,6 +69,13 @@ Postgres. `pivot config show|env` reports configuration. Packages with real code
 
 **Dependencies:** cobra, yaml.v3, goose, pgx/v5, modernc.org/sqlite (pure Go — no CGo, so
 Part 13's six-platform cross-compile stays a single build matrix), google/uuid.
+
+**Tenant isolation:** `internal/tenant.Scope` has unexported fields and no usable zero
+value. Repositories take **no org parameter at all** — they read the scope from the
+context — so a caller cannot pass the wrong tenant because there is nothing to pass.
+`OrganizationRepo` acts on the caller's own org; unscoped provisioning lives on
+`SystemRepo`, named so every call site says what it is doing. A reflection test asserts
+every repository method refuses an unscoped context, and it is mutation-verified.
 
 **Generated code:** `make gen` runs sqlc; output in `internal/store/gen/{pg,lite}` is
 committed. The two packages are byte-identical apart from the package clause, so Go allows
@@ -95,7 +102,7 @@ needs an entry in `sqlc.yaml`'s SQLite override list**, or the packages silently
 ## Progress
 
 ```
-Phase 0  Foundations        [█████               ]  4/16   (Part 3 split into 3-a/3-b)
+Phase 0  Foundations        [██████              ]  5/17   (Parts 3 and 4 each split)
 Phase 1  Connect & Query    [                    ]  0/12   (detailed at Part 15)
 Phase 2+ ...                                            (expanded as we approach)
 ```
@@ -232,31 +239,56 @@ one `rebind` test helper); the type-override work in 3-b is the real test.
 
 ---
 
-### - [ ] Part 4 — Tenant-scoped repository layer
+### - [x] Part 4-a — Tenant scoping, orgs & users repositories ✅ 2026-09-20
+
+*Part 4 was split: the scoping machinery plus two repositories is a session; groups,
+membership and the HTTP wiring is another.*
 
 **Deliverable:** A data access layer where returning another tenant's rows is structurally
 impossible — not merely unlikely.
 
 **Build:**
-- Request-scoped tenant context, propagated via `context.Context`
-- Repository base that **injects `org_id` into every query**; no method can be written that
-  omits it
-- Soft-delete filtering applied at the repository layer, not per call site
-- Optimistic concurrency via the `version` column
-- Entity-change event stream hook (feeds audit and search later)
-- CRUD repositories for orgs, users, groups
+- `internal/tenant` — `Scope` with unexported fields, context put/get, fail-closed lookup
+- `internal/store/model` — domain types independent of either engine's generated code
+- `internal/store/repo` — `Querier` interface + both engine adapters, repository base
+- Soft-delete filtering, optimistic concurrency, and change events applied in the base
+- `OrganizationRepo` (operates on the caller's own tenant, takes no org ID) and
+  `SystemRepo` (explicitly unscoped provisioning)
+- `UserRepo` with full CRUD
 
 **Done when:**
-- A test creates two orgs with identical data and proves **every** repository method scoped
-  to org A returns zero org-B rows
-- A test proves a soft-deleted row is invisible to normal reads
-- A test proves a stale-version update fails with a conflict error
-- An attempt to construct an unscoped query fails to compile or panics in tests
-
-**Notes:** [Phase 0 calls this the most important item in the phase](docs/roadmap/phase-0-foundations.md#3-metadata-layer).
-Retrofitting tenant isolation later is a rewrite. Take the time here.
+- Two orgs with identical data; every scoped method returns zero cross-tenant rows ✅
+- Soft-deleted rows invisible to reads ✅
+- Stale-version update returns `ErrConflict` ✅
+- Every method refuses an unscoped context ✅ *(reflection-driven, mutation-verified)*
 
 **Refs:** `P0-META-003`, `P0-META-006`, `P0-META-007`, `P0-META-008`
+
+---
+
+### - [ ] Part 4-b — Groups, membership, and request scoping
+
+**Deliverable:** The remaining repositories, and a real `tenant.Scope` on every request.
+
+**Build:**
+- `GroupRepo`: CRUD, nesting, membership add/remove/list, `IsMember`
+- `UserAttributeRepo`: upsert with provenance, list, delete by source *(feeds Phase 4 RLS)*
+- Adapter methods for the remaining 17 generated queries
+- **HTTP middleware that builds a `tenant.Scope` and puts it in the request context** —
+  stubbed to a single org until Part 6 provides a real session
+- An audit subscriber on the change event bus, logging actor + entity + kind
+
+**Done when:**
+- The cross-tenant and unscoped-context tests extend to groups and attributes, unchanged
+  in shape — the reflection walk should pick the new methods up automatically
+- A request without a resolvable tenant is rejected by middleware, not by the repository
+- The mutation check still fails when scoping is removed from any new method
+
+**Notes:** The reflection test in `isolation_test.go` finds methods automatically, so new
+repositories are covered the moment they are registered in `Repositories`. Verify that by
+mutating one, exactly as Part 4-a did — a test that cannot fail is worth nothing.
+
+**Refs:** `P0-META-003`, `P0-META-008`
 
 ---
 
@@ -562,6 +594,7 @@ Newest first. Record what **actually** shipped, including what didn't work.
 
 | Date | Part | Shipped | Notes |
 |---|---|---|---|
+| 2026-09-20 | 4-a | `internal/tenant` scope, `internal/store/model` domain types, `repo` package with both engine adapters, base (scoping + soft delete + version + change events), organizations and users repositories, isolation suite | **Split Part 4** — scoping machinery plus two repositories is a session; groups and HTTP wiring is another. All four `Done when` criteria verified on both engines, 19 Postgres subtests with 0 skips. **The key test was mutation-verified:** removing the scope check from `UserRepo.Get` made `TestEveryMethodRefusesAnUnscopedContext` fail by name on both engines, so the reflection walk genuinely catches drift rather than passing vacuously. Three Go subtleties cost time: struct conversion requires field types to be *identical*, so `model.NullString` had to become an alias for `sql.NullString` rather than an equivalent struct; the limit/offset field-order difference I called cosmetic in 3-b actually **breaks** conversion, so those two adapter methods construct params by name; and `sqlc`'s `rename:` was needed to emit `AvatarURL`, since staticcheck rejects `AvatarUrl` but renaming only in `model` would have broken every conversion. |
 | 2026-09-20 | 3-b | sqlc wired for both dialects: 22 queries x 2, generated packages in `internal/store/gen/{pg,lite}`, `dbtypes` custom column types, `make gen` / `gen-check`, round-trip tests on both engines | **Two sqlc bugs cost most of the session.** (1) A literal `?` inside a SQL *comment* is counted as a placeholder, shifting substitution offsets and corrupting output into tokens like `RETURNINid` — the comment explaining the placeholder rule was itself breaking generation. (2) A placeholder in a SQLite `DO UPDATE` clause is emitted in the SQL but *omitted from the bound arguments*, so the upsert would have failed at runtime with an argument-count mismatch; fixed by routing `updated_at` through the INSERT column list and reading it back via `excluded`. Also: numbered params are mis-substituted, and `LIMIT` infers `int32` on Postgres vs `int64` on SQLite (fixed with `sqlc.arg(...)::bigint`). **Portability tax measured: ~16%**, marginally over ADR-0003's threshold — recorded as a dated measurement in the ADR with the reasoning for keeping SQLite. The `dbtypes` overrides make both generated packages byte-identical apart from the package clause, so Go permits direct struct conversion and Part 4 needs one conversion per type rather than a per-engine mapping. |
 | 2026-09-20 | 3-a | Store package with engine detection, goose migrations for both dialects, schema v1 (5 tables), `pivot migrate up/status/version/create`, DB readiness check on `/readyz`, portability harness, dev Postgres compose + `make test-all` | **Split Part 3** — migrations and sqlc codegen are a session each. Verified on both engines: SQLite and Postgres migrate from scratch, idempotent on re-run, 12 Postgres subtests ran with **0 skips**. **`go mod tidy` failed on geoblocking** — `proxy.golang.org` returned HTTP 403 *"this service is not available in your location"* for `modernc.org/sqlite` while serving cobra/goose fine; the user changed location and it worked at 420 KB/s (vs 20–80 before). **Go floor raised 1.23 → 1.26** (goose needs 1.26, modernc needs 1.25); recorded as an amendment in ADR-0001 rather than a new ADR, since the decision (Go) is unchanged. Guessed the goose v3 API wrong in three places — read the actual structs in the module cache to fix. **Portability tax so far: low** — one extra schema file and a `rebind` test helper; the real test is 3-b's type overrides. Docker made explicit across Parts 12/13/15 and the Phase 0 spec at the user's request. |
 | 2026-09-20 | 2 | cobra CLI (`serve`, `version`, `config show`, `config env`), hand-rolled config precedence with YAML + `PIVOT_*` env table, slog JSON/text logging, HTTP server with health/readiness and graceful drain | All `Done when` checks verified live, including SIGTERM → exit 0. **A test caught a real design gap:** flipping readiness before `http.Shutdown` is decorative, because Shutdown stops accepting immediately, so a load balancer polling `/readyz` gets a connection refusal rather than a 503. Added `server.preShutdownDelay` (lame-duck period, default 0 so local Ctrl-C stays instant; set ~5s behind a load balancer) and verified 200 → SIGTERM → 503-while-accepting → clean exit. Also fixed `Duration` YAML parsing — yaml.v3 renders the scalar `120` as the string `"120"`, so the tag must be checked rather than attempting a string decode first. Chose cobra + yaml.v3 over viper: 4 modules instead of dozens, which matters on this network, and precedence is the property the tests must prove. |

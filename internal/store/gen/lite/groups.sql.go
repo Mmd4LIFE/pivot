@@ -236,7 +236,7 @@ func (q *Queries) ListGroupMembers(ctx context.Context, arg ListGroupMembersPara
 			&i.OrgID,
 			&i.Email,
 			&i.Name,
-			&i.AvatarUrl,
+			&i.AvatarURL,
 			&i.PasswordHash,
 			&i.IsActive,
 			&i.LastLoginAt,

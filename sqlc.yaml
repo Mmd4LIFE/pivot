@@ -25,6 +25,12 @@ sql:
         sql_package: database/sql
         emit_interface: true
         emit_empty_slices: true
+        # staticcheck wants initialisms capitalized; sqlc does not know URL is
+        # one. Renaming at the source keeps the generated code idiomatic and
+        # lets the model structs match field-for-field, which the conversions
+        # in repo/adapter.go require.
+        rename:
+          avatar_url: AvatarURL
         overrides:
           - db_type: uuid
             go_type: github.com/google/uuid.UUID
@@ -53,6 +59,8 @@ sql:
         sql_package: database/sql
         emit_interface: true
         emit_empty_slices: true
+        rename:
+          avatar_url: AvatarURL
         # One entry per column, because every one of these is TEXT or INTEGER
         # and there is no db_type to key on. A TEXT override would turn every
         # string column in the schema into a UUID.

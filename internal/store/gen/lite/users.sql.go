@@ -37,7 +37,7 @@ type CreateUserParams struct {
 	OrgID        uuid.UUID
 	Email        string
 	Name         string
-	AvatarUrl    sql.NullString
+	AvatarURL    sql.NullString
 	PasswordHash sql.NullString
 	IsActive     dbtypes.Bool
 	Locale       string
@@ -64,7 +64,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		arg.OrgID,
 		arg.Email,
 		arg.Name,
-		arg.AvatarUrl,
+		arg.AvatarURL,
 		arg.PasswordHash,
 		arg.IsActive,
 		arg.Locale,
@@ -78,7 +78,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.OrgID,
 		&i.Email,
 		&i.Name,
-		&i.AvatarUrl,
+		&i.AvatarURL,
 		&i.PasswordHash,
 		&i.IsActive,
 		&i.LastLoginAt,
@@ -112,7 +112,7 @@ func (q *Queries) GetUser(ctx context.Context, arg GetUserParams) (User, error) 
 		&i.OrgID,
 		&i.Email,
 		&i.Name,
-		&i.AvatarUrl,
+		&i.AvatarURL,
 		&i.PasswordHash,
 		&i.IsActive,
 		&i.LastLoginAt,
@@ -146,7 +146,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, arg GetUserByEmailParams) 
 		&i.OrgID,
 		&i.Email,
 		&i.Name,
-		&i.AvatarUrl,
+		&i.AvatarURL,
 		&i.PasswordHash,
 		&i.IsActive,
 		&i.LastLoginAt,
@@ -189,7 +189,7 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]User, e
 			&i.OrgID,
 			&i.Email,
 			&i.Name,
-			&i.AvatarUrl,
+			&i.AvatarURL,
 			&i.PasswordHash,
 			&i.IsActive,
 			&i.LastLoginAt,
@@ -279,7 +279,7 @@ RETURNING id, org_id, email, name, avatar_url, password_hash, is_active, last_lo
 type UpdateUserParams struct {
 	Email     string
 	Name      string
-	AvatarUrl sql.NullString
+	AvatarURL sql.NullString
 	IsActive  dbtypes.Bool
 	Locale    string
 	Timezone  string
@@ -294,7 +294,7 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 	row := q.db.QueryRowContext(ctx, updateUser,
 		arg.Email,
 		arg.Name,
-		arg.AvatarUrl,
+		arg.AvatarURL,
 		arg.IsActive,
 		arg.Locale,
 		arg.Timezone,
@@ -310,7 +310,7 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 		&i.OrgID,
 		&i.Email,
 		&i.Name,
-		&i.AvatarUrl,
+		&i.AvatarURL,
 		&i.PasswordHash,
 		&i.IsActive,
 		&i.LastLoginAt,

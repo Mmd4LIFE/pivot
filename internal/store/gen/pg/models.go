@@ -53,7 +53,7 @@ type User struct {
 	OrgID        uuid.UUID
 	Email        string
 	Name         string
-	AvatarUrl    sql.NullString
+	AvatarURL    sql.NullString
 	PasswordHash sql.NullString
 	IsActive     dbtypes.Bool
 	LastLoginAt  dbtypes.NullTime
