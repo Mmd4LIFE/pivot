@@ -4,6 +4,8 @@ import (
 	"log/slog"
 	"net/http"
 	"sync/atomic"
+
+	"github.com/Mmd4LIFE/pivot/internal/authz"
 )
 
 // APIPrefix is the versioned API root. The version is in the path because a
@@ -22,6 +24,15 @@ type RouterConfig struct {
 	// tenant scope. Nil registers no authentication surface, which is what
 	// tests that only exercise middleware want.
 	Auth *AuthHandler
+
+	// Roles serves the role catalog and role assignment. Nil registers no
+	// authorization surface and leaves every endpoint ungated, which is valid
+	// only in tests.
+	Roles *RoleHandler
+
+	// Checker answers permission questions for [RequirePermission]. It is set
+	// from Roles when Roles is present.
+	Checker authz.Checker
 
 	// TenantResolver attributes a request to an organization. When Auth is
 	// configured this defaults to [SessionTenantResolver]; nil with no Auth
@@ -106,6 +117,10 @@ func NewRouter(cfg RouterConfig) *Router {
 		cfg.TenantResolver = SessionTenantResolver()
 	}
 
+	if cfg.Roles != nil && cfg.Checker == nil {
+		cfg.Checker = cfg.Roles.checker
+	}
+
 	r := &Router{
 		cfg:            cfg,
 		mux:            http.NewServeMux(),
@@ -150,6 +165,7 @@ func (r *Router) routes() {
 	)
 
 	r.authRoutes(authed)
+	r.roleRoutes(authed)
 
 	// A catch-all so an unknown API path produces the standard error envelope
 	// rather than net/http's plain-text 404, which a client cannot parse.
@@ -205,6 +221,46 @@ func (r *Router) authRoutes(authed Middleware) {
 	r.mux.Handle("GET "+APIPrefix+"/auth/me", authed(http.HandlerFunc(h.handleMe)))
 	r.mux.Handle("GET "+APIPrefix+"/auth/sessions", authed(http.HandlerFunc(h.handleListSessions)))
 	r.mux.Handle("DELETE "+APIPrefix+"/auth/sessions/{id}", authed(http.HandlerFunc(h.handleRevokeSession)))
+}
+
+// roleRoutes registers the authorization surface.
+//
+// Every gated route is `authed` followed by a permission, in that order: the
+// tenant middleware establishes who and which organization, and only then is
+// there a question for the checker to answer. Reversing them would ask "may
+// you?" before "who are you?", which has no answer.
+func (r *Router) roleRoutes(authed Middleware) {
+	h := r.cfg.Roles
+	if h == nil {
+		return
+	}
+
+	// The catalog is readable by anyone logged in: which roles exist and
+	// what they mean is documentation, not a secret. Who holds them is not.
+	r.mux.Handle("GET "+APIPrefix+"/roles", authed(http.HandlerFunc(h.handleCatalog)))
+
+	manageRoles := Chain(authed, r.require(authz.PermManageRoles))
+
+	r.mux.Handle("GET "+APIPrefix+"/organization/role-assignments",
+		manageRoles(http.HandlerFunc(h.handleList)))
+	r.mux.Handle("POST "+APIPrefix+"/organization/role-assignments",
+		manageRoles(http.HandlerFunc(h.handleGrant)))
+	r.mux.Handle("DELETE "+APIPrefix+"/organization/role-assignments/{subjectType}/{subjectId}/{role}",
+		manageRoles(http.HandlerFunc(h.handleRevoke)))
+
+	r.mux.Handle("DELETE "+APIPrefix+"/admin/sessions/{id}",
+		Chain(authed, r.require(authz.PermManageSessions))(
+			http.HandlerFunc(h.handleRevokeAnySession)))
+}
+
+// require builds the permission middleware for a route.
+//
+// With no checker configured this denies rather than passing through. An
+// unconfigured authorization backend is a misconfiguration, and the safe
+// reading of one is that nothing is permitted — [authz.Enforce] treats a nil
+// checker exactly that way.
+func (r *Router) require(perm authz.Permission) Middleware {
+	return RequirePermission(r.cfg.Checker, perm, r.cfg.Log)
 }
 
 // AuthLimiter returns the limiter for authentication endpoints.

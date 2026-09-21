@@ -17,6 +17,7 @@ import (
 
 	"github.com/Mmd4LIFE/pivot/internal/api"
 	"github.com/Mmd4LIFE/pivot/internal/auth"
+	"github.com/Mmd4LIFE/pivot/internal/authz"
 	"github.com/Mmd4LIFE/pivot/internal/config"
 	"github.com/Mmd4LIFE/pivot/internal/store"
 	"github.com/Mmd4LIFE/pivot/internal/store/model"
@@ -188,13 +189,21 @@ func newAuthFixture(t *testing.T, db *store.DB, opts ...func(*api.RouterConfig))
 	}
 
 	svc := auth.NewService(repos, auth.DefaultPolicy(), discardLogger())
+	checker, cache := authz.New(repos)
+
+	authHandler := api.NewAuthHandler(svc, repos, api.DefaultCookie(), discardLogger())
+	authHandler.SetChecker(checker)
 
 	cfg := api.RouterConfig{
-		Log:  discardLogger(),
-		CORS: api.DefaultCORS(),
-		Auth: api.NewAuthHandler(svc, repos, api.DefaultCookie(), discardLogger()),
+		Log:     discardLogger(),
+		CORS:    api.DefaultCORS(),
+		Auth:    authHandler,
+		Roles:   api.NewRoleHandler(repos, checker, cache, discardLogger()),
+		Checker: checker,
 	}
 
+	// Options run last so a test can substitute a broken checker without the
+	// routes disappearing with it.
 	for _, opt := range opts {
 		opt(&cfg)
 	}

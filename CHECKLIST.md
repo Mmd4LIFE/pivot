@@ -53,8 +53,8 @@ At the end of every part, in this order:
 
 | | |
 |---|---|
-| **Last completed** | Part 7-a — Authorization model, checker, and the assertion harness |
-| **Next up** | **Part 7-b — Permission middleware and the administrative surface** |
+| **Last completed** | Part 7-b — Permission middleware and the administrative surface |
+| **Next up** | **Part 8 — OIDC single sign-on** |
 | **Current phase** | Phase 0 — Foundations |
 | **Branch** | `main` |
 | **Blockers** | None |
@@ -99,7 +99,19 @@ checker must satisfy it unchanged. `native_query` is a separate permission from
 `create_content` on purpose: raw SQL bypasses semantic RLS, so it is Analyst's and not
 Editor's. **Embedded OpenFGA was spiked and works** (see
 [ADR-0009's amendment](docs/architecture/adr/0009-authorization.md#amendments) for the
-numbers); adopting it is Part 7-b's call.
+numbers); deferred to Phase 4, where the recursion it exists for actually appears.
+
+`api.RequirePermission` gates a route *after* the tenant chain, so "who are you?" is
+already answered and only "may you?" is left. It draws a distinction that matters
+operationally: **403 means a decision was made and it was no; 503 means no decision could
+be reached.** Both deny, only one is an outage, and answering 403 during one would send a
+properly-permitted user to argue with an administrator. A nil checker denies too.
+`/auth/me` reports effective permissions, computed by asking the checker the same
+questions the middleware asks — so the advisory list and the enforced answer cannot
+drift. **The first user created in an organization becomes its admin**, or a fresh
+install would have nobody who could ever grant anything; the second user gets nothing.
+Removing the last administrator is refused over the API and merely warned about in the
+CLI, which is the recovery path.
 
 **Tenant isolation:** `internal/tenant.Scope` has unexported fields and no usable zero
 value. Repositories take **no org parameter at all** — they read the scope from the
@@ -117,13 +129,12 @@ only and is wired nowhere.
 **Schema is at v4.** Migration 00003 added `sessions` and `login_attempts`; 00004 added
 `role_assignments`.
 
-**A gap 7-b must close.** `role_assignments.subject_id` and `object_id` are polymorphic —
-a subject is a user *or* a group — so they carry no foreign key, and migration 00002's
-composite-key rule cannot apply. Tenant isolation still holds, because every read filters
-on `org_id` and a session can only produce its own org's scope. What does not hold is
-referential integrity: a grant can name a deleted or foreign user and simply dangle.
-`RoleRepo.RevokeAllForSubject` exists for the cleanup but nothing calls it yet, and the
-grant path does not check that the subject lives in this organization. Both are 7-b's.
+**Polymorphic subjects, closed in 7-b.** `role_assignments.subject_id` and `object_id`
+are polymorphic — a subject is a user *or* a group — so they carry no foreign key and
+migration 00002's composite-key rule cannot apply. Tenant isolation was never at risk
+(every read filters `org_id`), but referential integrity was: `RoleRepo.Grant` now
+verifies the subject exists in the caller's organization, and deleting a user or group
+revokes its grants, so a reused identifier cannot inherit a stranger's permissions.
 
 **Schema history.** Migration 00002 made the `group_members` and `user_attributes`
 foreign keys composite on `(id, org_id)`. The v1 single-column keys let a row name one
@@ -178,7 +189,7 @@ needs an entry in `sqlc.yaml`'s SQLite override list**, or the packages silently
 ## Progress
 
 ```
-Phase 0  Foundations        [██████████          ] 10/19   (Parts 3, 4, 6 and 7 each split)
+Phase 0  Foundations        [███████████         ] 11/19   (Parts 3, 4, 6 and 7 each split)
 Phase 1  Connect & Query    [                    ]  0/12   (detailed at Part 15)
 Phase 2+ ...                                            (expanded as we approach)
 ```
@@ -490,7 +501,7 @@ OpenFGA checker must satisfy unchanged. Full reasoning and numbers:
 
 ---
 
-### - [ ] Part 7-b — Permission middleware and the administrative surface
+### - [x] Part 7-b — Permission middleware and the administrative surface ✅ 2026-09-21
 
 **Deliverable:** An endpoint refuses a caller who lacks the permission, and roles can be
 granted over the API.
@@ -517,14 +528,19 @@ granted over the API.
 - Extend `api/openapi.yaml` and regenerate the TS client
 
 **Done when:**
-- A Viewer gets 403 `PIVOT-AUTH-002` on an admin endpoint; an Admin gets through
-- The declarative harness is extended with endpoint-level assertions, unchanged in shape
-- With the checker unavailable, every gated endpoint returns 503 and **none** returns 200
-- Demoting the last admin is refused
+- A Viewer gets 403 `PIVOT-AUTH-002` on an admin endpoint; an Admin gets through ✅
+  *(verified live, and mutation-verified: removing the gate fails the endpoint table)*
+- The declarative harness is extended with endpoint-level assertions, unchanged in
+  shape ✅ *(13 rows in the same file; both halves read one specification)*
+- With the checker unavailable, every gated endpoint returns 503 and **none** returns
+  200 ✅ *(and a nil checker denies too — an instance that booted without authorization
+  must not serve as though everyone were an administrator)*
+- Demoting the last admin is refused ✅ *(verified live: 422, and the admin keeps access)*
 
-**Notes:** Decide OpenFGA here, with the spike's numbers in hand. Adopting it means
-`openfga.Checker` implementing the same interface and passing `model_v1.yaml` unchanged —
-that table is exactly what makes the swap verifiable.
+**OpenFGA: deferred, as 7-a recommended.** The spike's numbers stand and nothing here
+changed them — Phase 0's model is flat and never asks Zanzibar a question only Zanzibar
+can answer. The swap remains a Phase 4 decision, and `model_v1.yaml` is what will make it
+verifiable rather than hopeful.
 
 **Refs:** `P0-AUTHZ-001`, `P0-AUTHZ-003`, `P0-AUTHZ-004`
 
@@ -754,6 +770,7 @@ Newest first. Record what **actually** shipped, including what didn't work.
 
 | Date | Part | Shipped | Notes |
 |---|---|---|---|
+| 2026-09-21 | 7-b | `api.RequirePermission`, the role catalog and role-assignment endpoints, administrative session revoke, effective permissions on `/auth/me`, `pivot admin grant-role` / `revoke-role`, first-user-becomes-admin, last-admin protection, and 13 endpoint-level rows added to the same assertion file | **The endpoint table is the part worth keeping.** `internal/authz` asserts what the checker *decides*; this asserts that the HTTP surface actually *asks* it — a different failure, and the likelier one, since a model can be perfectly correct while a route forgets to be gated. Both halves read one specification file. **Mutation-verified:** dropping `RequirePermission` from the role routes fails three rows by name with `= 200, want 403`. **403 and 503 are deliberately different answers.** A denial is a decision; an unreachable checker is not. Answering 403 during an outage would send a properly-permitted user to argue with an administrator about a permission they already have. A nil checker denies as well, so an instance that booted without authorization wired up cannot serve as though everyone were an admin. **Closed the referential gap 7-a recorded**: grants now verify the subject exists in the caller's organization, and deleting a user or group revokes its grants — the columns are polymorphic so nothing cascades on its own. **The first user in an organization becomes its admin**, without which a fresh install has nobody who can grant anything and is complete and unusable; the second user gets nothing, so it is not a standing escalation. All four `Done when` items verified against a live server, including the last-admin refusal (422, and the admin keeps access afterwards). **US spelling caught me again** — `catalogue` failed lint three times; the environment note exists and I still wrote it. |
 | 2026-09-21 | 7-a | `internal/authz` (Checker, Resolver, Cache, Enforce), authorization model v1 with four built-in roles, schema v4 `role_assignments` as Zanzibar tuples, `RoleRepo`, and a declarative assertion file of 26 rows run against both engines | **Split Part 7** — the model and the decision engine are a session, the middleware and admin surface are another. **The OpenFGA spike came back positive, which is not what this part expected.** `openfga v1.21.0` embeds in-process, pure Go, on `modernc.org/sqlite` and `pgx/v5` — our own drivers — so ADR-0009's "if embedded mode proves immature" trigger was *not* met. Measured: 115 → 244 modules, 16 MB → 26 MB. Deferred anyway, on the narrower ground that Phase 0's model is flat and exercises none of Zanzibar's recursion, with the reasoning and numbers recorded as a dated ADR amendment rather than a silent choice. **This is a judgment call worth the user's review**, which is why the spike output is in the ADR rather than only in a commit message. The deferral is made safe by three things, not by hope: grants are stored as tuples so migration is an export plus a `Write`; everything asks through `authz.Checker`; and the model is specified as *data* in `testdata/model_v1.yaml`, which a future OpenFGA checker must satisfy unchanged. **Mutation-verified twice:** making `Enforce` swallow an unavailable backend fails the fail-closed suite by name, and deleting group expansion fails the harness on exactly the inherited-role rows. **A test of mine was wrong and the code was right:** I asserted that a cycle in group nesting should error, but the visited set already resolves it correctly — a cycle means membership in both groups. Split into two honest tests: cycles terminate with an answer, unbounded *chains* hit the depth cap. **An em dash cost an hour.** sqlc's SQLite generator rewrites queries by byte offset and miscounts on multibyte characters, corrupting output into `SELECid` while pointing at valid SQL — the same mechanism as Part 3-b's `?`-in-a-comment bug. `TestQueryFilesAreASCII` and `TestSQLiteQueriesAvoidNamedArguments` now fail by name instead. |
 | 2026-09-21 | 6-b | The five `/api/v1/auth/*` endpoints, the session cookie, `api.SessionTenantResolver` replacing the single-tenant stand-in, an `auth` configuration section, spec + TS client, startup sweep of expired sessions | **A test found a real authorization hole.** `SessionRepo.Revoke` is scoped to the organization but not to the user, so any member could have ended any other member's session — the right power for an administrator, the wrong one for the endpoint that manages your own devices. Added `RevokeSessionForUser`, which names the user in the `WHERE` clause, so someone else's session is simply not found. Fixed in SQL rather than with a check in the handler, for the same reason Part 4-b fixed its hole in the schema. **Mutation-verified twice:** swapping `RevokeOwn` back to `Revoke` produces `returned 204, want 404` *and* ends the victim's session; removing the limiter from the login chain makes the throttling test fail. That second test asserts indirectly and is stronger for it — every login that reaches the service records a failed attempt, so the recorded count *is* the number of requests that got past the limiter. **`make test-all` was being killed outright**, which I had assumed was a timeout: `go test ./...` starts one binary per package at once, and several hash with Argon2 at 64 MiB under the race detector. Test targets now pass `-p 1`; the suite runs in ~30s and this matters more on a 2-core CI runner than it did here. All five `Done when` items verified against a live server, including the lockout: 429 `PIVOT-RATE-001` and 429 `PIVOT-AUTH-005` are distinguishable on the wire, which is the concrete case the error registry's "codes are independent of status" rule was written for. |
 | 2026-09-21 | 6-a | Schema v3 (`sessions`, `login_attempts`), Argon2id hashing, session tokens, `auth.Service` (login / authenticate / logout / set-password / sweep), progressive lockout, `pivot admin create-user` and `reset-password` | **Split Part 6** — security core is a session, HTTP surface is another. 16 Postgres subtests, 0 skips. Three security properties are tested rather than asserted in a comment: every failed login costs the same (a nonexistent account pays for a dummy Argon2 verification, and the test compares timing ratios); lockout is keyed by the **attempted** email so it applies to addresses that do not exist, which is what stops it being an enumeration oracle; and case variation cannot reset the counter. Two expiries — sliding idle plus a never-extended absolute cap — because with only the idle timeout a stolen token stays valid forever as long as the thief keeps using it. **Two test-fixture bugs found by the code, not by me:** the schema contract test caught the new tables missing from `expectedTables`, and the sessions unique index caught a fixture that truncated UUIDs to 8 characters — UUID v7 is time-sortable, so rows created milliseconds apart share their prefix. Also fixed a portability bug flagged by `unconvert`: `int(syscall.Stdin)` is redundant on Unix but `syscall.Stdin` is a Handle on Windows, so it became `int(os.Stdin.Fd())`. |

@@ -12,6 +12,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/Mmd4LIFE/pivot/internal/auth"
+	"github.com/Mmd4LIFE/pivot/internal/authz"
 	"github.com/Mmd4LIFE/pivot/internal/config"
 	"github.com/Mmd4LIFE/pivot/internal/logging"
 	"github.com/Mmd4LIFE/pivot/internal/store"
@@ -37,6 +38,8 @@ administrator. Anyone who can run them already has the database credentials.`,
 	cmd.AddCommand(
 		newCreateUserCmd(env, flags),
 		newResetPasswordCmd(env, flags),
+		newGrantRoleCmd(env, flags),
+		newRevokeRoleCmd(env, flags),
 	)
 
 	return cmd
@@ -226,6 +229,13 @@ environment variable is readable by anything that can inspect the process.`,
 
 			ctx := tenant.WithScope(cmd.Context(), scope)
 
+			// Whether this is the first user has to be decided before creating
+			// them, or the answer is always "no".
+			existing, err := repos.Users.Count(ctx)
+			if err != nil {
+				return err
+			}
+
 			user, err := repos.Users.Create(ctx, repo.CreateUser{
 				Email:        email,
 				Name:         name,
@@ -242,6 +252,27 @@ environment variable is readable by anything that can inspect the process.`,
 
 			fmt.Fprintf(env.Stdout, "Created user %s (%s) in organization %s.\n",
 				user.Email, user.ID, slug)
+
+			// The first user in an organization becomes its administrator.
+			//
+			// Without this a fresh install has nobody who can grant a role, so
+			// nobody can ever be granted one — the instance is complete and
+			// unusable. Granting it only to the first user keeps it from being
+			// a standing privilege escalation: the second user gets nothing.
+			if existing == 0 {
+				if gerr := repos.Roles.Grant(ctx, repo.GrantRole{
+					SubjectType: "user",
+					SubjectID:   user.ID,
+					Relation:    string(authz.RelationAdmin),
+					ObjectType:  string(authz.TypeOrganization),
+					ObjectID:    orgID,
+				}); gerr != nil {
+					return fmt.Errorf("grant admin to the first user: %w", gerr)
+				}
+
+				fmt.Fprintf(env.Stdout,
+					"Granted the admin role: %s is the first user in %s.\n", user.Email, slug)
+			}
 
 			return nil
 		},
@@ -370,4 +401,185 @@ func slugify(in string) string {
 	}
 
 	return string(out)
+}
+
+// resolveRoleTarget finds the user a role command names.
+func resolveRoleTarget(
+	cmd *cobra.Command, repos *repo.Repositories, orgID uuid.UUID, slug, email string,
+) (uuid.UUID, error) {
+	scope, err := tenant.NewSystemScope(orgID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+
+	ctx := tenant.WithScope(cmd.Context(), scope)
+
+	user, err := repos.Users.GetByEmail(ctx, repo.NormalizeEmail(email))
+	if err != nil {
+		if errors.Is(err, repo.ErrNotFound) {
+			return uuid.Nil, fmt.Errorf("no user with email %q in %q", email, slug)
+		}
+
+		return uuid.Nil, err
+	}
+
+	return user.ID, nil
+}
+
+// validRole checks a role name against the built-in set.
+func validRole(role string) error {
+	if authz.IsBuiltinRole(authz.Relation(role)) {
+		return nil
+	}
+
+	names := make([]string, 0, len(authz.BuiltinRoles))
+	for _, r := range authz.BuiltinRoles {
+		names = append(names, string(r))
+	}
+
+	return fmt.Errorf("unknown role %q; expected one of %s", role, strings.Join(names, ", "))
+}
+
+func newGrantRoleCmd(env Env, flags *globalFlags) *cobra.Command {
+	var email, role, orgSlug string
+
+	cmd := &cobra.Command{
+		Use:   "grant-role",
+		Short: "Give a user a role",
+		Long: `Give a user one of the built-in roles.
+
+This is the recovery path for an organization whose administrators have all
+been removed or locked out. It bypasses the permission check that the HTTP
+endpoint applies, which is safe for the same reason the other admin commands
+are: anyone who can run it already has the database credentials.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if email == "" {
+				return errors.New("--email is required")
+			}
+
+			if err := validRole(role); err != nil {
+				return err
+			}
+
+			db, repos, err := openRepos(cmd, env, flags)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = db.Close() }()
+
+			orgID, slug, err := resolveOrg(cmd, repos, orgSlug)
+			if err != nil {
+				return err
+			}
+
+			userID, err := resolveRoleTarget(cmd, repos, orgID, slug, email)
+			if err != nil {
+				return err
+			}
+
+			scope, err := tenant.NewSystemScope(orgID)
+			if err != nil {
+				return err
+			}
+
+			ctx := tenant.WithScope(cmd.Context(), scope)
+
+			if gerr := repos.Roles.Grant(ctx, repo.GrantRole{
+				SubjectType: "user",
+				SubjectID:   userID,
+				Relation:    role,
+				ObjectType:  string(authz.TypeOrganization),
+				ObjectID:    orgID,
+			}); gerr != nil {
+				return gerr
+			}
+
+			fmt.Fprintf(env.Stdout, "Granted %s to %s in %s.\n", role, email, slug)
+
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&email, "email", "", "Email address (required)")
+	cmd.Flags().StringVar(&role, "role", "admin", "Role to grant")
+	cmd.Flags().StringVar(&orgSlug, "org", "", "Organization slug; omit when only one exists")
+
+	return cmd
+}
+
+func newRevokeRoleCmd(env Env, flags *globalFlags) *cobra.Command {
+	var email, role, orgSlug string
+
+	cmd := &cobra.Command{
+		Use:   "revoke-role",
+		Short: "Take a role away from a user",
+		Long: `Remove one of the built-in roles from a user.
+
+Unlike the HTTP endpoint, this does not refuse to remove the last
+administrator: an operator with database access is expected to know what they
+are doing, and a recovery tool that argues with you is not much of one.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if email == "" {
+				return errors.New("--email is required")
+			}
+
+			if err := validRole(role); err != nil {
+				return err
+			}
+
+			db, repos, err := openRepos(cmd, env, flags)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = db.Close() }()
+
+			orgID, slug, err := resolveOrg(cmd, repos, orgSlug)
+			if err != nil {
+				return err
+			}
+
+			userID, err := resolveRoleTarget(cmd, repos, orgID, slug, email)
+			if err != nil {
+				return err
+			}
+
+			scope, err := tenant.NewSystemScope(orgID)
+			if err != nil {
+				return err
+			}
+
+			ctx := tenant.WithScope(cmd.Context(), scope)
+
+			if rerr := repos.Roles.Revoke(ctx, repo.GrantRole{
+				SubjectType: "user",
+				SubjectID:   userID,
+				Relation:    role,
+				ObjectType:  string(authz.TypeOrganization),
+				ObjectID:    orgID,
+			}); rerr != nil {
+				return rerr
+			}
+
+			// Warn rather than refuse, and say so plainly.
+			holders, cerr := repos.Roles.CountHolders(ctx,
+				string(authz.RelationAdmin), string(authz.TypeOrganization), orgID)
+			if cerr == nil && holders == 0 {
+				fmt.Fprintf(env.Stderr,
+					"warning: %s now has no administrators; "+
+						"use `pivot admin grant-role` to appoint one\n", slug)
+			}
+
+			fmt.Fprintf(env.Stdout, "Revoked %s from %s in %s.\n", role, email, slug)
+
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&email, "email", "", "Email address (required)")
+	cmd.Flags().StringVar(&role, "role", "admin", "Role to revoke")
+	cmd.Flags().StringVar(&orgSlug, "org", "", "Organization slug; omit when only one exists")
+
+	return cmd
 }

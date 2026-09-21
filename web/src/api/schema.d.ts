@@ -170,6 +170,112 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The built-in roles and what each may do
+         * @description Readable by any authenticated caller: which roles exist and what they
+         *     mean is documentation, and a role picker needs it. Who *holds* a role
+         *     is a different question, answered by the role-assignments endpoint,
+         *     which is gated.
+         *
+         *     `native_query` appears on Analyst and not on Editor deliberately. Raw
+         *     SQL bypasses semantic row-level security, so it is a separate grant
+         *     rather than something bundled into "can edit".
+         */
+        get: operations["listRoles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organization/role-assignments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Who holds which role
+         * @description Requires `manage_roles`.
+         */
+        get: operations["listRoleAssignments"];
+        put?: never;
+        /**
+         * Give a user or group a role
+         * @description Requires `manage_roles` — which is, deliberately, the most dangerous
+         *     permission in the API: whoever holds it can grant it to themselves.
+         *
+         *     Granting the same role twice is a no-op. A subject that does not exist
+         *     in the caller's organization is refused as a validation failure rather
+         *     than stored as a dangling row.
+         */
+        post: operations["grantRole"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organization/role-assignments/{subjectType}/{subjectId}/{role}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Take a role away
+         * @description Requires `manage_roles`.
+         *
+         *     Removing the **last** administrator is refused: an organization with
+         *     nobody who can grant roles is recoverable only from the command line,
+         *     and the people most likely to reach that state are the least likely to
+         *     have shell access. `pivot admin grant-role` is that recovery path.
+         */
+        delete: operations["revokeRole"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/sessions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * End any session in the organization
+         * @description Requires `manage_sessions`. This is the administrative counterpart to
+         *     `DELETE /api/v1/auth/sessions/{id}`, which only ever ends the caller's
+         *     own: scoped to the organization rather than to one user, it is the
+         *     right power for responding to a compromise and the wrong one for
+         *     managing your own devices, which is why they are separate endpoints
+         *     with separate permissions.
+         */
+        delete: operations["revokeAnySession"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -234,6 +340,54 @@ export interface components {
         SessionEnvelope: {
             user: components["schemas"]["User"];
             session: components["schemas"]["Session"];
+            /**
+             * @description What the caller may do in their organization.
+             *
+             *     **Advisory.** It exists so a UI can hide what it cannot do rather
+             *     than letting someone discover it by being refused. Every endpoint
+             *     enforces independently, so treating this list as the authority
+             *     would be a mistake — and an omission from it is never a way in.
+             *
+             *     Present on `/auth/me`, absent from the login response.
+             * @example [
+             *       "view_content",
+             *       "query"
+             *     ]
+             */
+            permissions?: string[];
+        };
+        RoleDescription: {
+            /** @example analyst */
+            role: string;
+            permissions: string[];
+        };
+        RoleCatalog: {
+            roles: components["schemas"]["RoleDescription"][];
+        };
+        RoleAssignment: {
+            /**
+             * @description A `group` assignment is a userset: every member of that group holds
+             *     the role, including members of groups nested beneath it.
+             * @enum {string}
+             */
+            subjectType: "user" | "group";
+            /** Format: uuid */
+            subjectId: string;
+            /** @example admin */
+            role: string;
+            /** Format: date-time */
+            grantedAt?: string;
+        };
+        RoleAssignmentList: {
+            assignments: components["schemas"]["RoleAssignment"][];
+        };
+        GrantRoleRequest: {
+            /** @enum {string} */
+            subjectType: "user" | "group";
+            /** Format: uuid */
+            subjectId: string;
+            /** @enum {string} */
+            role: "admin" | "editor" | "analyst" | "viewer";
         };
         SessionList: {
             sessions: components["schemas"]["Session"][];
@@ -344,6 +498,20 @@ export interface components {
             headers: {
                 /** @description Seconds to wait before retrying. */
                 "Retry-After"?: number;
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /**
+         * @description A dependency could not be reached. On a gated endpoint this means the
+         *     authorization backend was unavailable, so the request was denied
+         *     without a decision being made — deliberately distinguishable from 403,
+         *     which means a decision was made and it was no.
+         */
+        ServiceUnavailable: {
+            headers: {
                 [name: string]: unknown;
             };
             content: {
@@ -554,6 +722,139 @@ export interface operations {
                     "application/json": components["schemas"]["HealthResponse"];
                 };
             };
+        };
+    };
+    listRoles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The role catalog */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoleCatalog"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    listRoleAssignments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every role assignment in the caller's organization */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoleAssignmentList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    grantRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GrantRoleRequest"];
+            };
+        };
+        responses: {
+            /** @description The role was granted */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoleAssignment"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    revokeRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                subjectType: "user" | "group";
+                subjectId: string;
+                role: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The role was revoked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /**
+             * @description The request was rejected — most usefully, because this is the last
+             *     administrator.
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    revokeAnySession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The session was revoked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
 }

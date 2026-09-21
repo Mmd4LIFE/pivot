@@ -13,6 +13,27 @@ newest first within each section.
 
 ### Added
 
+**Permission enforcement — Part 7-b**
+- `api.RequirePermission` gates a route after the tenant chain, so a handler
+  never runs without both an identity and a decision
+- Role endpoints: the catalog of built-in roles, who holds what, grant, and
+  revoke. Plus an administrative "end any session in this organization",
+  separate from the self-service one because they need different permissions
+- **403 and 503 mean different things.** A 403 is a decision — you may not. A
+  503 is the absence of one — the authorization backend could not be reached.
+  Both deny, only one is an outage, and answering 403 during one would send a
+  properly-permitted user to argue with an administrator
+- `/auth/me` reports the caller's effective permissions, so a UI can hide what
+  it cannot do. Advisory only: every endpoint enforces independently
+- `pivot admin grant-role` and `revoke-role`, the recovery path for an
+  organization whose administrators are all locked out
+- **The first user created in an organization becomes its administrator.**
+  Without it a fresh install has nobody who can grant a role, so nobody can
+  ever be granted one. The second user gets nothing
+- Removing the last administrator is refused over the API
+- Endpoint-level assertions in the same specification file, so the model and
+  the surface that enforces it are described in one place
+
 **Authorization — Part 7-a**
 - `authz.Checker` answers "may this user do this to this object?", and
   `authz.Enforce` reduces it to an error, so a caller has no boolean to
@@ -151,6 +172,13 @@ newest first within each section.
   [ADR-0001](docs/architecture/adr/0001-backend-language.md#amendments)
 
 ### Fixed
+
+- **Role grants could outlive their subject.** `role_assignments.subject_id` is
+  polymorphic — a subject is a user or a group — so no foreign key could
+  enforce it and nothing cascaded. A grant naming a deleted or foreign user
+  stored fine and dangled, and an identifier reused by a later import would
+  have inherited it. Granting now verifies the subject exists in the caller's
+  organization, and deleting a user or group revokes its grants
 
 - **Any member could have ended any other member's session.** The session
   repository's revoke was scoped to the organization but not to the user, which

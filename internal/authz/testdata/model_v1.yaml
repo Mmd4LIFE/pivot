@@ -94,3 +94,41 @@ assertions:
   - { subject: user:nobody, permission: create_content, object: organization:acme, expect: deny }
   - { subject: user:nobody, permission: native_query,   object: organization:acme, expect: deny }
   - { subject: user:nobody, permission: manage_users,   object: organization:acme, expect: deny }
+
+# Endpoint-level assertions.
+#
+# The rows above assert what the checker decides. These assert that the HTTP
+# surface actually asks it — a permission model is worth nothing if a route
+# forgets to be gated, and that is a different failure from the model being
+# wrong. Each row logs in as the named user and calls the endpoint for real.
+#
+# `status` is what the response must be. 403 means the check ran and said no;
+# 401 would mean authentication failed, and a 200 where a 403 belongs is the
+# bug this table exists to catch.
+endpoints:
+  # The catalogue is documentation: any authenticated caller may read it.
+  - { as: user:mallory, method: GET, path: /roles, status: 200 }
+  - { as: user:ada,     method: GET, path: /roles, status: 200 }
+
+  # Who holds what is not documentation. It needs manage_roles, which only the
+  # administrator has.
+  - { as: user:ada,     method: GET, path: /organization/role-assignments, status: 200 }
+  - { as: user:grace,   method: GET, path: /organization/role-assignments, status: 403 }
+  - { as: user:mallory, method: GET, path: /organization/role-assignments, status: 403 }
+  - { as: user:nobody,  method: GET, path: /organization/role-assignments, status: 403 }
+
+  # Granting a role is the most dangerous thing in the API: whoever can do it
+  # can make themselves an administrator. An analyst must not.
+  - { as: user:grace,   method: POST, path: /organization/role-assignments, status: 403 }
+  - { as: user:mallory, method: POST, path: /organization/role-assignments, status: 403 }
+
+  # Ending someone else's session needs manage_sessions, not merely a login.
+  - { as: user:mallory, method: DELETE, path: /admin/sessions/00000000-0000-0000-0000-000000000000, status: 403 }
+  - { as: user:grace,   method: DELETE, path: /admin/sessions/00000000-0000-0000-0000-000000000000, status: 403 }
+  # The administrator passes the permission check and then legitimately finds
+  # no such session, which is a 404 and proves the gate was not the thing that
+  # stopped them.
+  - { as: user:ada,     method: DELETE, path: /admin/sessions/00000000-0000-0000-0000-000000000000, status: 404 }
+
+  # Everyone authenticated can see themselves.
+  - { as: user:nobody,  method: GET, path: /auth/me, status: 200 }

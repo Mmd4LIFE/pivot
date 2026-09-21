@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Mmd4LIFE/pivot/internal/auth"
+	"github.com/Mmd4LIFE/pivot/internal/authz"
 	"github.com/Mmd4LIFE/pivot/internal/logging"
 	"github.com/Mmd4LIFE/pivot/internal/store/model"
 	"github.com/Mmd4LIFE/pivot/internal/store/repo"
@@ -212,7 +213,18 @@ type AuthHandler struct {
 	repos  *repo.Repositories
 	cookie CookieConfig
 	log    *slog.Logger
+
+	// checker supplies the effective-permission list on /auth/me. Nil simply
+	// omits the list: it is advisory, and every endpoint enforces on its own.
+	checker authz.Checker
 }
+
+// SetChecker supplies the authorization checker.
+//
+// Separate from the constructor because the checker and the auth handler are
+// built at the same moment and neither is available to the other's factory.
+// Nil is safe: the permission list is omitted, never guessed.
+func (h *AuthHandler) SetChecker(c authz.Checker) { h.checker = c }
 
 // NewAuthHandler builds the authentication endpoints.
 func NewAuthHandler(
@@ -326,6 +338,16 @@ func newSessionResponse(s model.Session, current bool) sessionResponse {
 type sessionEnvelope struct {
 	User    userResponse    `json:"user"`
 	Session sessionResponse `json:"session"`
+
+	// Permissions is what the caller may do in their organization.
+	//
+	// It exists so a UI can hide what it cannot do rather than letting someone
+	// discover it by being refused. It is **advisory** — every endpoint
+	// enforces independently — which is why an omission here is a cosmetic bug
+	// and never a security one.
+	//
+	// Absent from the login response, where no checker is involved.
+	Permissions []string `json:"permissions,omitempty"`
 }
 
 type sessionListResponse struct {
@@ -494,9 +516,17 @@ func (h *AuthHandler) handleMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	perms := EffectivePermissions(r, h.checker)
+
+	names := make([]string, 0, len(perms))
+	for _, p := range perms {
+		names = append(names, string(p))
+	}
+
 	WriteJSON(r.Context(), w, http.StatusOK, sessionEnvelope{
-		User:    newUserResponse(user),
-		Session: newSessionResponse(authed.Session, true),
+		User:        newUserResponse(user),
+		Session:     newSessionResponse(authed.Session, true),
+		Permissions: names,
 	})
 }
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/Mmd4LIFE/pivot/internal/api"
 	"github.com/Mmd4LIFE/pivot/internal/auth"
+	"github.com/Mmd4LIFE/pivot/internal/authz"
 	"github.com/Mmd4LIFE/pivot/internal/logging"
 	"github.com/Mmd4LIFE/pivot/internal/store"
 	"github.com/Mmd4LIFE/pivot/internal/store/repo"
@@ -94,6 +95,8 @@ readiness change before the drain begins, so no request is dropped.`,
 				)
 			}
 
+			checker, cache := authz.New(repos)
+
 			srv := api.New(cfg.Server, log,
 				api.WithCheck(api.Check{
 					Name: "database",
@@ -105,6 +108,7 @@ readiness change before the drain begins, so no request is dropped.`,
 					Domain: cfg.Auth.CookieDomain,
 					Secure: cfg.Auth.CookieSecure,
 				}, log)),
+				api.WithRoles(api.NewRoleHandler(repos, checker, cache, log)),
 			)
 
 			return srv.Run(ctx)

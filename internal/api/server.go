@@ -34,6 +34,10 @@ type Server struct {
 	// which is only useful in tests.
 	auth *AuthHandler
 
+	// roles serves the authorization surface and supplies the permission
+	// checker. Nil leaves every endpoint ungated.
+	roles *RoleHandler
+
 	// ready gates /readyz. It flips false the instant shutdown begins, before
 	// draining starts, so a load balancer stops sending new work while
 	// in-flight requests finish.
@@ -68,6 +72,12 @@ func WithAuth(h *AuthHandler) Option {
 	return func(s *Server) { s.auth = h }
 }
 
+// WithRoles serves the authorization endpoints and gates the routes that need
+// a permission.
+func WithRoles(h *RoleHandler) Option {
+	return func(s *Server) { s.roles = h }
+}
+
 // New builds a server. It does not bind a port; [Server.Run] does that.
 func New(cfg config.ServerConfig, log *slog.Logger, opts ...Option) *Server {
 	s := &Server{cfg: cfg, log: log}
@@ -76,10 +86,19 @@ func New(cfg config.ServerConfig, log *slog.Logger, opts ...Option) *Server {
 		opt(s)
 	}
 
+	// The auth handler reports effective permissions on /auth/me, which needs
+	// the same checker the middleware enforces with. Wiring it here rather
+	// than at both construction sites is what keeps the advisory list and the
+	// enforced answer on one code path.
+	if s.auth != nil && s.roles != nil {
+		s.auth.SetChecker(s.roles.checker)
+	}
+
 	s.router = NewRouter(RouterConfig{
 		Log:            log,
 		CORS:           DefaultCORS(),
 		Auth:           s.auth,
+		Roles:          s.roles,
 		TenantResolver: s.tenantResolver,
 		Checks:         s.checks,
 	})

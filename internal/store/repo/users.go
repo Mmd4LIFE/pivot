@@ -249,6 +249,19 @@ func (r *UserRepo) SoftDelete(ctx context.Context, id uuid.UUID) error {
 		return derr
 	}
 
+	// Role grants do not survive the user.
+	//
+	// The user row stays — this is a soft delete — but its grants are removed
+	// outright, because the subject columns in role_assignments are polymorphic
+	// and so carry no foreign key to cascade through. Leaving them would mean a
+	// restored or re-imported account silently inheriting whatever it used to
+	// hold, which is the kind of thing nobody notices until it matters.
+	if _, rerr := r.q.RevokeAllForSubject(ctx, model.RevokeAllForSubjectParams{
+		OrgID: s.OrgID(), SubjectType: subjectTypeUser, SubjectID: id,
+	}); rerr != nil {
+		return translate(rerr)
+	}
+
 	r.emit(ctx, ChangeDeleted, entityUser, id, s.OrgID(), s.ActorID())
 
 	return nil

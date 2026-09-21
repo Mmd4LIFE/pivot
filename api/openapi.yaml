@@ -35,6 +35,8 @@ tags:
     description: Liveness and readiness probes
   - name: auth
     description: Login, logout, and session management
+  - name: authorization
+    description: Roles and role assignment
   - name: system
     description: Instance metadata
 
@@ -223,6 +225,162 @@ paths:
                 checks:
                   database: "error: connection refused"
 
+  /api/v1/roles:
+    get:
+      tags: [authorization]
+      operationId: listRoles
+      summary: The built-in roles and what each may do
+      description: |
+        Readable by any authenticated caller: which roles exist and what they
+        mean is documentation, and a role picker needs it. Who *holds* a role
+        is a different question, answered by the role-assignments endpoint,
+        which is gated.
+
+        `native_query` appears on Analyst and not on Editor deliberately. Raw
+        SQL bypasses semantic row-level security, so it is a separate grant
+        rather than something bundled into "can edit".
+      responses:
+        "200":
+          description: The role catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoleCatalog"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/organization/role-assignments:
+    get:
+      tags: [authorization]
+      operationId: listRoleAssignments
+      summary: Who holds which role
+      description: Requires `manage_roles`.
+      responses:
+        "200":
+          description: Every role assignment in the caller's organization
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoleAssignmentList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+    post:
+      tags: [authorization]
+      operationId: grantRole
+      summary: Give a user or group a role
+      description: |
+        Requires `manage_roles` — which is, deliberately, the most dangerous
+        permission in the API: whoever holds it can grant it to themselves.
+
+        Granting the same role twice is a no-op. A subject that does not exist
+        in the caller's organization is refused as a validation failure rather
+        than stored as a dangling row.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GrantRoleRequest"
+      responses:
+        "201":
+          description: The role was granted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoleAssignment"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/organization/role-assignments/{subjectType}/{subjectId}/{role}:
+    delete:
+      tags: [authorization]
+      operationId: revokeRole
+      summary: Take a role away
+      description: |
+        Requires `manage_roles`.
+
+        Removing the **last** administrator is refused: an organization with
+        nobody who can grant roles is recoverable only from the command line,
+        and the people most likely to reach that state are the least likely to
+        have shell access. `pivot admin grant-role` is that recovery path.
+      parameters:
+        - name: subjectType
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [user, group]
+        - name: subjectId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: role
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: The role was revoked
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          description: |
+            The request was rejected — most usefully, because this is the last
+            administrator.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/admin/sessions/{id}:
+    delete:
+      tags: [authorization]
+      operationId: revokeAnySession
+      summary: End any session in the organization
+      description: |
+        Requires `manage_sessions`. This is the administrative counterpart to
+        `DELETE /api/v1/auth/sessions/{id}`, which only ever ends the caller's
+        own: scoped to the organization rather than to one user, it is the
+        right power for responding to a compromise and the wrong one for
+        managing your own devices, which is why they are separate endpoints
+        with separate permissions.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: The session was revoked
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
 components:
   securitySchemes:
     sessionCookie:
@@ -329,6 +487,84 @@ components:
           $ref: "#/components/schemas/User"
         session:
           $ref: "#/components/schemas/Session"
+        permissions:
+          type: array
+          description: |
+            What the caller may do in their organization.
+
+            **Advisory.** It exists so a UI can hide what it cannot do rather
+            than letting someone discover it by being refused. Every endpoint
+            enforces independently, so treating this list as the authority
+            would be a mistake — and an omission from it is never a way in.
+
+            Present on `/auth/me`, absent from the login response.
+          items:
+            type: string
+          examples: [[view_content, query]]
+
+    RoleDescription:
+      type: object
+      required: [role, permissions]
+      properties:
+        role:
+          type: string
+          examples: [analyst]
+        permissions:
+          type: array
+          items:
+            type: string
+
+    RoleCatalog:
+      type: object
+      required: [roles]
+      properties:
+        roles:
+          type: array
+          items:
+            $ref: "#/components/schemas/RoleDescription"
+
+    RoleAssignment:
+      type: object
+      required: [subjectType, subjectId, role]
+      properties:
+        subjectType:
+          type: string
+          enum: [user, group]
+          description: |
+            A `group` assignment is a userset: every member of that group holds
+            the role, including members of groups nested beneath it.
+        subjectId:
+          type: string
+          format: uuid
+        role:
+          type: string
+          examples: [admin]
+        grantedAt:
+          type: string
+          format: date-time
+
+    RoleAssignmentList:
+      type: object
+      required: [assignments]
+      properties:
+        assignments:
+          type: array
+          items:
+            $ref: "#/components/schemas/RoleAssignment"
+
+    GrantRoleRequest:
+      type: object
+      required: [subjectType, subjectId, role]
+      properties:
+        subjectType:
+          type: string
+          enum: [user, group]
+        subjectId:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [admin, editor, analyst, viewer]
 
     SessionList:
       type: object
@@ -453,6 +689,17 @@ components:
           schema:
             type: integer
           description: Seconds to wait before retrying.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    ServiceUnavailable:
+      description: |
+        A dependency could not be reached. On a gated endpoint this means the
+        authorization backend was unavailable, so the request was denied
+        without a decision being made — deliberately distinguishable from 403,
+        which means a decision was made and it was no.
       content:
         application/json:
           schema:

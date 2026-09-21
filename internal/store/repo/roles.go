@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/google/uuid"
 
@@ -108,10 +109,19 @@ type GrantRole struct {
 // tuple is a fact, and a fact is either recorded or not. Returning a conflict
 // would make every caller write "grant unless already granted", which is the
 // same thing with more ways to get it wrong.
+//
+// The subject is verified to exist in the caller's organization first. The
+// columns are polymorphic — a subject is a user or a group — so no foreign key
+// can enforce it, and without this check a typo or a stale identifier stores a
+// grant that dangles. Returns [ErrNotFound] when the subject is not there.
 func (r *RoleRepo) Grant(ctx context.Context, in GrantRole) error {
 	s, err := r.scope(ctx)
 	if err != nil {
 		return err
+	}
+
+	if verr := r.verifySubject(ctx, in); verr != nil {
+		return verr
 	}
 
 	if gerr := r.q.GrantRole(ctx, model.GrantRoleParams{
@@ -132,6 +142,39 @@ func (r *RoleRepo) Grant(ctx context.Context, in GrantRole) error {
 
 	return nil
 }
+
+// verifySubject confirms the grant names something real in this tenant.
+//
+// Both lookups are already tenant-scoped by the repositories they go through,
+// so a subject belonging to another organization reads as missing — which is
+// the correct answer and, deliberately, the same one as "does not exist".
+func (r *RoleRepo) verifySubject(ctx context.Context, in GrantRole) error {
+	s, err := r.scope(ctx)
+	if err != nil {
+		return err
+	}
+
+	switch in.SubjectType {
+	case subjectTypeUser:
+		_, uerr := r.q.GetUser(ctx, model.GetUserParams{ID: in.SubjectID, OrgID: s.OrgID()})
+
+		return translate(uerr)
+
+	case subjectTypeGroup:
+		_, gerr := r.q.GetGroup(ctx, model.GetGroupParams{ID: in.SubjectID, OrgID: s.OrgID()})
+
+		return translate(gerr)
+
+	default:
+		return fmt.Errorf("%w: unknown subject type %q", ErrNotFound, in.SubjectType)
+	}
+}
+
+// Subject types, matching the CHECK constraint in migration 00004.
+const (
+	subjectTypeUser  = "user"
+	subjectTypeGroup = "group"
+)
 
 // Revoke removes a relationship.
 //

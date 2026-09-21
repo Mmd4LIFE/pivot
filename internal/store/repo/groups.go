@@ -197,6 +197,15 @@ func (r *GroupRepo) SoftDelete(ctx context.Context, id uuid.UUID) error {
 		return serr
 	}
 
+	// Role grants do not survive the group, for the same reason they do not
+	// survive a user: the subject columns are polymorphic, so nothing cascades
+	// and a deleted group's grants would otherwise outlive it.
+	if _, rerr := r.q.RevokeAllForSubject(ctx, model.RevokeAllForSubjectParams{
+		OrgID: s.OrgID(), SubjectType: subjectTypeGroup, SubjectID: id,
+	}); rerr != nil {
+		return translate(rerr)
+	}
+
 	r.emit(ctx, ChangeDeleted, entityGroup, id, s.OrgID(), s.ActorID())
 
 	return nil
