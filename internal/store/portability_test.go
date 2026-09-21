@@ -18,7 +18,9 @@ import (
 var expectedTables = []string{
 	"group_members",
 	"groups",
+	"login_attempts",
 	"organizations",
+	"sessions",
 	"user_attributes",
 	"users",
 }
@@ -46,6 +48,15 @@ var expectedColumns = map[string][]string{
 	},
 	"group_members": {
 		"added_at", "added_by", "group_id", "org_id", "user_id",
+	},
+	"sessions": {
+		"absolute_expires_at", "expires_at", "id", "ip", "issued_at",
+		"last_seen_at", "org_id", "revoked_at", "token_hash", "user_agent",
+		"user_id",
+	},
+	"login_attempts": {
+		"email", "failed_count", "first_failed_at", "id", "last_failed_at",
+		"locked_until", "org_id",
 	},
 }
 

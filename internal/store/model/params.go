@@ -232,3 +232,76 @@ type DeleteUserAttributesBySourceParams struct {
 	UserID uuid.UUID
 	Source string
 }
+
+// --- sessions -------------------------------------------------------------
+
+type CreateSessionParams struct {
+	ID                uuid.UUID
+	OrgID             uuid.UUID
+	UserID            uuid.UUID
+	TokenHash         string
+	ExpiresAt         dbtypes.Time
+	AbsoluteExpiresAt dbtypes.Time
+	IP                string
+	UserAgent         string
+}
+
+type TouchSessionParams struct {
+	LastSeenAt dbtypes.Time
+	ExpiresAt  dbtypes.Time
+	ID         uuid.UUID
+}
+
+type RevokeSessionParams struct {
+	RevokedAt dbtypes.NullTime
+	ID        uuid.UUID
+	OrgID     uuid.UUID
+}
+
+type RevokeUserSessionsParams struct {
+	RevokedAt dbtypes.NullTime
+	UserID    uuid.UUID
+	OrgID     uuid.UUID
+}
+
+type ListUserSessionsParams struct {
+	UserID uuid.UUID
+	OrgID  uuid.UUID
+}
+
+type DeleteExpiredSessionsParams struct {
+	AbsoluteExpiresAt dbtypes.Time
+	RevokedAt         dbtypes.NullTime
+}
+
+// --- login attempts -------------------------------------------------------
+
+type GetLoginAttemptParams struct {
+	OrgID uuid.UUID
+	Email string
+}
+
+type RecordFailedLoginParams struct {
+	ID            uuid.UUID
+	OrgID         uuid.UUID
+	Email         string
+	FirstFailedAt dbtypes.Time
+	LastFailedAt  dbtypes.Time
+	LockedUntil   dbtypes.NullTime
+}
+
+type SetLoginLockParams struct {
+	LockedUntil dbtypes.NullTime
+	OrgID       uuid.UUID
+	Email       string
+}
+
+type ClearLoginAttemptsParams struct {
+	OrgID uuid.UUID
+	Email string
+}
+
+type DeleteStaleLoginAttemptsParams struct {
+	LastFailedAt dbtypes.Time
+	LockedUntil  dbtypes.NullTime
+}

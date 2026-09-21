@@ -13,6 +13,21 @@ newest first within each section.
 
 ### Added
 
+**Authentication — Part 6-a**
+- Argon2id password hashing (m=64MB, t=3), PHC-encoded so the cost can be
+  raised later without invalidating existing hashes
+- Server-side sessions with two expiries: a sliding idle timeout, and an
+  absolute cap that is never extended. Tokens are 256-bit and stored only as a
+  SHA-256 hash, so a database dump yields no working sessions
+- Progressive lockout after repeated failures, keyed by the **attempted**
+  email so it covers addresses that do not exist — locking out only real
+  accounts would make the lockout a user-enumeration oracle
+- Every failed login costs the same: a nonexistent account still pays for an
+  Argon2 verification, because matching the response but not the timing leaves
+  the oracle open
+- `pivot admin create-user` and `pivot admin reset-password`, reading the
+  password from the terminal without echoing
+
 **HTTP foundations — Part 5**
 - Standard error envelope on every non-2xx response, carrying a stable
   machine-readable code (`PIVOT-<AREA>-<NNN>`), a correlation ID, and a

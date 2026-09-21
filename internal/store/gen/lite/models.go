@@ -34,6 +34,16 @@ type GroupMember struct {
 	AddedBy uuid.NullUUID
 }
 
+type LoginAttempt struct {
+	ID            uuid.UUID
+	OrgID         uuid.UUID
+	Email         string
+	FailedCount   int64
+	FirstFailedAt dbtypes.Time
+	LastFailedAt  dbtypes.Time
+	LockedUntil   dbtypes.NullTime
+}
+
 type Organization struct {
 	ID        uuid.UUID
 	Name      string
@@ -46,6 +56,20 @@ type Organization struct {
 	UpdatedBy uuid.NullUUID
 	DeletedAt dbtypes.NullTime
 	Version   int64
+}
+
+type Session struct {
+	ID                uuid.UUID
+	OrgID             uuid.UUID
+	UserID            uuid.UUID
+	TokenHash         string
+	IssuedAt          dbtypes.Time
+	ExpiresAt         dbtypes.Time
+	AbsoluteExpiresAt dbtypes.Time
+	LastSeenAt        dbtypes.Time
+	IP                string
+	UserAgent         string
+	RevokedAt         dbtypes.NullTime
 }
 
 type User struct {

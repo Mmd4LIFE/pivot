@@ -537,3 +537,139 @@ func (a *liteQuerier) DeleteUserAttribute(ctx context.Context, p model.DeleteUse
 func (a *liteQuerier) DeleteUserAttributesBySource(ctx context.Context, p model.DeleteUserAttributesBySourceParams) (int64, error) {
 	return a.q.DeleteUserAttributesBySource(ctx, lite.DeleteUserAttributesBySourceParams(p))
 }
+
+// --- sessions and login attempts: PostgreSQL ------------------------------
+
+func (a *pgQuerier) GetSessionByTokenHash(ctx context.Context, hash string) (model.Session, error) {
+	row, err := a.q.GetSessionByTokenHash(ctx, hash)
+
+	return model.Session(row), err
+}
+
+func (a *pgQuerier) CreateSession(ctx context.Context, p model.CreateSessionParams) (model.Session, error) {
+	row, err := a.q.CreateSession(ctx, pg.CreateSessionParams(p))
+
+	return model.Session(row), err
+}
+
+func (a *pgQuerier) TouchSession(ctx context.Context, p model.TouchSessionParams) (int64, error) {
+	return a.q.TouchSession(ctx, pg.TouchSessionParams(p))
+}
+
+func (a *pgQuerier) RevokeSession(ctx context.Context, p model.RevokeSessionParams) (int64, error) {
+	return a.q.RevokeSession(ctx, pg.RevokeSessionParams(p))
+}
+
+func (a *pgQuerier) RevokeUserSessions(ctx context.Context, p model.RevokeUserSessionsParams) (int64, error) {
+	return a.q.RevokeUserSessions(ctx, pg.RevokeUserSessionsParams(p))
+}
+
+func (a *pgQuerier) ListUserSessions(ctx context.Context, p model.ListUserSessionsParams) ([]model.Session, error) {
+	rows, err := a.q.ListUserSessions(ctx, pg.ListUserSessionsParams(p))
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.Session, len(rows))
+	for i, r := range rows {
+		out[i] = model.Session(r)
+	}
+
+	return out, nil
+}
+
+func (a *pgQuerier) DeleteExpiredSessions(ctx context.Context, p model.DeleteExpiredSessionsParams) (int64, error) {
+	return a.q.DeleteExpiredSessions(ctx, pg.DeleteExpiredSessionsParams(p))
+}
+
+func (a *pgQuerier) GetLoginAttempt(ctx context.Context, p model.GetLoginAttemptParams) (model.LoginAttempt, error) {
+	row, err := a.q.GetLoginAttempt(ctx, pg.GetLoginAttemptParams(p))
+
+	return model.LoginAttempt(row), err
+}
+
+func (a *pgQuerier) RecordFailedLogin(ctx context.Context, p model.RecordFailedLoginParams) (model.LoginAttempt, error) {
+	row, err := a.q.RecordFailedLogin(ctx, pg.RecordFailedLoginParams(p))
+
+	return model.LoginAttempt(row), err
+}
+
+func (a *pgQuerier) SetLoginLock(ctx context.Context, p model.SetLoginLockParams) (int64, error) {
+	return a.q.SetLoginLock(ctx, pg.SetLoginLockParams(p))
+}
+
+func (a *pgQuerier) ClearLoginAttempts(ctx context.Context, p model.ClearLoginAttemptsParams) (int64, error) {
+	return a.q.ClearLoginAttempts(ctx, pg.ClearLoginAttemptsParams(p))
+}
+
+func (a *pgQuerier) DeleteStaleLoginAttempts(ctx context.Context, p model.DeleteStaleLoginAttemptsParams) (int64, error) {
+	return a.q.DeleteStaleLoginAttempts(ctx, pg.DeleteStaleLoginAttemptsParams(p))
+}
+
+// --- sessions and login attempts: SQLite -----------------------------------
+
+func (a *liteQuerier) GetSessionByTokenHash(ctx context.Context, hash string) (model.Session, error) {
+	row, err := a.q.GetSessionByTokenHash(ctx, hash)
+
+	return model.Session(row), err
+}
+
+func (a *liteQuerier) CreateSession(ctx context.Context, p model.CreateSessionParams) (model.Session, error) {
+	row, err := a.q.CreateSession(ctx, lite.CreateSessionParams(p))
+
+	return model.Session(row), err
+}
+
+func (a *liteQuerier) TouchSession(ctx context.Context, p model.TouchSessionParams) (int64, error) {
+	return a.q.TouchSession(ctx, lite.TouchSessionParams(p))
+}
+
+func (a *liteQuerier) RevokeSession(ctx context.Context, p model.RevokeSessionParams) (int64, error) {
+	return a.q.RevokeSession(ctx, lite.RevokeSessionParams(p))
+}
+
+func (a *liteQuerier) RevokeUserSessions(ctx context.Context, p model.RevokeUserSessionsParams) (int64, error) {
+	return a.q.RevokeUserSessions(ctx, lite.RevokeUserSessionsParams(p))
+}
+
+func (a *liteQuerier) ListUserSessions(ctx context.Context, p model.ListUserSessionsParams) ([]model.Session, error) {
+	rows, err := a.q.ListUserSessions(ctx, lite.ListUserSessionsParams(p))
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.Session, len(rows))
+	for i, r := range rows {
+		out[i] = model.Session(r)
+	}
+
+	return out, nil
+}
+
+func (a *liteQuerier) DeleteExpiredSessions(ctx context.Context, p model.DeleteExpiredSessionsParams) (int64, error) {
+	return a.q.DeleteExpiredSessions(ctx, lite.DeleteExpiredSessionsParams(p))
+}
+
+func (a *liteQuerier) GetLoginAttempt(ctx context.Context, p model.GetLoginAttemptParams) (model.LoginAttempt, error) {
+	row, err := a.q.GetLoginAttempt(ctx, lite.GetLoginAttemptParams(p))
+
+	return model.LoginAttempt(row), err
+}
+
+func (a *liteQuerier) RecordFailedLogin(ctx context.Context, p model.RecordFailedLoginParams) (model.LoginAttempt, error) {
+	row, err := a.q.RecordFailedLogin(ctx, lite.RecordFailedLoginParams(p))
+
+	return model.LoginAttempt(row), err
+}
+
+func (a *liteQuerier) SetLoginLock(ctx context.Context, p model.SetLoginLockParams) (int64, error) {
+	return a.q.SetLoginLock(ctx, lite.SetLoginLockParams(p))
+}
+
+func (a *liteQuerier) ClearLoginAttempts(ctx context.Context, p model.ClearLoginAttemptsParams) (int64, error) {
+	return a.q.ClearLoginAttempts(ctx, lite.ClearLoginAttemptsParams(p))
+}
+
+func (a *liteQuerier) DeleteStaleLoginAttempts(ctx context.Context, p model.DeleteStaleLoginAttemptsParams) (int64, error) {
+	return a.q.DeleteStaleLoginAttempts(ctx, lite.DeleteStaleLoginAttemptsParams(p))
+}

@@ -12,10 +12,16 @@ import (
 
 type Querier interface {
 	AddGroupMember(ctx context.Context, arg AddGroupMemberParams) error
+	// A successful login clears the record entirely.
+	ClearLoginAttempts(ctx context.Context, arg ClearLoginAttemptsParams) (int64, error)
 	CountOrganizations(ctx context.Context) (int64, error)
 	CountUsers(ctx context.Context, orgID uuid.UUID) (int64, error)
 	CreateGroup(ctx context.Context, arg CreateGroupParams) (Group, error)
 	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error)
+	// Session lookup by token is deliberately NOT org-scoped: resolving a session
+	// is how the tenant is discovered in the first place, so it cannot require
+	// knowing the tenant already. Every other query here is scoped as usual.
+	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	// Every query is scoped by org_id, including lookups by primary key. The id is
 	// already unique, so the extra predicate buys nothing on its own -- it means a
 	// caller holding an id from one tenant cannot read a row from another, even by
@@ -29,14 +35,24 @@ type Querier interface {
 	// placeholders inside comments, which shifts its substitution offsets and
 	// corrupts the generated SQL into tokens like RETURNINid.
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	// Expired and revoked rows are swept rather than left to accumulate.
+	DeleteExpiredSessions(ctx context.Context, arg DeleteExpiredSessionsParams) (int64, error)
+	// Swept alongside expired sessions, so a dictionary attack cannot grow this
+	// table without bound.
+	DeleteStaleLoginAttempts(ctx context.Context, arg DeleteStaleLoginAttemptsParams) (int64, error)
 	DeleteUserAttribute(ctx context.Context, arg DeleteUserAttributeParams) (int64, error)
 	// Replacing an IdP's attributes must not disturb manually assigned ones, so
 	// deletion is scoped by source.
 	DeleteUserAttributesBySource(ctx context.Context, arg DeleteUserAttributesBySourceParams) (int64, error)
 	GetGroup(ctx context.Context, arg GetGroupParams) (Group, error)
 	GetGroupByName(ctx context.Context, arg GetGroupByNameParams) (Group, error)
+	// Failed login tracking, keyed by the ATTEMPTED email rather than a user id:
+	// a row must exist even when the account does not, or the lockout itself
+	// becomes a user-enumeration oracle.
+	GetLoginAttempt(ctx context.Context, arg GetLoginAttemptParams) (LoginAttempt, error)
 	GetOrganization(ctx context.Context, id uuid.UUID) (Organization, error)
 	GetOrganizationBySlug(ctx context.Context, slug string) (Organization, error)
+	GetSessionByTokenHash(ctx context.Context, tokenHash string) (Session, error)
 	GetUser(ctx context.Context, arg GetUserParams) (User, error)
 	GetUserAttribute(ctx context.Context, arg GetUserAttributeParams) (UserAttribute, error)
 	GetUserByEmail(ctx context.Context, arg GetUserByEmailParams) (User, error)
@@ -47,12 +63,23 @@ type Querier interface {
 	ListOrganizations(ctx context.Context, arg ListOrganizationsParams) ([]Organization, error)
 	ListUserAttributes(ctx context.Context, arg ListUserAttributesParams) ([]UserAttribute, error)
 	ListUserGroups(ctx context.Context, arg ListUserGroupsParams) ([]Group, error)
+	ListUserSessions(ctx context.Context, arg ListUserSessionsParams) ([]Session, error)
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]User, error)
+	RecordFailedLogin(ctx context.Context, arg RecordFailedLoginParams) (LoginAttempt, error)
 	RecordUserLogin(ctx context.Context, arg RecordUserLoginParams) (int64, error)
 	RemoveGroupMember(ctx context.Context, arg RemoveGroupMemberParams) (int64, error)
+	RevokeSession(ctx context.Context, arg RevokeSessionParams) (int64, error)
+	// Revoking every session for a user is what a password change and a
+	// compromise response both need.
+	RevokeUserSessions(ctx context.Context, arg RevokeUserSessionsParams) (int64, error)
+	// Applied after a lockout threshold is crossed, once the new count is known.
+	SetLoginLock(ctx context.Context, arg SetLoginLockParams) (int64, error)
 	SoftDeleteGroup(ctx context.Context, arg SoftDeleteGroupParams) (int64, error)
 	SoftDeleteOrganization(ctx context.Context, arg SoftDeleteOrganizationParams) (int64, error)
 	SoftDeleteUser(ctx context.Context, arg SoftDeleteUserParams) (int64, error)
+	// Sliding idle expiry. The absolute cap is never touched, so an active session
+	// still ends when it reaches it.
+	TouchSession(ctx context.Context, arg TouchSessionParams) (int64, error)
 	UpdateGroup(ctx context.Context, arg UpdateGroupParams) (Group, error)
 	// Optimistic concurrency: the WHERE clause carries the caller's expected
 	// version, so a stale update affects zero rows instead of silently winning.

@@ -67,4 +67,22 @@ type Querier interface {
 	ListUserAttributes(context.Context, model.ListUserAttributesParams) ([]model.UserAttribute, error)
 	DeleteUserAttribute(context.Context, model.DeleteUserAttributeParams) (int64, error)
 	DeleteUserAttributesBySource(context.Context, model.DeleteUserAttributesBySourceParams) (int64, error)
+
+	// Sessions. GetSessionByTokenHash is deliberately unscoped: resolving a
+	// session is how the tenant is discovered, so it cannot require knowing
+	// the tenant already.
+	CreateSession(context.Context, model.CreateSessionParams) (model.Session, error)
+	GetSessionByTokenHash(context.Context, string) (model.Session, error)
+	TouchSession(context.Context, model.TouchSessionParams) (int64, error)
+	RevokeSession(context.Context, model.RevokeSessionParams) (int64, error)
+	RevokeUserSessions(context.Context, model.RevokeUserSessionsParams) (int64, error)
+	ListUserSessions(context.Context, model.ListUserSessionsParams) ([]model.Session, error)
+	DeleteExpiredSessions(context.Context, model.DeleteExpiredSessionsParams) (int64, error)
+
+	// Login attempts, for progressive lockout.
+	GetLoginAttempt(context.Context, model.GetLoginAttemptParams) (model.LoginAttempt, error)
+	RecordFailedLogin(context.Context, model.RecordFailedLoginParams) (model.LoginAttempt, error)
+	SetLoginLock(context.Context, model.SetLoginLockParams) (int64, error)
+	ClearLoginAttempts(context.Context, model.ClearLoginAttemptsParams) (int64, error)
+	DeleteStaleLoginAttempts(context.Context, model.DeleteStaleLoginAttemptsParams) (int64, error)
 }

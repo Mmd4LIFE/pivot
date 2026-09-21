@@ -31,6 +31,7 @@ sql:
         # in repo/adapter.go require.
         rename:
           avatar_url: AvatarURL
+          ip: IP
         overrides:
           - db_type: uuid
             go_type: github.com/google/uuid.UUID
@@ -61,6 +62,7 @@ sql:
         emit_empty_slices: true
         rename:
           avatar_url: AvatarURL
+          ip: IP
         # One entry per column, because every one of these is TEXT or INTEGER
         # and there is no db_type to key on. A TEXT override would turn every
         # string column in the schema into a UUID.
@@ -162,3 +164,33 @@ sql:
             go_type:
               import: github.com/google/uuid
               type: NullUUID
+
+          # -- sessions ------------------------------------------------------
+          - column: sessions.id
+            go_type: github.com/google/uuid.UUID
+          - column: sessions.org_id
+            go_type: github.com/google/uuid.UUID
+          - column: sessions.user_id
+            go_type: github.com/google/uuid.UUID
+          - column: sessions.issued_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
+          - column: sessions.expires_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
+          - column: sessions.absolute_expires_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
+          - column: sessions.last_seen_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
+          - column: sessions.revoked_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.NullTime
+
+          # -- login_attempts ------------------------------------------------
+          - column: login_attempts.id
+            go_type: github.com/google/uuid.UUID
+          - column: login_attempts.org_id
+            go_type: github.com/google/uuid.UUID
+          - column: login_attempts.first_failed_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
+          - column: login_attempts.last_failed_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
+          - column: login_attempts.locked_until
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.NullTime

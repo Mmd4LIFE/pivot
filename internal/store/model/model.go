@@ -132,3 +132,42 @@ const (
 	SourceSAML   = "saml"
 	SourceSCIM   = "scim"
 )
+
+// Session is a server-side login session.
+//
+// The token itself is never stored — only TokenHash — so a database dump does
+// not hand the reader a set of working sessions.
+type Session struct {
+	ID        uuid.UUID
+	OrgID     uuid.UUID
+	UserID    uuid.UUID
+	TokenHash string
+	IssuedAt  dbtypes.Time
+
+	// ExpiresAt is the idle timeout and moves forward on use.
+	ExpiresAt dbtypes.Time
+
+	// AbsoluteExpiresAt is a hard cap and is never extended, so an active
+	// session still ends eventually.
+	AbsoluteExpiresAt dbtypes.Time
+
+	LastSeenAt dbtypes.Time
+	IP         string
+	UserAgent  string
+	RevokedAt  dbtypes.NullTime
+}
+
+// LoginAttempt tracks consecutive failures for progressive lockout.
+//
+// Keyed by the attempted email rather than a user id, because a row must exist
+// even when the account does not — locking out only real accounts would turn
+// the lockout into a user-enumeration oracle.
+type LoginAttempt struct {
+	ID            uuid.UUID
+	OrgID         uuid.UUID
+	Email         string
+	FailedCount   int64
+	FirstFailedAt dbtypes.Time
+	LastFailedAt  dbtypes.Time
+	LockedUntil   dbtypes.NullTime
+}
