@@ -80,6 +80,18 @@ type Querier interface {
 	ListUserSessions(context.Context, model.ListUserSessionsParams) ([]model.Session, error)
 	DeleteExpiredSessions(context.Context, model.DeleteExpiredSessionsParams) (int64, error)
 
+	// Role assignments: Zanzibar tuples. ListObjectGrants deliberately returns
+	// a widened set — the user's own grants plus every group grant on the
+	// object — because a variable-length IN list is not portable across both
+	// engines. The caller intersects.
+	ListObjectGrants(context.Context, model.ListObjectGrantsParams) ([]model.RoleAssignment, error)
+	ListSubjectGrants(context.Context, model.ListSubjectGrantsParams) ([]model.RoleAssignment, error)
+	ListGrantsOnObject(context.Context, model.ListGrantsOnObjectParams) ([]model.RoleAssignment, error)
+	GrantRole(context.Context, model.GrantRoleParams) error
+	RevokeRole(context.Context, model.RevokeRoleParams) (int64, error)
+	RevokeAllForSubject(context.Context, model.RevokeAllForSubjectParams) (int64, error)
+	CountRoleHolders(context.Context, model.CountRoleHoldersParams) (int64, error)
+
 	// Login attempts, for progressive lockout.
 	GetLoginAttempt(context.Context, model.GetLoginAttemptParams) (model.LoginAttempt, error)
 	RecordFailedLogin(context.Context, model.RecordFailedLoginParams) (model.LoginAttempt, error)

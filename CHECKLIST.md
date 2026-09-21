@@ -53,8 +53,8 @@ At the end of every part, in this order:
 
 | | |
 |---|---|
-| **Last completed** | Part 6-b — Auth endpoints and session-backed scoping |
-| **Next up** | **Part 7 — Authorization skeleton (OpenFGA)** |
+| **Last completed** | Part 7-a — Authorization model, checker, and the assertion harness |
+| **Next up** | **Part 7-b — Permission middleware and the administrative surface** |
 | **Current phase** | Phase 0 — Foundations |
 | **Branch** | `main` |
 | **Blockers** | None |
@@ -63,10 +63,10 @@ At the end of every part, in this order:
 **Where the code stands:** `./bin/pivot serve` runs an HTTP server with structured JSON
 logging, `/healthz`, `/readyz` (including a database check), and a graceful drain on
 SIGTERM. **A user can log in over HTTP and call an authenticated endpoint.**
-`pivot migrate up|status|version|create` manages schema v3 on **both** SQLite and
+`pivot migrate up|status|version|create` manages schema v4 on **both** SQLite and
 Postgres. `pivot config show|env` reports configuration. Packages with real code:
-`version`, `config`, `logging`, `api`, `auth`, `cli`, `store`. Still `doc.go` stubs:
-`authz`, `connectors`, `semantic`, `query`.
+`version`, `config`, `logging`, `api`, `auth`, `authz`, `cli`, `store`. Still `doc.go`
+stubs: `connectors`, `semantic`, `query`.
 
 **Dependencies:** cobra, yaml.v3, goose, pgx/v5, modernc.org/sqlite (pure Go — no CGo, so
 Part 13's six-platform cross-compile stays a single build matrix), google/uuid,
@@ -88,20 +88,42 @@ and the local install would never log anyone in. **Behind a TLS-terminating prox
 `auth.cookieSecure`** — Pivot only sees plain HTTP and cannot tell. Login is throttled
 per IP *outside* the handler, so a throttled request never reaches Argon2.
 
+**Authorization:** `authz.Checker` answers `can(user, action, object)`; `authz.Enforce`
+reduces it to an error so a handler has no boolean to misread. It **fails closed** —
+an unreachable backend denies — and that is mutation-verified. Role grants are stored as
+Zanzibar tuples in `role_assignments`, not a `user_roles` table, so migrating to OpenFGA
+is an export and a `Write` rather than a translation. Group nesting is followed **upward**
+by a depth-capped walk in Go, not a recursive CTE. **The model is specified as data** in
+`internal/authz/testdata/model_v1.yaml` — that file is the contract, and any future
+checker must satisfy it unchanged. `native_query` is a separate permission from
+`create_content` on purpose: raw SQL bypasses semantic RLS, so it is Analyst's and not
+Editor's. **Embedded OpenFGA was spiked and works** (see
+[ADR-0009's amendment](docs/architecture/adr/0009-authorization.md#amendments) for the
+numbers); adopting it is Part 7-b's call.
+
 **Tenant isolation:** `internal/tenant.Scope` has unexported fields and no usable zero
 value. Repositories take **no org parameter at all** — they read the scope from the
 context — so a caller cannot pass the wrong tenant because there is nothing to pass.
 `OrganizationRepo` acts on the caller's own org; unscoped provisioning lives on
 `SystemRepo`, named so every call site says what it is doing. A reflection test walks
 `Repositories`' exported fields, so **a repository is covered the moment it is registered
-in that struct** — it asserts all 34 methods refuse an unscoped context, and it is
+in that struct** — it asserts all 41 methods refuse an unscoped context, and it is
 mutation-verified. `api.WithTenant` rejects an unresolvable request with 401 before any
 handler runs, and the scope now comes from `api.SessionTenantResolver` — the organization
 is read off the session row and from nowhere in the request, so a caller cannot name a
 tenant they have not authenticated against. `SingleTenantResolver` survives for tests
 only and is wired nowhere.
 
-**Schema is at v3.** Migration 00003 added `sessions` and `login_attempts`.
+**Schema is at v4.** Migration 00003 added `sessions` and `login_attempts`; 00004 added
+`role_assignments`.
+
+**A gap 7-b must close.** `role_assignments.subject_id` and `object_id` are polymorphic —
+a subject is a user *or* a group — so they carry no foreign key, and migration 00002's
+composite-key rule cannot apply. Tenant isolation still holds, because every read filters
+on `org_id` and a session can only produce its own org's scope. What does not hold is
+referential integrity: a grant can name a deleted or foreign user and simply dangle.
+`RoleRepo.RevokeAllForSubject` exists for the cleanup but nothing calls it yet, and the
+grant path does not check that the subject lives in this organization. Both are 7-b's.
 
 **Schema history.** Migration 00002 made the `group_members` and `user_attributes`
 foreign keys composite on `(id, org_id)`. The v1 single-column keys let a row name one
@@ -142,6 +164,12 @@ needs an entry in `sqlc.yaml`'s SQLite override list**, or the packages silently
 - **`make gen-check` only means anything on a clean tree.** It diffs `internal/store/`
   against `HEAD`, so run on a dirty one it reports every uncommitted change as stale
   generated code. Run it after committing, not before.
+- **Query files must be pure ASCII.** sqlc's SQLite generator rewrites queries by byte
+  offset and miscounts on multibyte characters, corrupting output into tokens like
+  `SELECid` while pointing at valid SQL. An em dash in a comment cost this part an hour.
+  `TestQueryFilesAreASCII` now fails by name instead. Same mechanism as Part 3-b's
+  `?`-in-a-comment bug, and `sqlc.arg` is avoided in SQLite files for a third variant of
+  it — `TestSQLiteQueriesAvoidNamedArguments` guards that one.
 - **Lint enforces US spelling** (`misspell`, `locale: US`) and rejects both `err` shadowing
   (govet) and `err` reassignment (gocritic) — give the inner error a distinct name.
 
@@ -150,7 +178,7 @@ needs an entry in `sqlc.yaml`'s SQLite override list**, or the packages silently
 ## Progress
 
 ```
-Phase 0  Foundations        [██████████          ]  9/18   (Parts 3, 4 and 6 each split)
+Phase 0  Foundations        [██████████          ] 10/19   (Parts 3, 4, 6 and 7 each split)
 Phase 1  Connect & Query    [                    ]  0/12   (detailed at Part 15)
 Phase 2+ ...                                            (expanded as we approach)
 ```
@@ -422,38 +450,83 @@ picking one.
 
 ---
 
-### - [ ] Part 7 — Authorization skeleton (OpenFGA)
+### - [x] Part 7-a — Authorization model, checker, and the assertion harness ✅ 2026-09-21
 
-**Deliverable:** Permission checks enforced in middleware, with a declarative test harness.
+*Part 7 was split: the permission model and the decision engine are a session; the
+middleware and the administrative surface are another.*
 
-**Build:**
-- OpenFGA integration — **embedded mode first** (single-binary requirement)
-- Authorization model v1: `organization` → `group` → `user`, role assignment
-- Built-in roles: Admin, Editor, Analyst, Viewer
-- Resource-scoped permission middleware
-- Decision caching (in-process for now; Valkey when multi-node arrives) with invalidation
-  on relationship writes
-- **Declarative permission test harness** — assertions as data, not as hand-written tests
+**Deliverable:** `authz.Checker` answers `can(user, action, object)`, and the model it
+answers from is written down as data.
+
+**Built:**
+- **Spiked embedded OpenFGA first**, as this part instructed — see the outcome below
+- `internal/authz`: `Checker`, `Request`, `Decision`, `Explanation`, `Enforce`
+- Authorization model v1: `organization` → `group` → `user`, with nesting followed upward
+- Built-in roles Admin / Editor / Analyst / Viewer, and a permission registry
+- Schema v4: `role_assignments`, stored as Zanzibar tuples
+- `RoleRepo` (7 methods, picked up by the reflection isolation walk automatically)
+- Decision cache: immediate invalidation plus a 3s TTL backstop
+- **Declarative harness** — `internal/authz/testdata/model_v1.yaml`, 26 assertions
 
 **Done when:**
-- A Viewer is denied an Admin endpoint; an Admin is allowed
-- Permission changes take effect in under 5 seconds (assert with a test)
-- The test harness runs a table of `(user, action, object) → allow|deny` assertions
-- **Fail-closed verified:** with OpenFGA unavailable, all access is denied, not granted
+- Permission changes take effect in under 5 seconds ✅ *(both mechanisms tested: immediate
+  invalidation, and the TTL bounding a stale **allow** when the write happened elsewhere)*
+- The harness runs a table of `(user, action, object) → allow|deny` ✅ *(26 assertions ×
+  both engines; a test also fails if any registered permission is never asserted)*
+- **Fail-closed verified** ✅ *(mutation-verified: making `Enforce` swallow an unavailable
+  backend fails the suite by name)*
+- A Viewer is denied what an Admin is allowed ✅ *(at the checker; at an endpoint in 7-b)*
 
-**Notes:** [ADR-0009](docs/architecture/adr/0009-authorization.md) names a fallback —
-hand-rolled RBAC behind the same interface — if embedded OpenFGA proves immature. **Spike
-this first.** If it's not viable, take the fallback and write the ADR update rather than
-fighting it.
+**The OpenFGA spike — it works, and Part 7-b decides whether to adopt it.**
+`openfga v1.21.0` embeds in-process, pure Go, on `modernc.org/sqlite` and `pgx/v5` — the
+same drivers Pivot already uses. It is **not** immature, so ADR-0009's fallback trigger
+was not met. Cost: 115 → 244 modules, 16 MB → 26 MB. Phase 0's model is flat and
+exercises none of Zanzibar's recursion, which arrives in Phase 4. Deferred behind
+`Checker`, with grants stored as tuples and the assertion table as the contract a future
+OpenFGA checker must satisfy unchanged. Full reasoning and numbers:
+[ADR-0009 amendment](docs/architecture/adr/0009-authorization.md#amendments).
 
-Part 6-b leaves two things for this part to pick up. `SessionRepo.Revoke` — the
-organization-scoped one — is currently called by nothing, because the "my sessions"
-endpoint uses the user-scoped `RevokeOwn`; it is the administrative form and wants a
-permission check, not a caller. And `SystemRepo` as a whole is still ungated: every
-method on it is unscoped by design, which was correct while the only callers were the
-CLI and login, and stops being correct the moment an endpoint reaches one.
+**Refs:** `P0-AUTHZ-002`, `P0-AUTHZ-005`, `P0-AUTHZ-006`
 
-**Refs:** `P0-AUTHZ-001` … `P0-AUTHZ-006`
+---
+
+### - [ ] Part 7-b — Permission middleware and the administrative surface
+
+**Deliverable:** An endpoint refuses a caller who lacks the permission, and roles can be
+granted over the API.
+
+**Build:**
+- `api.RequirePermission(perm)` middleware, composed after the tenant chain so a handler
+  never runs without both a scope and a decision
+- Role assignment endpoints: grant, revoke, list who holds what
+- `GET /api/v1/auth/me` extended with the caller's effective permissions, so the UI can
+  hide what it cannot do rather than discovering it by being refused
+- Gate the two things Part 6-b deliberately left open:
+  - `SessionRepo.Revoke` — the organization-scoped form — has no caller. It is the
+    administrative "end someone else's session", and wants `manage_sessions`
+  - `SystemRepo` is entirely ungated. Every method on it is unscoped by design, which was
+    right while only the CLI and login reached it, and stops being right the moment an
+    endpoint does
+- `pivot admin grant-role` / `revoke-role`, and **the first user created on a fresh
+  install becomes an admin** — otherwise a new instance has nobody who can grant anything
+- Refuse removing the last administrator (`RoleRepo.CountHolders` exists for this)
+- **Close the referential gap** described in Current state: validate on grant that the
+  subject exists in this organization, and call `RoleRepo.RevokeAllForSubject` when a user
+  or group is deleted, so an identifier reused by a later import cannot inherit a
+  stranger's permissions
+- Extend `api/openapi.yaml` and regenerate the TS client
+
+**Done when:**
+- A Viewer gets 403 `PIVOT-AUTH-002` on an admin endpoint; an Admin gets through
+- The declarative harness is extended with endpoint-level assertions, unchanged in shape
+- With the checker unavailable, every gated endpoint returns 503 and **none** returns 200
+- Demoting the last admin is refused
+
+**Notes:** Decide OpenFGA here, with the spike's numbers in hand. Adopting it means
+`openfga.Checker` implementing the same interface and passing `model_v1.yaml` unchanged —
+that table is exactly what makes the swap verifiable.
+
+**Refs:** `P0-AUTHZ-001`, `P0-AUTHZ-003`, `P0-AUTHZ-004`
 
 ---
 
@@ -681,6 +754,7 @@ Newest first. Record what **actually** shipped, including what didn't work.
 
 | Date | Part | Shipped | Notes |
 |---|---|---|---|
+| 2026-09-21 | 7-a | `internal/authz` (Checker, Resolver, Cache, Enforce), authorization model v1 with four built-in roles, schema v4 `role_assignments` as Zanzibar tuples, `RoleRepo`, and a declarative assertion file of 26 rows run against both engines | **Split Part 7** — the model and the decision engine are a session, the middleware and admin surface are another. **The OpenFGA spike came back positive, which is not what this part expected.** `openfga v1.21.0` embeds in-process, pure Go, on `modernc.org/sqlite` and `pgx/v5` — our own drivers — so ADR-0009's "if embedded mode proves immature" trigger was *not* met. Measured: 115 → 244 modules, 16 MB → 26 MB. Deferred anyway, on the narrower ground that Phase 0's model is flat and exercises none of Zanzibar's recursion, with the reasoning and numbers recorded as a dated ADR amendment rather than a silent choice. **This is a judgment call worth the user's review**, which is why the spike output is in the ADR rather than only in a commit message. The deferral is made safe by three things, not by hope: grants are stored as tuples so migration is an export plus a `Write`; everything asks through `authz.Checker`; and the model is specified as *data* in `testdata/model_v1.yaml`, which a future OpenFGA checker must satisfy unchanged. **Mutation-verified twice:** making `Enforce` swallow an unavailable backend fails the fail-closed suite by name, and deleting group expansion fails the harness on exactly the inherited-role rows. **A test of mine was wrong and the code was right:** I asserted that a cycle in group nesting should error, but the visited set already resolves it correctly — a cycle means membership in both groups. Split into two honest tests: cycles terminate with an answer, unbounded *chains* hit the depth cap. **An em dash cost an hour.** sqlc's SQLite generator rewrites queries by byte offset and miscounts on multibyte characters, corrupting output into `SELECid` while pointing at valid SQL — the same mechanism as Part 3-b's `?`-in-a-comment bug. `TestQueryFilesAreASCII` and `TestSQLiteQueriesAvoidNamedArguments` now fail by name instead. |
 | 2026-09-21 | 6-b | The five `/api/v1/auth/*` endpoints, the session cookie, `api.SessionTenantResolver` replacing the single-tenant stand-in, an `auth` configuration section, spec + TS client, startup sweep of expired sessions | **A test found a real authorization hole.** `SessionRepo.Revoke` is scoped to the organization but not to the user, so any member could have ended any other member's session — the right power for an administrator, the wrong one for the endpoint that manages your own devices. Added `RevokeSessionForUser`, which names the user in the `WHERE` clause, so someone else's session is simply not found. Fixed in SQL rather than with a check in the handler, for the same reason Part 4-b fixed its hole in the schema. **Mutation-verified twice:** swapping `RevokeOwn` back to `Revoke` produces `returned 204, want 404` *and* ends the victim's session; removing the limiter from the login chain makes the throttling test fail. That second test asserts indirectly and is stronger for it — every login that reaches the service records a failed attempt, so the recorded count *is* the number of requests that got past the limiter. **`make test-all` was being killed outright**, which I had assumed was a timeout: `go test ./...` starts one binary per package at once, and several hash with Argon2 at 64 MiB under the race detector. Test targets now pass `-p 1`; the suite runs in ~30s and this matters more on a 2-core CI runner than it did here. All five `Done when` items verified against a live server, including the lockout: 429 `PIVOT-RATE-001` and 429 `PIVOT-AUTH-005` are distinguishable on the wire, which is the concrete case the error registry's "codes are independent of status" rule was written for. |
 | 2026-09-21 | 6-a | Schema v3 (`sessions`, `login_attempts`), Argon2id hashing, session tokens, `auth.Service` (login / authenticate / logout / set-password / sweep), progressive lockout, `pivot admin create-user` and `reset-password` | **Split Part 6** — security core is a session, HTTP surface is another. 16 Postgres subtests, 0 skips. Three security properties are tested rather than asserted in a comment: every failed login costs the same (a nonexistent account pays for a dummy Argon2 verification, and the test compares timing ratios); lockout is keyed by the **attempted** email so it applies to addresses that do not exist, which is what stops it being an enumeration oracle; and case variation cannot reset the counter. Two expiries — sliding idle plus a never-extended absolute cap — because with only the idle timeout a stolen token stays valid forever as long as the thief keeps using it. **Two test-fixture bugs found by the code, not by me:** the schema contract test caught the new tables missing from `expectedTables`, and the sessions unique index caught a fixture that truncated UUIDs to 8 characters — UUID v7 is time-sortable, so rows created milliseconds apart share their prefix. Also fixed a portability bug flagged by `unconvert`: `int(syscall.Stdin)` is redundant on Unix but `syscall.Stdin` is a Handle on Windows, so it became `int(os.Stdin.Fd())`. |
 | 2026-09-21 | 5 | Error envelope with a 15-code registry, middleware chain (request ID, logging, recovery, security headers, CORS, body limit, rate limit), hand-rolled token-bucket limiter, boundary decoding with validation, `api/openapi.yaml` + TS client generation | All `Done when` checks verified live: unknown API path returns the envelope with a code and request ID; 100 rapid requests produced 43 × 429 with `Retry-After`; a panicking handler returns a coded 500 without leaking the panic value, and the server serves the next request. **Health probes are deliberately exempt from rate limiting** — throttling a readiness probe makes an orchestrator kill a healthy instance exactly when it is busiest. **CORS defaults to closed**, and a wildcard origin combined with credentials is refused rather than silently downgraded, since that combination turns any website into an authenticated client. The request-ID middleware sanitizes and length-bounds a client-supplied value: it lands in every log line for that request, so an unvalidated one is log injection. Spec-drift tests keep `openapi.yaml` honest — a documented path that 404s fails the build. Needed a `Router` type, so `Server.routes` moved and the shutdown tests were rewired to `router.Mux()`. |

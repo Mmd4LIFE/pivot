@@ -20,6 +20,7 @@ var expectedTables = []string{
 	"groups",
 	"login_attempts",
 	"organizations",
+	"role_assignments",
 	"sessions",
 	"user_attributes",
 	"users",
@@ -53,6 +54,10 @@ var expectedColumns = map[string][]string{
 		"absolute_expires_at", "expires_at", "id", "ip", "issued_at",
 		"last_seen_at", "org_id", "revoked_at", "token_hash", "user_agent",
 		"user_id",
+	},
+	"role_assignments": {
+		"created_at", "created_by", "id", "object_id", "object_type", "org_id",
+		"relation", "subject_id", "subject_relation", "subject_type",
 	},
 	"login_attempts": {
 		"email", "failed_count", "first_failed_at", "id", "last_failed_at",

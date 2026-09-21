@@ -194,3 +194,17 @@ sql:
             go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
           - column: login_attempts.locked_until
             go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.NullTime
+
+          # -- role_assignments ----------------------------------------------
+          - column: role_assignments.id
+            go_type: github.com/google/uuid.UUID
+          - column: role_assignments.org_id
+            go_type: github.com/google/uuid.UUID
+          - column: role_assignments.subject_id
+            go_type: github.com/google/uuid.UUID
+          - column: role_assignments.object_id
+            go_type: github.com/google/uuid.UUID
+          - column: role_assignments.created_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
+          - column: role_assignments.created_by
+            go_type: github.com/google/uuid.NullUUID

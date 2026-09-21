@@ -125,3 +125,72 @@ Rejected on the reasoning above. It's the default approach and it's how bypasses
   interface)
 - Authorization latency cannot meet the 10ms p95 budget even with caching
 - OpenFGA's maintenance or licensing status changes
+
+---
+
+## Amendments
+
+### 2026-09-21 — Embedded mode spiked; integration deferred to when the model needs it
+
+Part 7 spiked embedded OpenFGA before building, as planned. **It works.** The decision
+below is therefore *not* the fallback this ADR names, and the fallback's trigger —
+"embedded mode proves immature" — was **not** met. This is a change of timing, recorded
+honestly as such.
+
+#### What was measured
+
+Against `github.com/openfga/openfga v1.21.0`:
+
+| | modules in build list | binary, `-s -w` |
+|---|---|---|
+| Pivot as of Part 6-b | 115 | 16 MB |
+| A program that only constructs an embedded OpenFGA server | 244 | 26 MB |
+
+- `server.NewServerWithOpts(server.WithDatastore(...))` constructs and runs in process.
+  No gRPC listener is required to call `Check` — the embedding story is real.
+- It is **pure Go**. Its SQLite driver is `modernc.org/sqlite` and its PostgreSQL driver
+  is `pgx/v5` — the same two Pivot already uses, so it would not have cost us CGo, and
+  Part 13's six-platform cross-compile would have stayed a single matrix. This was the
+  risk most likely to have killed it, and it is absent.
+- It brings gRPC, grpc-gateway, viper, cobra, the full OpenTelemetry SDK and the
+  Prometheus client as direct requirements.
+
+#### Why Part 7 did not adopt it yet
+
+Phase 0's authorization model is `organization → group → user` with four built-in roles.
+It exercises none of the recursion this ADR was written for: no nested collections, no
+inheritance with override, no object whose accessibility depends on another object. Those
+arrive in **Phase 4**, which is where the argument in *Why relationships rather than a
+permissions table* actually bites.
+
+Set against that, roughly +130 modules and +10 MB for flat role checks buys nothing today
+and costs in three places that are already planned: Part 12's ten-minute CI gate runs
+`govulncheck` and `osv-scanner` over every dependency; Part 13 signs and ships six
+platforms plus a multi-arch image; and Part 14 chooses Pivot's own OpenTelemetry setup,
+which an early OpenFGA would have pinned for us.
+
+#### What makes the deferral safe rather than merely cheap
+
+The part of this ADR that matters most is not "OpenFGA" — it is that authorization lives
+behind one interface, and that enforcement will move into the query compiler. Both hold:
+
+- `authz.Checker` is the only way anything asks a permission question.
+- Role grants are stored as **Zanzibar tuples** — `(subject, relation, object)`, with
+  usersets written `group:analysts#member` — not as a `user_roles` table. Migrating is an
+  export and a `Write` call, not a translation. See migration `00004_role_assignments`.
+- The permission model is asserted **as data**, in
+  `internal/authz/testdata/model_v1.yaml`. That table is the contract, and it is what a
+  future OpenFGA-backed checker must satisfy unchanged. A swap becomes verifiable rather
+  than hopeful — the same technique Part 17 plans for connector conformance.
+- Group nesting is resolved by a bounded walk in Go, not a recursive CTE. This ADR's
+  objection to hand-rolled RBAC is specifically the recursive CTE: unreadable,
+  unpredictable, and unportable across both engines. A depth-capped loop over two indexed
+  queries is none of those, and unlike a CTE it can explain its own answer, which is what
+  `Checker.Explain` and Phase 4's permission debugger need.
+
+#### When to take it up
+
+At Phase 4, when nested collections and inheritance-with-override make the relationship
+model earn its weight — or sooner if the operational cost of a second permission
+implementation outweighs the dependency cost. The spike is recorded here so that decision
+starts from measurements rather than from a fresh investigation.

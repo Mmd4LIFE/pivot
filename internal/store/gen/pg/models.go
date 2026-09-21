@@ -58,6 +58,19 @@ type Organization struct {
 	Version   int64
 }
 
+type RoleAssignment struct {
+	ID              uuid.UUID
+	OrgID           uuid.UUID
+	SubjectType     string
+	SubjectID       uuid.UUID
+	SubjectRelation string
+	Relation        string
+	ObjectType      string
+	ObjectID        uuid.UUID
+	CreatedAt       dbtypes.Time
+	CreatedBy       uuid.NullUUID
+}
+
 type Session struct {
 	ID                uuid.UUID
 	OrgID             uuid.UUID

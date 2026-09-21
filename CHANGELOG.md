@@ -13,6 +13,29 @@ newest first within each section.
 
 ### Added
 
+**Authorization — Part 7-a**
+- `authz.Checker` answers "may this user do this to this object?", and
+  `authz.Enforce` reduces it to an error, so a caller has no boolean to
+  misread. **It fails closed**: an unreachable backend denies rather than
+  allows, because an authorization system that fails open is worse than none —
+  it creates the false belief that access is controlled
+- Authorization model v1 — `organization` → `group` → `user`, with group
+  nesting followed upward so a role granted to a parent reaches a sub-team
+- Built-in roles: Admin, Editor, Analyst, Viewer. `native_query` is Analyst's
+  and not Editor's, deliberately: raw SQL bypasses semantic row-level security,
+  so it is a separate grant rather than something bundled into "can edit"
+- Role grants stored as Zanzibar tuples — `(subject, relation, object)`, with
+  usersets written `group:analysts#member` — rather than a roles table, so the
+  data migrates to OpenFGA as an export and a write
+- **The permission model is specified as data**, in
+  `internal/authz/testdata/model_v1.yaml`. That file is the contract; the Go
+  beside it is a loader. Every assertion runs against both engines
+- Decision caching with immediate invalidation and a 3-second TTL, so a
+  permission change takes effect well inside the five-second budget whether or
+  not the write happened in this process
+- `TestQueryFilesAreASCII` and `TestSQLiteQueriesAvoidNamedArguments` — guards
+  against two sqlc generation bugs that produce unintelligible errors
+
 **Authentication over HTTP — Part 6-b**
 - `POST /api/v1/auth/login`, `POST /api/v1/auth/logout`, `GET /api/v1/auth/me`,
   `GET /api/v1/auth/sessions`, and `DELETE /api/v1/auth/sessions/{id}`

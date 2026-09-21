@@ -15,6 +15,7 @@ type Querier interface {
 	// A successful login clears the record entirely.
 	ClearLoginAttempts(ctx context.Context, arg ClearLoginAttemptsParams) (int64, error)
 	CountOrganizations(ctx context.Context) (int64, error)
+	CountRoleHolders(ctx context.Context, arg CountRoleHoldersParams) (int64, error)
 	CountUsers(ctx context.Context, orgID uuid.UUID) (int64, error)
 	CreateGroup(ctx context.Context, arg CreateGroupParams) (Group, error)
 	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error)
@@ -56,11 +57,37 @@ type Querier interface {
 	GetUser(ctx context.Context, arg GetUserParams) (User, error)
 	GetUserAttribute(ctx context.Context, arg GetUserAttributeParams) (UserAttribute, error)
 	GetUserByEmail(ctx context.Context, arg GetUserByEmailParams) (User, error)
+	// Granting a role twice is a no-op, not a duplicate row: a tuple is a fact,
+	// and a fact is either stored or not.
+	GrantRole(ctx context.Context, arg GrantRoleParams) error
 	IsGroupMember(ctx context.Context, arg IsGroupMemberParams) (bool, error)
 	ListChildGroups(ctx context.Context, arg ListChildGroupsParams) ([]Group, error)
+	ListGrantsOnObject(ctx context.Context, arg ListGrantsOnObjectParams) ([]RoleAssignment, error)
 	ListGroupMembers(ctx context.Context, arg ListGroupMembersParams) ([]User, error)
 	ListGroups(ctx context.Context, arg ListGroupsParams) ([]Group, error)
+	// Role assignments are Zanzibar tuples. See ADR-0009's amendment.
+	//
+	// Placeholders are positional in both dialects and must appear in the same
+	// order, because the two generated parameter structs are converted directly
+	// into one another and a differing field order breaks the conversion - the
+	// lesson of Part 4-a. sqlc's named arguments are avoided because its SQLite
+	// path mis-substitutes numbered placeholders.
+	// The request-path query, and the one shape worth explaining.
+	//
+	// The resolver asks which relations a set of subjects hold on an object, where
+	// the subjects are one user plus the member-userset of every group they belong
+	// to. That is a variable-length IN list, which Postgres expresses as an array
+	// and SQLite cannot express at all without building SQL by hand - and
+	// hand-built SQL is how injection happens.
+	//
+	// So the predicate is widened instead: the user's own grants, plus every group
+	// grant on this object. The caller intersects the group rows with the groups
+	// it already knows the user belongs to. The widened set is bounded by the
+	// number of groups holding a role on one object, which is small, and the query
+	// is identical on both engines.
+	ListObjectGrants(ctx context.Context, arg ListObjectGrantsParams) ([]RoleAssignment, error)
 	ListOrganizations(ctx context.Context, arg ListOrganizationsParams) ([]Organization, error)
+	ListSubjectGrants(ctx context.Context, arg ListSubjectGrantsParams) ([]RoleAssignment, error)
 	ListUserAttributes(ctx context.Context, arg ListUserAttributesParams) ([]UserAttribute, error)
 	ListUserGroups(ctx context.Context, arg ListUserGroupsParams) ([]Group, error)
 	ListUserSessions(ctx context.Context, arg ListUserSessionsParams) ([]Session, error)
@@ -68,6 +95,9 @@ type Querier interface {
 	RecordFailedLogin(ctx context.Context, arg RecordFailedLoginParams) (LoginAttempt, error)
 	RecordUserLogin(ctx context.Context, arg RecordUserLoginParams) (int64, error)
 	RemoveGroupMember(ctx context.Context, arg RemoveGroupMemberParams) (int64, error)
+	// Removing a user or group takes its grants with it.
+	RevokeAllForSubject(ctx context.Context, arg RevokeAllForSubjectParams) (int64, error)
+	RevokeRole(ctx context.Context, arg RevokeRoleParams) (int64, error)
 	RevokeSession(ctx context.Context, arg RevokeSessionParams) (int64, error)
 	// Revoking one's own session names the user as well as the organization.
 	// RevokeSession above is the administrative form: scoped to the organization

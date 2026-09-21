@@ -42,6 +42,7 @@ type Repositories struct {
 	Groups         *GroupRepo
 	UserAttributes *UserAttributeRepo
 	Sessions       *SessionRepo
+	Roles          *RoleRepo
 
 	q      Querier
 	events *EventBus
@@ -67,6 +68,7 @@ func NewWithQuerier(q Querier) *Repositories {
 		Groups:         &GroupRepo{base: b},
 		UserAttributes: &UserAttributeRepo{base: b},
 		Sessions:       &SessionRepo{base: b},
+		Roles:          &RoleRepo{base: b},
 	}
 }
 

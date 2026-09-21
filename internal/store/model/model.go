@@ -171,3 +171,25 @@ type LoginAttempt struct {
 	LastFailedAt  dbtypes.Time
 	LockedUntil   dbtypes.NullTime
 }
+
+// RoleAssignment is one stored relationship, in Zanzibar's shape: a subject
+// holds a relation on an object.
+//
+// SubjectRelation empty means the subject is a single user. Non-empty makes it
+// a userset — "member" names every member of the group — which is how a role
+// is granted to a group rather than one person at a time.
+//
+// Group membership deliberately lives in group_members rather than here: one
+// fact, one place. See migration 00004 and ADR-0009's amendment.
+type RoleAssignment struct {
+	ID              uuid.UUID
+	OrgID           uuid.UUID
+	SubjectType     string
+	SubjectID       uuid.UUID
+	SubjectRelation string
+	Relation        string
+	ObjectType      string
+	ObjectID        uuid.UUID
+	CreatedAt       dbtypes.Time
+	CreatedBy       uuid.NullUUID
+}

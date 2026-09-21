@@ -1,0 +1,96 @@
+# The authorization model v1, asserted as data.
+#
+# This file is the specification of what Pivot's built-in roles mean. It is not
+# a convenience wrapper around tests — it is the test, and the Go code beside it
+# is only a loader. Adding a permission means adding rows here, and a role table
+# that stops matching this file fails the build.
+#
+# Names are symbolic. The harness creates a real organization, real users and
+# real groups, maps these names onto their generated UUIDs, and runs every
+# assertion against both PostgreSQL and SQLite.
+
+fixture:
+  organization: acme
+
+  users:
+    - ada      # administrator
+    - grace    # analyst, directly
+    - linus    # analyst, inherited through a nested group
+    - mallory  # viewer only
+    - nobody   # no grants at all, the deny-by-default case
+
+  groups:
+    - name: analysts
+    - name: eu-analysts
+      parent: analysts   # nesting: members of the child are members of the parent
+    - name: everyone
+
+  members:
+    analysts: [grace]
+    eu-analysts: [linus]
+    everyone: [ada, grace, linus, mallory]
+
+  grants:
+    # A role held directly by one user.
+    - subject: user:ada
+      relation: admin
+      object: organization:acme
+
+    # A role held by a group's members - the userset form. grace is a direct
+    # member; linus reaches it through eu-analysts' parent pointer.
+    - subject: group:analysts#member
+      relation: analyst
+      object: organization:acme
+
+    # The floor, granted broadly.
+    - subject: group:everyone#member
+      relation: viewer
+      object: organization:acme
+
+assertions:
+  # --- the administrator ---------------------------------------------------
+  - { subject: user:ada, permission: manage_organization, object: organization:acme, expect: allow }
+  - { subject: user:ada, permission: manage_users,        object: organization:acme, expect: allow }
+  - { subject: user:ada, permission: manage_groups,       object: organization:acme, expect: allow }
+  - { subject: user:ada, permission: manage_roles,        object: organization:acme, expect: allow }
+  - { subject: user:ada, permission: manage_sessions,     object: organization:acme, expect: allow }
+  - { subject: user:ada, permission: manage_connections,  object: organization:acme, expect: allow }
+  - { subject: user:ada, permission: native_query,        object: organization:acme, expect: allow }
+
+  # --- the analyst, granted through a group --------------------------------
+  # Raw SQL is an analyst's to run: the role exists for people trusted with the
+  # connection itself.
+  - { subject: user:grace, permission: native_query,   object: organization:acme, expect: allow }
+  - { subject: user:grace, permission: query,          object: organization:acme, expect: allow }
+  - { subject: user:grace, permission: create_content, object: organization:acme, expect: allow }
+  # But an analyst does not administer anything.
+  - { subject: user:grace, permission: manage_users,   object: organization:acme, expect: deny }
+  - { subject: user:grace, permission: manage_roles,   object: organization:acme, expect: deny }
+  - { subject: user:grace, permission: manage_sessions, object: organization:acme, expect: deny }
+
+  # --- inheritance through nested groups -----------------------------------
+  # linus is in eu-analysts, which is a child of analysts. The grant is on the
+  # parent. If nesting is not followed upward, these two flip and the whole
+  # point of a relationship model is lost.
+  - { subject: user:linus, permission: native_query,  object: organization:acme, expect: allow }
+  - { subject: user:linus, permission: query,         object: organization:acme, expect: allow }
+  - { subject: user:linus, permission: manage_users,  object: organization:acme, expect: deny }
+
+  # --- the viewer ----------------------------------------------------------
+  # A viewer may run queries, because viewing a dashboard runs its queries -
+  # but those go through the semantic layer, where row and column policy apply.
+  - { subject: user:mallory, permission: view_content,   object: organization:acme, expect: allow }
+  - { subject: user:mallory, permission: query,          object: organization:acme, expect: allow }
+  # And may do nothing else.
+  - { subject: user:mallory, permission: create_content, object: organization:acme, expect: deny }
+  - { subject: user:mallory, permission: native_query,   object: organization:acme, expect: deny }
+  - { subject: user:mallory, permission: manage_users,   object: organization:acme, expect: deny }
+
+  # --- deny by default -----------------------------------------------------
+  # A user with no grant at all gets nothing. This is the assertion that would
+  # catch a resolver that answers allow when it finds no relations.
+  - { subject: user:nobody, permission: view_content,   object: organization:acme, expect: deny }
+  - { subject: user:nobody, permission: query,          object: organization:acme, expect: deny }
+  - { subject: user:nobody, permission: create_content, object: organization:acme, expect: deny }
+  - { subject: user:nobody, permission: native_query,   object: organization:acme, expect: deny }
+  - { subject: user:nobody, permission: manage_users,   object: organization:acme, expect: deny }

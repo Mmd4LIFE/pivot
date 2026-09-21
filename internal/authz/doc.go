@@ -17,5 +17,9 @@
 // every decision is deny. An authorization system that fails open is worse
 // than none, because it creates a false belief that access is controlled.
 //
-// Built in Part 7; extended with RLS and masking in Phase 4.
+// Part 7 builds the contract and the model: authz.Checker, Zanzibar-shaped
+// role tuples, the four built-in roles, and a declarative assertion table in
+// testdata that is the specification rather than a test of it. The backing
+// implementation resolves the graph locally; ADR-0009's amendment records the
+// embedded-OpenFGA spike and when to take it up. Phase 4 adds RLS and masking.
 package authz

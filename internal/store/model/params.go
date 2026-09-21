@@ -312,3 +312,59 @@ type DeleteStaleLoginAttemptsParams struct {
 	LastFailedAt dbtypes.Time
 	LockedUntil  dbtypes.NullTime
 }
+
+// --- role assignments -----------------------------------------------------
+
+type ListObjectGrantsParams struct {
+	OrgID      uuid.UUID
+	ObjectType string
+	ObjectID   uuid.UUID
+	SubjectID  uuid.UUID
+}
+
+type ListSubjectGrantsParams struct {
+	OrgID       uuid.UUID
+	SubjectType string
+	SubjectID   uuid.UUID
+}
+
+type ListGrantsOnObjectParams struct {
+	OrgID      uuid.UUID
+	ObjectType string
+	ObjectID   uuid.UUID
+}
+
+type GrantRoleParams struct {
+	ID              uuid.UUID
+	OrgID           uuid.UUID
+	SubjectType     string
+	SubjectID       uuid.UUID
+	SubjectRelation string
+	Relation        string
+	ObjectType      string
+	ObjectID        uuid.UUID
+	CreatedBy       uuid.NullUUID
+}
+
+type RevokeRoleParams struct {
+	OrgID           uuid.UUID
+	SubjectType     string
+	SubjectID       uuid.UUID
+	SubjectRelation string
+	Relation        string
+	ObjectType      string
+	ObjectID        uuid.UUID
+}
+
+type RevokeAllForSubjectParams struct {
+	OrgID       uuid.UUID
+	SubjectType string
+	SubjectID   uuid.UUID
+}
+
+type CountRoleHoldersParams struct {
+	OrgID      uuid.UUID
+	Relation   string
+	ObjectType string
+	ObjectID   uuid.UUID
+}

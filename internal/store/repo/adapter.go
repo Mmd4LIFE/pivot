@@ -681,3 +681,123 @@ func (a *liteQuerier) ClearLoginAttempts(ctx context.Context, p model.ClearLogin
 func (a *liteQuerier) DeleteStaleLoginAttempts(ctx context.Context, p model.DeleteStaleLoginAttemptsParams) (int64, error) {
 	return a.q.DeleteStaleLoginAttempts(ctx, lite.DeleteStaleLoginAttemptsParams(p))
 }
+
+// --- role assignments (postgres) ------------------------------------------
+
+func (a *pgQuerier) ListObjectGrants(ctx context.Context, p model.ListObjectGrantsParams) ([]model.RoleAssignment, error) {
+	rows, err := a.q.ListObjectGrants(ctx, pg.ListObjectGrantsParams(p))
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.RoleAssignment, len(rows))
+	for i, r := range rows {
+		out[i] = model.RoleAssignment(r)
+	}
+
+	return out, nil
+}
+
+func (a *pgQuerier) ListSubjectGrants(ctx context.Context, p model.ListSubjectGrantsParams) ([]model.RoleAssignment, error) {
+	rows, err := a.q.ListSubjectGrants(ctx, pg.ListSubjectGrantsParams(p))
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.RoleAssignment, len(rows))
+	for i, r := range rows {
+		out[i] = model.RoleAssignment(r)
+	}
+
+	return out, nil
+}
+
+func (a *pgQuerier) ListGrantsOnObject(ctx context.Context, p model.ListGrantsOnObjectParams) ([]model.RoleAssignment, error) {
+	rows, err := a.q.ListGrantsOnObject(ctx, pg.ListGrantsOnObjectParams(p))
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.RoleAssignment, len(rows))
+	for i, r := range rows {
+		out[i] = model.RoleAssignment(r)
+	}
+
+	return out, nil
+}
+
+func (a *pgQuerier) GrantRole(ctx context.Context, p model.GrantRoleParams) error {
+	return a.q.GrantRole(ctx, pg.GrantRoleParams(p))
+}
+
+func (a *pgQuerier) RevokeRole(ctx context.Context, p model.RevokeRoleParams) (int64, error) {
+	return a.q.RevokeRole(ctx, pg.RevokeRoleParams(p))
+}
+
+func (a *pgQuerier) RevokeAllForSubject(ctx context.Context, p model.RevokeAllForSubjectParams) (int64, error) {
+	return a.q.RevokeAllForSubject(ctx, pg.RevokeAllForSubjectParams(p))
+}
+
+func (a *pgQuerier) CountRoleHolders(ctx context.Context, p model.CountRoleHoldersParams) (int64, error) {
+	return a.q.CountRoleHolders(ctx, pg.CountRoleHoldersParams(p))
+}
+
+// --- role assignments (sqlite) --------------------------------------------
+
+func (a *liteQuerier) ListObjectGrants(ctx context.Context, p model.ListObjectGrantsParams) ([]model.RoleAssignment, error) {
+	rows, err := a.q.ListObjectGrants(ctx, lite.ListObjectGrantsParams(p))
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.RoleAssignment, len(rows))
+	for i, r := range rows {
+		out[i] = model.RoleAssignment(r)
+	}
+
+	return out, nil
+}
+
+func (a *liteQuerier) ListSubjectGrants(ctx context.Context, p model.ListSubjectGrantsParams) ([]model.RoleAssignment, error) {
+	rows, err := a.q.ListSubjectGrants(ctx, lite.ListSubjectGrantsParams(p))
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.RoleAssignment, len(rows))
+	for i, r := range rows {
+		out[i] = model.RoleAssignment(r)
+	}
+
+	return out, nil
+}
+
+func (a *liteQuerier) ListGrantsOnObject(ctx context.Context, p model.ListGrantsOnObjectParams) ([]model.RoleAssignment, error) {
+	rows, err := a.q.ListGrantsOnObject(ctx, lite.ListGrantsOnObjectParams(p))
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.RoleAssignment, len(rows))
+	for i, r := range rows {
+		out[i] = model.RoleAssignment(r)
+	}
+
+	return out, nil
+}
+
+func (a *liteQuerier) GrantRole(ctx context.Context, p model.GrantRoleParams) error {
+	return a.q.GrantRole(ctx, lite.GrantRoleParams(p))
+}
+
+func (a *liteQuerier) RevokeRole(ctx context.Context, p model.RevokeRoleParams) (int64, error) {
+	return a.q.RevokeRole(ctx, lite.RevokeRoleParams(p))
+}
+
+func (a *liteQuerier) RevokeAllForSubject(ctx context.Context, p model.RevokeAllForSubjectParams) (int64, error) {
+	return a.q.RevokeAllForSubject(ctx, lite.RevokeAllForSubjectParams(p))
+}
+
+func (a *liteQuerier) CountRoleHolders(ctx context.Context, p model.CountRoleHoldersParams) (int64, error) {
+	return a.q.CountRoleHolders(ctx, lite.CountRoleHoldersParams(p))
+}
