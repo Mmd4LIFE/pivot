@@ -76,3 +76,63 @@ million rows. Those need client-side state.
 - Bundle size cannot be kept within budget despite splitting
 - The embedding market shifts decisively away from React
 - We add a public, unauthenticated content surface where SEO matters
+
+---
+
+## Amendments
+
+### 2026-09-21 — Versions pinned, and what the toolchain now requires of Node
+
+Part 9 built the scaffold. Three things are worth recording, because each one
+is a decision somebody will otherwise re-derive.
+
+#### The stack, as actually pinned
+
+| | ADR | Pinned | Why |
+|---|---|---|---|
+| Vite | 6 | **6.4.3** | as decided; see the Node constraint below |
+| React | 19 | **19.3.0** | current |
+| TypeScript | 5.6 | **5.9.3** | last 5.x |
+| Tailwind | 4 | **4.3.3** | current |
+| `@vitejs/plugin-react` | — | **4.7.0** | the last line supporting Vite 6 |
+
+#### Vite 7 and 8 are gated on a Node upgrade, not on a decision
+
+Vite 7 and 8 both require `node: ^20.19.0 || >=22.12.0`, as do
+`@vitejs/plugin-react` 5 and 6. The development machine runs Node 20.16.0, so
+they cannot be installed there at all.
+
+The failure is worth describing because it is not obvious. Vite 8 builds with
+rolldown, whose platform binary ships as an *optional* dependency carrying that
+same engine constraint. npm skips an optional dependency whose engines do not
+match — silently — and the build then dies with
+`Cannot find module '../rolldown-binding.linux-x64-gnu.node'`, which points at
+npm rather than at Node. `package.json` now declares `engines`, so the next
+person gets an engine warning instead of a missing-binary stack trace.
+
+Vite 6 is what this ADR chose, it is supported, and it works on the installed
+Node today. Moving to 7 or 8 is a routine bump once the toolchain Node is
+≥ 20.19 — **Part 12 should pin that version in CI**, which is the natural place
+to make it a property of the project rather than of one machine.
+
+TypeScript 7.0 exists and is the native rewrite. Deferred deliberately: Parts
+10 and 11 add Storybook and Playwright, and taking a just-released compiler
+rewrite at the same time is an avoidable risk for a cheap upgrade later.
+
+#### Two bugs the scaffold shipped with, and the tests that now catch them
+
+Both were invisible — no error, no failed request, just a feature quietly
+absent — which is why each has a test rather than a comment.
+
+`<alpha-value>` is Tailwind 3 syntax. Tailwind 4 emits it verbatim, so
+`rgb(var(--pivot-surface) / <alpha-value>)` reached the browser, which
+discards the whole declaration. Every themed utility did nothing. Found by
+reading the compiled CSS, not by looking at the page.
+
+The theme bootstrap was an inline `<script>`, and the application shell is
+served with `script-src 'self'`, which blocks inline scripts. It is now
+`/theme-init.js`, loaded render-blocking so it still runs before first paint.
+
+The tests are in `web/embed_test.go`: the built CSS must contain
+`var(--pivot-` and no `<alpha-value>`, and the shell must contain no inline
+script at all.

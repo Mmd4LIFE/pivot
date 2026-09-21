@@ -1,0 +1,141 @@
+/*
+ * Design tokens, as CSS custom properties.
+ *
+ * This file is load-bearing, and the reason is Phase 8. White-label embedding
+ * means a customer restyles Pivot to their brand. If theme values were
+ * compiled into class names, that would require a rebuild per customer —
+ * which is not a product. As runtime variables it is a configuration change:
+ * set --pivot-* on :root and everything follows.
+ *
+ * Two layers, deliberately:
+ *
+ *   --pivot-*   semantic tokens. This is the public surface. An embedder
+ *               overrides these and nothing else.
+ *   --color-*   Tailwind's theme, declared with `@theme inline` in app.css so
+ *               that utilities emit var(--pivot-*) rather than a resolved
+ *               value. Without `inline`, Tailwind would bake the color in at
+ *               build time and a runtime override would do nothing.
+ *
+ * Colors are written as raw channel triples so an alpha modifier still works:
+ * `bg-surface/50` needs to be able to say rgb(var(--pivot-surface) / 0.5).
+ */
+
+:root {
+  color-scheme: light dark;
+
+  /* --- surfaces ------------------------------------------------------- */
+  --pivot-canvas: 250 250 250;
+  --pivot-surface: 255 255 255;
+  --pivot-surface-raised: 255 255 255;
+  --pivot-surface-sunken: 244 244 245;
+  --pivot-overlay: 0 0 0;
+
+  /* --- text ----------------------------------------------------------- */
+  --pivot-text: 24 24 27;
+  --pivot-text-muted: 113 113 122;
+  --pivot-text-subtle: 161 161 170;
+  --pivot-text-inverted: 250 250 250;
+
+  /* --- lines ---------------------------------------------------------- */
+  --pivot-border: 228 228 231;
+  --pivot-border-strong: 212 212 216;
+
+  /* --- brand ---------------------------------------------------------- */
+  --pivot-accent: 37 99 235;
+  --pivot-accent-hover: 29 78 216;
+  --pivot-accent-text: 255 255 255;
+  --pivot-accent-subtle: 239 246 255;
+
+  /* --- status --------------------------------------------------------- */
+  --pivot-success: 22 163 74;
+  --pivot-warning: 217 119 6;
+  --pivot-danger: 220 38 38;
+  --pivot-danger-hover: 185 28 28;
+  --pivot-info: 8 145 178;
+
+  /* --- shape ---------------------------------------------------------- */
+  --pivot-radius: 0.5rem;
+  --pivot-radius-sm: 0.25rem;
+  --pivot-radius-lg: 0.75rem;
+
+  /* --- type ----------------------------------------------------------- */
+  --pivot-font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  --pivot-font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
+    monospace;
+
+  /* --- elevation ------------------------------------------------------ */
+  --pivot-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --pivot-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  --pivot-shadow-lg:
+    0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+}
+
+/*
+ * Dark theme.
+ *
+ * Applied by the data-theme attribute rather than a media query alone, because
+ * a user's explicit choice has to beat the operating system's. index.html sets
+ * the attribute before first paint so there is no flash of the wrong theme.
+ *
+ * The media query is kept as the fallback for the case where the inline script
+ * could not run — blocked storage, a locked-down browser — so the page still
+ * respects the system preference rather than defaulting to light.
+ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --pivot-canvas: 9 9 11;
+    --pivot-surface: 24 24 27;
+    --pivot-surface-raised: 39 39 42;
+    --pivot-surface-sunken: 9 9 11;
+    --pivot-overlay: 0 0 0;
+
+    --pivot-text: 250 250 250;
+    --pivot-text-muted: 161 161 170;
+    --pivot-text-subtle: 113 113 122;
+    --pivot-text-inverted: 24 24 27;
+
+    --pivot-border: 39 39 42;
+    --pivot-border-strong: 63 63 70;
+
+    --pivot-accent: 59 130 246;
+    --pivot-accent-hover: 96 165 250;
+    --pivot-accent-text: 255 255 255;
+    --pivot-accent-subtle: 30 41 59;
+
+    --pivot-success: 34 197 94;
+    --pivot-warning: 245 158 11;
+    --pivot-danger: 239 68 68;
+    --pivot-danger-hover: 248 113 113;
+    --pivot-info: 34 211 238;
+  }
+}
+
+:root[data-theme="dark"] {
+  --pivot-canvas: 9 9 11;
+  --pivot-surface: 24 24 27;
+  --pivot-surface-raised: 39 39 42;
+  --pivot-surface-sunken: 9 9 11;
+  --pivot-overlay: 0 0 0;
+
+  --pivot-text: 250 250 250;
+  --pivot-text-muted: 161 161 170;
+  --pivot-text-subtle: 113 113 122;
+  --pivot-text-inverted: 24 24 27;
+
+  --pivot-border: 39 39 42;
+  --pivot-border-strong: 63 63 70;
+
+  --pivot-accent: 59 130 246;
+  --pivot-accent-hover: 96 165 250;
+  --pivot-accent-text: 255 255 255;
+  --pivot-accent-subtle: 30 41 59;
+
+  --pivot-success: 34 197 94;
+  --pivot-warning: 245 158 11;
+  --pivot-danger: 239 68 68;
+  --pivot-danger-hover: 248 113 113;
+  --pivot-info: 34 211 238;
+}

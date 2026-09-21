@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <!--
+      Applies the stored theme before first paint. External rather than
+      inline because the shell is served with `script-src 'self'`, which
+      blocks inline scripts; and render-blocking on purpose, because
+      running after paint would show a flash of the wrong theme.
+    -->
+    <script src="/theme-init.js"></script>
+
+    <title>Pivot</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

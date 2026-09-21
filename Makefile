@@ -97,6 +97,92 @@ dev-db-reset: ## Destroy and recreate the development Postgres volume
 dev-db-url: ## Print the development Postgres URL
 	@echo '$(DEV_PG_URL)'
 
+# ── Frontend ─────────────────────────────────────────────────────────────────
+#
+# Vite builds static assets into web/dist, which web/embed.go compiles into the
+# binary. Nothing here runs in production - ADR-0002 rejects an SSR framework
+# precisely so that no Node process has to be deployed.
+#
+# The Go build does not depend on these targets. web/dist ships with a
+# committed placeholder, so `make build` works on a machine with no Node and
+# the server explains itself rather than failing. `make all` is the one that
+# produces a binary with a real frontend in it.
+WEB_DIR := web
+
+.PHONY: web-install
+web-install: ## Install frontend dependencies (large download, run once)
+	cd $(WEB_DIR) && npm install
+
+$(WEB_DIR)/node_modules:
+	@echo "frontend dependencies are missing; run 'make web-install'" && exit 1
+
+.PHONY: web-build
+web-build: $(WEB_DIR)/node_modules ## Type-check and build the browser application
+	cd $(WEB_DIR) && npm run build
+	@$(MAKE) --no-print-directory web-keep
+
+# web-keep restores the embed placeholder.
+#
+# Vite's emptyOutDir wipes web/dist on every build, .gitkeep included. Without
+# it `//go:embed all:dist` fails on a fresh clone, so a developer who built the
+# frontend and then committed would break the Go build for everyone who had
+# not. Restoring it after each build makes that impossible rather than
+# remembered.
+.PHONY: web-keep
+web-keep:
+	@mkdir -p $(WEB_DIR)/dist
+	@[ -f $(WEB_DIR)/dist/.gitkeep ] || printf '%s\n' \
+		'Keeps this directory in git so that `//go:embed all:dist` in ../embed.go has' \
+		'something to embed on a fresh clone. Vite'"'"'s emptyOutDir deletes it on every' \
+		'build, so `make web-build` and `make web-clean` both put it back -- without it,' \
+		'`go build ./...` fails on a machine that has never run the frontend build.' \
+		> $(WEB_DIR)/dist/.gitkeep
+
+.PHONY: web-typecheck
+web-typecheck: $(WEB_DIR)/node_modules ## Type-check the frontend without building
+	cd $(WEB_DIR) && npm run typecheck
+
+.PHONY: web-clean
+web-clean: ## Remove built frontend assets, keeping the embed placeholder
+	@find $(WEB_DIR)/dist -mindepth 1 ! -name '.gitkeep' -delete 2>/dev/null || true
+	@$(MAKE) --no-print-directory web-keep
+	@echo "cleaned $(WEB_DIR)/dist"
+
+.PHONY: all
+all: web-build build ## Build the frontend and embed it in the binary
+
+.PHONY: dev
+dev: $(WEB_DIR)/node_modules ## Run both sides with reload: Vite on :5173, Go on :8080
+	@echo "Vite  http://localhost:5173  (proxies /api to :8080)"
+	@echo "Go    http://localhost:8080"
+	@echo "Ctrl-C stops both."
+	@trap 'kill 0' EXIT INT TERM; \
+	( cd $(WEB_DIR) && npm run dev ) & \
+	$(MAKE) --no-print-directory dev-go & \
+	wait
+
+# dev-go restarts the server whenever a .go file changes.
+#
+# Polling with find rather than adding a file-watcher dependency: it is a
+# second of latency on a rebuild nobody is waiting on, and it works the same on
+# every machine without another tool to install.
+.PHONY: dev-go
+dev-go:
+	@stamp=$$(mktemp); \
+	trap 'rm -f $$stamp; kill 0' EXIT INT TERM; \
+	while true; do \
+		go run ./cmd/pivot serve & \
+		pid=$$!; \
+		touch $$stamp; \
+		while [ -z "$$(find . -name '*.go' -newer $$stamp -not -path './web/node_modules/*' -print -quit)" ]; do \
+			sleep 1; \
+			kill -0 $$pid 2>/dev/null || break; \
+		done; \
+		kill $$pid 2>/dev/null || true; \
+		wait $$pid 2>/dev/null || true; \
+		echo "--- restarting after a change ---"; \
+	done
+
 # ── Quality ──────────────────────────────────────────────────────────────────
 #
 # TEST_FLAGS carries -p 1, which serializes *packages* (subtests inside a

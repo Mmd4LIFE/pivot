@@ -1,0 +1,4 @@
+Keeps this directory in git so that `//go:embed all:dist` in ../embed.go has
+something to embed on a fresh clone. Vite's emptyOutDir deletes it on every
+build, so `make web-build` and `make web-clean` both put it back -- without it,
+`go build ./...` fails on a machine that has never run the frontend build.

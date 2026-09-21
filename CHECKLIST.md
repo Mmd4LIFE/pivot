@@ -53,8 +53,8 @@ At the end of every part, in this order:
 
 | | |
 |---|---|
-| **Last completed** | Part 8-b — SSO endpoints and Keycloak conformance |
-| **Next up** | **Part 9 — Frontend scaffold, embedded in the binary** |
+| **Last completed** | Part 9 — Frontend scaffold, embedded in the binary |
+| **Next up** | **Part 10 — Design system core** |
 | **Current phase** | Phase 0 — Foundations |
 | **Branch** | `main` |
 | **Blockers** | None |
@@ -64,9 +64,10 @@ At the end of every part, in this order:
 logging, `/healthz`, `/readyz` (including a database check), and a graceful drain on
 SIGTERM. **A user can log in over HTTP and call an authenticated endpoint.**
 `pivot migrate up|status|version|create` manages schema v5 on **both** SQLite and
-Postgres. `pivot config show|env` reports configuration. Packages with real code:
-`version`, `config`, `logging`, `api`, `auth`, `authz`, `oidc`, `cli`, `store`. Still
-`doc.go` stubs: `connectors`, `semantic`, `query`.
+Postgres. `pivot config show|env` reports configuration. **`make all` produces one 20 MB
+binary that serves the React application and the API together**, with no Node at runtime.
+Packages with real code: `version`, `config`, `logging`, `api`, `auth`, `authz`, `oidc`,
+`cli`, `store`, `web`. Still `doc.go` stubs: `connectors`, `semantic`, `query`.
 
 **Dependencies:** cobra, yaml.v3, goose, pgx/v5, modernc.org/sqlite (pure Go — no CGo, so
 Part 13's six-platform cross-compile stays a single build matrix), google/uuid,
@@ -141,6 +142,27 @@ expiry policy rather than two. **`server.baseURL`** sets the redirect URI; empty
 it from the request, which is right locally and wrong behind a proxy that rewrites the
 scheme or Host.
 
+**Frontend:** Vite 6 + React 19 + TypeScript 5.9 + Tailwind 4, with TanStack Router and
+Query. `web/embed.go` embeds `web/dist` and serves it as the catch-all outside the API
+prefix. **`web/dist` ships with a committed placeholder**, so `go build ./...` and the
+whole Go suite work on a machine with no Node — a backend-only contributor never runs the
+frontend build, and the server explains itself rather than 404ing when none is embedded.
+Hashed assets under `/assets/` get a year and `immutable`; the shell is never cached,
+because it names those hashed files and a stale copy is the white screen only a hard
+refresh fixes. A missing file is a **404, never the shell** — answering HTML for a missing
+`.js` produces a MIME error rather than a missing-file one, which is a confusing hour.
+
+**The application gets its own CSP.** The API's `default-src 'none'` is right for JSON and
+would render a blank page, which Part 5 anticipated. The document policy allows `'self'`
+scripts and no inline ones — so the theme bootstrap is `/theme-init.js`, render-blocking
+so it still beats first paint.
+
+**Design tokens are runtime CSS custom properties** (`--pivot-*`), mapped into Tailwind
+with `@theme inline`. That is what makes Phase 8's white-label embedding a configuration
+change rather than a rebuild, and it is asserted: the built CSS must contain `var(--pivot-`
+and must not contain Tailwind 3's `<alpha-value>` placeholder, which Tailwind 4 emits
+verbatim and browsers silently discard.
+
 **Tenant isolation:** `internal/tenant.Scope` has unexported fields and no usable zero
 value. Repositories take **no org parameter at all** — they read the scope from the
 context — so a caller cannot pass the wrong tenant because there is nothing to pass.
@@ -209,6 +231,15 @@ needs an entry in `sqlc.yaml`'s SQLite override list**, or the packages silently
   `TestQueryFilesAreASCII` now fails by name instead. Same mechanism as Part 3-b's
   `?`-in-a-comment bug, and `sqlc.arg` is avoided in SQLite files for a third variant of
   it — `TestSQLiteQueriesAvoidNamedArguments` guards that one.
+- **Node is 20.16.0, and that is the toolchain's binding constraint.** Vite 7/8 and
+  `@vitejs/plugin-react` 5/6 require `^20.19 || >=22.12`. npm skips an optional dependency
+  whose engines do not match **silently**, so Vite 8 fails with
+  `Cannot find module '../rolldown-binding.linux-x64-gnu.node'` — which points at npm
+  rather than at Node. `web/package.json` declares `engines` so the next person sees a
+  warning instead. Upgrading Node to 20.19+ or 22 LTS unblocks the newer Vite.
+- **`make web-install` once per clone** (~102 MB in `web/node_modules`). `make build`
+  deliberately does *not* depend on it; `make all` is the target that builds the frontend
+  and embeds it.
 - **Lint enforces US spelling** (`misspell`, `locale: US`) and rejects both `err` shadowing
   (govet) and `err` reassignment (gocritic) — give the inner error a distinct name.
 
@@ -217,7 +248,7 @@ needs an entry in `sqlc.yaml`'s SQLite override list**, or the packages silently
 ## Progress
 
 ```
-Phase 0  Foundations        [█████████████       ] 13/20   (Parts 3, 4, 6, 7 and 8 each split)
+Phase 0  Foundations        [██████████████      ] 14/20   (Parts 3, 4, 6, 7 and 8 each split)
 Phase 1  Connect & Query    [                    ]  0/12   (detailed at Part 15)
 Phase 2+ ...                                            (expanded as we approach)
 ```
@@ -654,7 +685,7 @@ this part's plan and should have been. Mutation-verified.
 
 ---
 
-### - [ ] Part 9 — Frontend scaffold, embedded in the binary
+### - [x] Part 9 — Frontend scaffold, embedded in the binary ✅ 2026-09-21
 
 **Deliverable:** `./pivot serve` serves a React app from the single binary. No Node at
 runtime.
@@ -669,17 +700,27 @@ runtime.
 - `make dev` runs Vite dev server + Go with hot reload; `make build` embeds the built assets
 
 **Done when:**
-```bash
-make build && ./bin/pivot serve   # serves the React app from ONE binary
-ldd ./bin/pivot                    # no Node runtime anywhere
-```
-Plus: deep-linking to a client route works (SPA fallback), and `make dev` hot-reloads both
-sides.
+- `make all && ./bin/pivot serve` serves the React app from one 20 MB binary ✅
+  *(verified live: shell, hashed assets, deep link, and the API all from one process)*
+- `ldd ./bin/pivot` shows libc and nothing else — no Node anywhere ✅
+- Deep-linking to a client route works ✅ *(`/settings/users` returns the shell;
+  `/assets/nope.js` returns 404 rather than HTML, which is what stops a bad deploy
+  producing a baffling MIME error)*
+- `make dev` reloads both sides ✅ *(Vite HMR for the frontend; the Go server restarts on
+  a `.go` change, polled with `find` rather than adding a watcher dependency)*
 
-**Notes:** Node isn't installed on this machine yet, and `npm install` for this dependency
-set is a large download on a slow link (see the environment notes in Current state). Hand
-the user the install commands rather than running them in-session. Consider `pnpm` for a
-smaller, faster install.
+**Two bugs shipped and were caught by reading the compiled output, not the page.**
+`<alpha-value>` is Tailwind 3 syntax — Tailwind 4 emits it verbatim, the browser discards
+the declaration, and every themed utility silently did nothing. And the theme bootstrap
+was an inline `<script>`, which `script-src 'self'` blocks outright. Both are now tests:
+the built CSS must contain `var(--pivot-` and no `<alpha-value>`, and the shell must
+contain no inline script. Both mutation-verified.
+
+**Node 20.16 is the constraint on the toolchain.** Vite 7/8 and `@vitejs/plugin-react`
+5/6 all require `^20.19 || >=22.12`, so the stack is pinned to Vite 6 — which is what
+[ADR-0002](docs/architecture/adr/0002-frontend-stack.md#amendments) chose anyway. **Part
+12 should pin a Node version in CI**, which makes this a property of the project rather
+than of one machine.
 
 **Refs:** `P0-FE-001` … `P0-FE-004`, `P0-API-007`, `P0-PKG-001`
 
@@ -858,6 +899,7 @@ Newest first. Record what **actually** shipped, including what didn't work.
 
 | Date | Part | Shipped | Notes |
 |---|---|---|---|
+| 2026-09-21 | 9 | Vite 6 + React 19 + TS 5.9 + Tailwind 4 scaffold, TanStack Router and Query, a typed API client over the generated schema, design tokens as runtime CSS variables, `web/embed.go` with SPA fallback and caching, a document CSP, `make all` / `web-*` / `dev` targets, and 12 Go tests over the serving rules | **Two bugs shipped and were found by reading the compiled output, not the page.** `<alpha-value>` is Tailwind 3 syntax; Tailwind 4 emits it verbatim, browsers discard the whole declaration, and every themed utility silently did nothing — no error anywhere. And the theme bootstrap was an inline `<script>`, which the shell's `script-src 'self'` blocks outright, so the stored theme preference was never applied. Both are now mutation-verified tests. **A test of mine was wrong twice in one session:** first it passed against a mutation that does not actually break the property (`@theme` vs `@theme inline` — both preserve the indirection, contrary to my comment), then the strengthened version failed on a *clean* build because Tailwind 4's own `@property` rules legitimately contain `syntax:"<length>"`. Narrowed to the literal `<alpha-value>`. **Node 20.16 turned out to be the binding constraint on the whole toolchain.** Vite 7/8 and plugin-react 5/6 all need `^20.19 || >=22.12`; npm skips the mismatched optional native binding *silently*, so the failure reads as an npm bug rather than a Node one. Pinned to Vite 6 — which is what ADR-0002 chose anyway — with `engines` declared so the next person gets a legible warning, and a note for Part 12 to pin Node in CI. The Go tests run against a synthetic asset tree, so they pass on a clean checkout where no frontend has been built, which is exactly the case they most need to protect. |
 | 2026-09-21 | 8-b | `/auth/oidc/{provider}/{start,callback}`, the public provider list, admin CRUD for providers gated on `manage_organization`, `auth.Service.StartSession` shared with password login, `pivot admin add-provider`, `server.baseURL`, spec + TS client, and an opt-in Keycloak conformance test | **Discovery ran against Google's real OIDC issuer, live.** The Keycloak container test exists and skips unless `PIVOT_TEST_KEYCLOAK_URL` is set — the image is a large pull, and a suite that needs a container is a suite people stop running — but the live check turned out stronger than the plan: a complete authorization request against a genuinely independent implementation, with S256 challenge, nonce, state and `scope=openid` all present. **Added an open-redirect guard that was not in the plan.** The post-login `return` path accepted anything; `//evil.example` and `/\evil.example` both redirect off-site in real browsers, and an open redirect on the login route is what makes a phishing link convincing. Only a same-site absolute path is honored now, mutation-verified. **`SameSite=Lax` on the flow cookie is load-bearing, not a default.** Strict would withhold it on the callback, which arrives as a top-level navigation from the provider's origin — every login would break. A test asserts Lax specifically. **Session creation was factored, not duplicated:** SSO calls the same `StartSession` the password path does, so there is one expiry policy rather than two, and only one of two would have been covered by the tests that matter. Mutation-verified twice: deleting the state check and deleting the protocol-relative guard each fail tests by name. gosec flagged the start redirect as a taint-analysis open redirect; it is not — the destination is the configured provider's own discovered endpoint — and the nolint says why rather than just silencing it. |
 | 2026-09-21 | 8-a | `internal/oidc` (discovery with caching, PKCE, ID token verification, claim mapping), schema v5 `identity_providers` + `federated_identities`, `IdentityProviderRepo`, JIT provisioning with group and attribute sync, and an in-process identity provider that signs real RS256 tokens | **Split Part 8** — the protocol and provisioning domain is a session, the endpoints and Keycloak conformance are another. **A test of mine found a real hole in my own design.** I asserted that a recycled email address must not hand over the original account; it did, because my provisioning linked by email unconditionally. Closing the front door (match on `sub`) while leaving the side door open (link on email) is worth exactly nothing. Fixed by making `link_by_email` **opt-in per provider and off by default**, and requiring `email_verified` even when it is on. Two new tests pin the default down. The migration was edited in place rather than amended, because it had not been committed or applied anywhere. Also added email sync for returning users, which is safe precisely because identity was already settled by subject — the address moves, the account cannot. **The rejection paths are tested by breaking tokens on purpose:** bad signature, foreign issuer, replayed nonce, mismatched PKCE verifier. That is the whole reason for the in-process provider — a real Keycloak will not issue you a token it has broken — and it sits alongside 8-b's container test rather than replacing it. Signature verification is mutation-verified: turning it off fails two tests by name. `go-oidc` was chosen over hand-rolling because ID token verification is not something to hand-roll; it costs two direct requires. 12 Postgres subtests, 0 skips. |
 | 2026-09-21 | 7-b | `api.RequirePermission`, the role catalog and role-assignment endpoints, administrative session revoke, effective permissions on `/auth/me`, `pivot admin grant-role` / `revoke-role`, first-user-becomes-admin, last-admin protection, and 13 endpoint-level rows added to the same assertion file | **The endpoint table is the part worth keeping.** `internal/authz` asserts what the checker *decides*; this asserts that the HTTP surface actually *asks* it — a different failure, and the likelier one, since a model can be perfectly correct while a route forgets to be gated. Both halves read one specification file. **Mutation-verified:** dropping `RequirePermission` from the role routes fails three rows by name with `= 200, want 403`. **403 and 503 are deliberately different answers.** A denial is a decision; an unreachable checker is not. Answering 403 during an outage would send a properly-permitted user to argue with an administrator about a permission they already have. A nil checker denies as well, so an instance that booted without authorization wired up cannot serve as though everyone were an admin. **Closed the referential gap 7-a recorded**: grants now verify the subject exists in the caller's organization, and deleting a user or group revokes its grants — the columns are polymorphic so nothing cascades on its own. **The first user in an organization becomes its admin**, without which a fresh install has nobody who can grant anything and is complete and unusable; the second user gets nothing, so it is not a standing escalation. All four `Done when` items verified against a live server, including the last-admin refusal (422, and the admin keeps access afterwards). **US spelling caught me again** — `catalogue` failed lint three times; the environment note exists and I still wrote it. |

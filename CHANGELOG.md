@@ -13,6 +13,26 @@ newest first within each section.
 
 ### Added
 
+**The browser application, in the binary — Part 9**
+- Vite 6 + React 19 + TypeScript + Tailwind 4, with TanStack Router and Query
+- **One binary serves the application and the API.** Vite builds static
+  assets, `embed.FS` compiles them in, and the Go process serves them. No Node
+  at runtime and nothing to deploy alongside
+- `web/dist` ships with a placeholder, so `go build` and the Go test suite work
+  on a machine with no Node. A server with no frontend embedded explains how to
+  build one rather than returning a bare 404
+- Hashed assets get a year and `immutable`; the application shell is never
+  cached, because it names those hashed files and a stale copy is the white
+  screen that only a hard refresh fixes
+- A missing file is a 404, never the shell. Answering HTML for a missing `.js`
+  produces a MIME-type error in the console rather than a missing-file one
+- The shell gets its own content security policy. The API's `default-src
+  'none'` is correct for JSON and would render a blank page
+- **Design tokens are runtime CSS custom properties**, which is what makes
+  Phase 8's white-label embedding a configuration change rather than a rebuild
+- `make all` builds both sides; `make dev` runs Vite with hot reload and
+  restarts the Go server on a change
+
 **Single sign-on over HTTP — Part 8-b**
 - `GET /api/v1/auth/oidc/{provider}/start` and `/callback`, plus
   `GET /api/v1/auth/providers` for the login page's buttons — unauthenticated

@@ -16,6 +16,7 @@ import (
 	"github.com/Mmd4LIFE/pivot/internal/store"
 	"github.com/Mmd4LIFE/pivot/internal/store/repo"
 	"github.com/Mmd4LIFE/pivot/internal/version"
+	"github.com/Mmd4LIFE/pivot/web"
 )
 
 // sweepRetention keeps revoked and expired rows around briefly rather than
@@ -119,7 +120,14 @@ readiness change before the drain begins, so no request is dropped.`,
 				api.WithRoles(api.NewRoleHandler(repos, checker, cache, log)),
 				api.WithOIDC(api.NewOIDCHandler(
 					repos, registry, authSvc, cookie, cfg.Server.BaseURL, log)),
+				api.WithSPA(web.Handler()),
 			)
+
+			if !web.Built() {
+				log.Warn("no frontend is embedded in this binary",
+					slog.String("hint", "run `make web-build && make build`"),
+				)
+			}
 
 			return srv.Run(ctx)
 		},

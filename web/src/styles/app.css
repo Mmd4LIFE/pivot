@@ -1,0 +1,100 @@
+@import "tailwindcss";
+@import "./tokens.css";
+
+/*
+ * Tailwind's theme, mapped onto the semantic tokens.
+ *
+ * `inline` matters here. Without it Tailwind emits its own `--color-*`
+ * variables and utilities reference those, giving two hops to reach a token;
+ * with it, `bg-surface` compiles straight to `rgb(var(--pivot-surface))`. Both
+ * preserve the runtime override, but one indirection is easier to reason about
+ * when debugging a theme, and it is what keeps the emitted CSS small.
+ *
+ * No `<alpha-value>` placeholder: that is Tailwind 3 syntax. Tailwind 4 emits
+ * it *literally*, producing `rgb(var(--x) / <alpha-value>)` — invalid CSS that
+ * every browser silently drops, so every utility using it does nothing at all.
+ * Alpha modifiers like `bg-surface/50` work without it, because Tailwind 4
+ * composes them with color-mix().
+ *
+ * Two Go tests guard this: the built CSS must contain var(--pivot-, or the
+ * indirection is gone, and it must contain no angle brackets, or a placeholder
+ * has survived into the output.
+ */
+@theme inline {
+  --color-canvas: rgb(var(--pivot-canvas));
+  --color-surface: rgb(var(--pivot-surface));
+  --color-surface-raised: rgb(var(--pivot-surface-raised));
+  --color-surface-sunken: rgb(var(--pivot-surface-sunken));
+
+  --color-content: rgb(var(--pivot-text));
+  --color-content-muted: rgb(var(--pivot-text-muted));
+  --color-content-subtle: rgb(var(--pivot-text-subtle));
+  --color-content-inverted: rgb(var(--pivot-text-inverted));
+
+  --color-line: rgb(var(--pivot-border));
+  --color-line-strong: rgb(var(--pivot-border-strong));
+
+  --color-accent: rgb(var(--pivot-accent));
+  --color-accent-hover: rgb(var(--pivot-accent-hover));
+  --color-accent-content: rgb(var(--pivot-accent-text));
+  --color-accent-subtle: rgb(var(--pivot-accent-subtle));
+
+  --color-success: rgb(var(--pivot-success));
+  --color-warning: rgb(var(--pivot-warning));
+  --color-danger: rgb(var(--pivot-danger));
+  --color-danger-hover: rgb(var(--pivot-danger-hover));
+  --color-info: rgb(var(--pivot-info));
+
+  --radius-token: var(--pivot-radius);
+  --radius-token-sm: var(--pivot-radius-sm);
+  --radius-token-lg: var(--pivot-radius-lg);
+
+  --font-sans: var(--pivot-font-sans);
+  --font-mono: var(--pivot-font-mono);
+
+  --shadow-token-sm: var(--pivot-shadow-sm);
+  --shadow-token: var(--pivot-shadow);
+  --shadow-token-lg: var(--pivot-shadow-lg);
+}
+
+@layer base {
+  html {
+    /*
+     * Logical properties throughout, from the start. Arabic and Hebrew are
+     * real markets, and `dir="rtl"` has to be a one-line change rather than a
+     * multi-week retrofit. Part 11 sets dir from the locale; this is what
+     * makes that work.
+     */
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--color-canvas);
+    color: var(--color-content);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /*
+   * A visible focus ring, always. Removing it is the single most common
+   * accessibility regression in an application like this, and the people it
+   * excludes are the ones who cannot use a mouse.
+   */
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  /* Respect a user who has asked for less motion. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}

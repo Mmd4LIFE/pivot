@@ -1,0 +1,8 @@
+node_modules/
+*.tsbuildinfo
+
+# Build output is not committed, but the directory must exist: web/embed.go
+# embeds it, and //go:embed fails on a missing directory. The placeholder is
+# what lets `go build ./...` work on a fresh clone with no Node installed.
+dist/
+!dist/.gitkeep

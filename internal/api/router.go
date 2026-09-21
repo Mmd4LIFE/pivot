@@ -38,6 +38,11 @@ type RouterConfig struct {
 	// registers no SSO surface.
 	OIDC *OIDCHandler
 
+	// SPA serves the browser application on every path that is not an API
+	// call or a health probe. Nil answers those paths with a coded 404, which
+	// is what an API-only deployment and most tests want.
+	SPA http.Handler
+
 	// TenantResolver attributes a request to an organization. When Auth is
 	// configured this defaults to [SessionTenantResolver]; nil with no Auth
 	// leaves the API unscoped, which is valid only in tests.
@@ -176,9 +181,16 @@ func (r *Router) routes() {
 	// rather than net/http's plain-text 404, which a client cannot parse.
 	r.mux.Handle(APIPrefix+"/", authed(http.HandlerFunc(r.handleAPINotFound)))
 
-	// Anything outside the API prefix that is not a probe. Part 9 replaces
-	// this with the SPA fallback.
-	r.mux.HandleFunc("/", r.handleNotFound)
+	// Anything outside the API prefix that is not a probe.
+	//
+	// The application is mounted last and as a catch-all, so it never shadows
+	// the API: Go's mux prefers the more specific pattern, and every API route
+	// is more specific than "/".
+	if r.cfg.SPA != nil {
+		r.mux.Handle("/", r.cfg.SPA)
+	} else {
+		r.mux.HandleFunc("/", r.handleNotFound)
+	}
 }
 
 // withTenant applies tenant scoping when a resolver is configured.

@@ -41,6 +41,9 @@ type Server struct {
 	// oidc serves single sign-on. Nil means no SSO surface.
 	oidc *OIDCHandler
 
+	// spa serves the browser application. Nil serves none.
+	spa http.Handler
+
 	// ready gates /readyz. It flips false the instant shutdown begins, before
 	// draining starts, so a load balancer stops sending new work while
 	// in-flight requests finish.
@@ -86,6 +89,11 @@ func WithOIDC(h *OIDCHandler) Option {
 	return func(s *Server) { s.oidc = h }
 }
 
+// WithSPA serves the browser application outside the API prefix.
+func WithSPA(h http.Handler) Option {
+	return func(s *Server) { s.spa = h }
+}
+
 // New builds a server. It does not bind a port; [Server.Run] does that.
 func New(cfg config.ServerConfig, log *slog.Logger, opts ...Option) *Server {
 	s := &Server{cfg: cfg, log: log}
@@ -108,6 +116,7 @@ func New(cfg config.ServerConfig, log *slog.Logger, opts ...Option) *Server {
 		Auth:           s.auth,
 		Roles:          s.roles,
 		OIDC:           s.oidc,
+		SPA:            s.spa,
 		TenantResolver: s.tenantResolver,
 		Checks:         s.checks,
 	})
