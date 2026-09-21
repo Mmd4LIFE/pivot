@@ -38,6 +38,9 @@ type Server struct {
 	// checker. Nil leaves every endpoint ungated.
 	roles *RoleHandler
 
+	// oidc serves single sign-on. Nil means no SSO surface.
+	oidc *OIDCHandler
+
 	// ready gates /readyz. It flips false the instant shutdown begins, before
 	// draining starts, so a load balancer stops sending new work while
 	// in-flight requests finish.
@@ -78,6 +81,11 @@ func WithRoles(h *RoleHandler) Option {
 	return func(s *Server) { s.roles = h }
 }
 
+// WithOIDC serves single sign-on and identity provider administration.
+func WithOIDC(h *OIDCHandler) Option {
+	return func(s *Server) { s.oidc = h }
+}
+
 // New builds a server. It does not bind a port; [Server.Run] does that.
 func New(cfg config.ServerConfig, log *slog.Logger, opts ...Option) *Server {
 	s := &Server{cfg: cfg, log: log}
@@ -99,6 +107,7 @@ func New(cfg config.ServerConfig, log *slog.Logger, opts ...Option) *Server {
 		CORS:           DefaultCORS(),
 		Auth:           s.auth,
 		Roles:          s.roles,
+		OIDC:           s.oidc,
 		TenantResolver: s.tenantResolver,
 		Checks:         s.checks,
 	})

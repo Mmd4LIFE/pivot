@@ -37,6 +37,8 @@ tags:
     description: Login, logout, and session management
   - name: authorization
     description: Roles and role assignment
+  - name: sso
+    description: Single sign-on and identity providers
   - name: system
     description: Instance metadata
 
@@ -224,6 +226,276 @@ paths:
                 version: 1.0.0
                 checks:
                   database: "error: connection refused"
+
+  /api/v1/auth/providers:
+    get:
+      tags: [sso]
+      operationId: listAuthProviders
+      summary: The single sign-on buttons a login page should offer
+      description: |
+        Unauthenticated by necessity: the login page needs these before anyone
+        has a session. It therefore returns the slug and display name and
+        nothing else — issuer and client id are not secret, but publishing an
+        organization's vendor relationships to anonymous callers buys nothing.
+
+        An unresolvable organization returns an empty list rather than an
+        error, which is true and reveals nothing about which organizations
+        exist.
+      security: []
+      parameters:
+        - name: organization
+          in: query
+          required: false
+          schema:
+            type: string
+          description: |
+            Organization slug. May be omitted when the instance hosts exactly
+            one organization.
+      responses:
+        "200":
+          description: The providers to offer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthProviderList"
+
+  /api/v1/auth/oidc/{provider}/start:
+    get:
+      tags: [sso]
+      operationId: startSSO
+      summary: Begin a single sign-on login
+      description: |
+        Redirects the browser to the identity provider, and sets a short-lived
+        `HttpOnly` cookie holding this login's `state`, `nonce` and PKCE
+        verifier.
+
+        That cookie is `SameSite=Lax` and must be: the callback is a top-level
+        navigation *from the identity provider's origin*, and `Strict` would
+        withhold the cookie there and break every login.
+      security: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: organization
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: return
+          in: query
+          required: false
+          schema:
+            type: string
+          description: |
+            Where to send the browser after the session exists. **Only a
+            same-site absolute path is honored.** An absolute URL, a
+            protocol-relative `//host`, or anything a browser might normalize
+            into one is dropped — an open redirect on the login path is what
+            turns a phishing link into a convincing one.
+      responses:
+        "302":
+          description: Redirect to the identity provider
+          headers:
+            Location:
+              schema:
+                type: string
+        "404":
+          description: |
+            No such provider. A disabled provider is deliberately
+            indistinguishable from one that does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/auth/oidc/{provider}/callback:
+    get:
+      tags: [sso]
+      operationId: completeSSO
+      summary: Complete a single sign-on login
+      description: |
+        Verifies the returned `state` against the flow cookie, redeems the
+        authorization code, verifies the ID token, provisions or resolves the
+        user, and issues a Pivot session — the same session a password login
+        produces.
+
+        The flow cookie is cleared whatever the outcome: a login is single-use,
+        and leaving it behind invites a replay.
+
+        Responds with a redirect for a browser, or the session envelope when
+        the caller asks for `application/json`.
+      security: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: code
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Signed in; the session cookie is set
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionEnvelope"
+        "302":
+          description: Signed in; the browser is redirected onward
+        "401":
+          description: |
+            The login could not be verified. Every reason returns this same
+            answer — which step of a token's validation failed is of interest
+            to an attacker and to nobody else.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: |
+            Verified, but not allowed an account here — provisioning is off,
+            the account is disabled, or the provider sent no verified address.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/organization/identity-providers:
+    get:
+      tags: [sso]
+      operationId: listIdentityProviders
+      summary: The organization's configured identity providers
+      description: |
+        Requires `manage_organization`. Pointing an organization at a different
+        directory is deciding who its users are, which is the same power as
+        granting roles by another route.
+
+        **`clientSecret` is never returned**, to an administrator or anyone
+        else. `hasClientSecret` says whether one is configured.
+      responses:
+        "200":
+          description: The configured providers
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdentityProviderList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+    post:
+      tags: [sso]
+      operationId: createIdentityProvider
+      summary: Configure an identity provider
+      description: Requires `manage_organization`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IdentityProviderRequest"
+      responses:
+        "201":
+          description: Configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdentityProvider"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/organization/identity-providers/{id}:
+    put:
+      tags: [sso]
+      operationId: updateIdentityProvider
+      summary: Change an identity provider
+      description: |
+        Requires `manage_organization`.
+
+        An omitted `clientSecret` keeps the stored one. That is what makes a
+        write-only field usable: an administration screen reads the provider,
+        edits the name, and writes it back without ever having seen the secret
+        and without blanking it.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IdentityProviderRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdentityProvider"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+    delete:
+      tags: [sso]
+      operationId: deleteIdentityProvider
+      summary: Remove an identity provider
+      description: Requires `manage_organization`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Removed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 
   /api/v1/roles:
     get:
@@ -501,6 +773,157 @@ components:
           items:
             type: string
           examples: [[view_content, query]]
+
+    AuthProvider:
+      type: object
+      required: [slug, name]
+      properties:
+        slug:
+          type: string
+          examples: [okta]
+        name:
+          type: string
+          examples: [Okta]
+
+    AuthProviderList:
+      type: object
+      required: [providers]
+      properties:
+        providers:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuthProvider"
+
+    ClaimMapping:
+      type: object
+      description: |
+        Which claim means what. Identity providers disagree about names, so
+        this is configuration rather than a constant. Omitted fields use the
+        standard OpenID Connect names.
+      properties:
+        email:
+          type: string
+          examples: [email]
+        emailVerified:
+          type: string
+          examples: [email_verified]
+        name:
+          type: string
+        groups:
+          type: string
+          examples: [groups]
+        attributes:
+          type: object
+          description: |
+            Claim name to user-attribute key. Only the claims listed here are
+            copied: a provider's token routinely carries things Pivot has no
+            business storing.
+          additionalProperties:
+            type: string
+
+    IdentityProvider:
+      type: object
+      required:
+        [id, slug, name, kind, issuer, clientId, isEnabled, autoProvision,
+         linkByEmail, defaultRole, version, hasClientSecret]
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        name:
+          type: string
+        kind:
+          type: string
+          enum: [oidc]
+        issuer:
+          type: string
+          format: uri
+        clientId:
+          type: string
+        scopes:
+          type: array
+          items:
+            type: string
+        isEnabled:
+          type: boolean
+        autoProvision:
+          type: boolean
+          description: Create a Pivot user on first login.
+        linkByEmail:
+          type: boolean
+          description: |
+            Adopt an existing local account whose **verified** address matches,
+            on first login. **Off by default, and meant to stay off outside a
+            migration.** Directories reassign addresses, and with this on the
+            next holder of an address inherits the previous holder's account.
+        defaultRole:
+          type: string
+        claimMapping:
+          $ref: "#/components/schemas/ClaimMapping"
+        version:
+          type: integer
+          format: int64
+        hasClientSecret:
+          type: boolean
+          description: |
+            Whether a client secret is configured, without saying what it is.
+            There is no read path for the secret itself.
+
+    IdentityProviderList:
+      type: object
+      required: [providers]
+      properties:
+        providers:
+          type: array
+          items:
+            $ref: "#/components/schemas/IdentityProvider"
+
+    IdentityProviderRequest:
+      type: object
+      required: [slug, name, issuer, clientId]
+      properties:
+        slug:
+          type: string
+          maxLength: 100
+          description: URL segment; lowercase letters, digits and hyphens.
+        name:
+          type: string
+        issuer:
+          type: string
+          format: uri
+          description: |
+            Must be an `https` URL, or `http` on a loopback host for a local
+            provider.
+        clientId:
+          type: string
+        clientSecret:
+          type: string
+          format: password
+          description: |
+            **Write-only.** Omit on update to keep the stored value. May be
+            empty: PKCE is always used, so a provider configured as a public
+            client needs no secret.
+        scopes:
+          type: array
+          items:
+            type: string
+        isEnabled:
+          type: boolean
+        autoProvision:
+          type: boolean
+        linkByEmail:
+          type: boolean
+        defaultRole:
+          type: string
+          enum: [admin, editor, analyst, viewer]
+        claimMapping:
+          $ref: "#/components/schemas/ClaimMapping"
+        version:
+          type: integer
+          format: int64
+          description: Required on update, for optimistic concurrency.
 
     RoleDescription:
       type: object

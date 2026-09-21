@@ -12,6 +12,7 @@ import (
 	"github.com/Mmd4LIFE/pivot/internal/auth"
 	"github.com/Mmd4LIFE/pivot/internal/authz"
 	"github.com/Mmd4LIFE/pivot/internal/logging"
+	"github.com/Mmd4LIFE/pivot/internal/oidc"
 	"github.com/Mmd4LIFE/pivot/internal/store"
 	"github.com/Mmd4LIFE/pivot/internal/store/repo"
 	"github.com/Mmd4LIFE/pivot/internal/version"
@@ -97,18 +98,27 @@ readiness change before the drain begins, so no request is dropped.`,
 
 			checker, cache := authz.New(repos)
 
+			cookie := api.CookieConfig{
+				Name:   cfg.Auth.CookieName,
+				Path:   "/",
+				Domain: cfg.Auth.CookieDomain,
+				Secure: cfg.Auth.CookieSecure,
+			}
+
+			// One registry per process: it caches provider discovery, so
+			// sharing it is what turns a per-login round trip into a per-hour
+			// one.
+			registry := oidc.NewRegistry()
+
 			srv := api.New(cfg.Server, log,
 				api.WithCheck(api.Check{
 					Name: "database",
 					Func: db.HealthCheck,
 				}),
-				api.WithAuth(api.NewAuthHandler(authSvc, repos, api.CookieConfig{
-					Name:   cfg.Auth.CookieName,
-					Path:   "/",
-					Domain: cfg.Auth.CookieDomain,
-					Secure: cfg.Auth.CookieSecure,
-				}, log)),
+				api.WithAuth(api.NewAuthHandler(authSvc, repos, cookie, log)),
 				api.WithRoles(api.NewRoleHandler(repos, checker, cache, log)),
+				api.WithOIDC(api.NewOIDCHandler(
+					repos, registry, authSvc, cookie, cfg.Server.BaseURL, log)),
 			)
 
 			return srv.Run(ctx)

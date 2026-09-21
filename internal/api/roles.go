@@ -94,6 +94,11 @@ func (b *grantRoleRequest) Validate() []Detail {
 	return details
 }
 
+// isBuiltinRoleName reports whether a string names a built-in role.
+func isBuiltinRoleName(role string) bool {
+	return authz.IsBuiltinRole(authz.Relation(role))
+}
+
 func joinRoles() string {
 	out := ""
 

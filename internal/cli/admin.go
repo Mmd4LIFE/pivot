@@ -40,6 +40,7 @@ administrator. Anyone who can run them already has the database credentials.`,
 		newResetPasswordCmd(env, flags),
 		newGrantRoleCmd(env, flags),
 		newRevokeRoleCmd(env, flags),
+		newAddProviderCmd(env, flags),
 	)
 
 	return cmd
@@ -580,6 +581,119 @@ are doing, and a recovery tool that argues with you is not much of one.`,
 	cmd.Flags().StringVar(&email, "email", "", "Email address (required)")
 	cmd.Flags().StringVar(&role, "role", "admin", "Role to revoke")
 	cmd.Flags().StringVar(&orgSlug, "org", "", "Organization slug; omit when only one exists")
+
+	return cmd
+}
+
+func newAddProviderCmd(env Env, flags *globalFlags) *cobra.Command {
+	var (
+		slug, name, issuer, clientID, orgSlug string
+		scopes, defaultRole                   string
+		linkByEmail, noProvision              bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "add-provider",
+		Short: "Configure an OpenID Connect identity provider",
+		Long: `Configure single sign-on for an organization.
+
+This exists because the HTTP endpoint that does the same thing requires an
+administrator to be logged in, and an organization that wants SSO from the
+outset has nobody who can be.
+
+The client secret is read from PIVOT_OIDC_CLIENT_SECRET rather than a flag: a
+secret passed as an argument lands in the shell history and in the process
+list. Leave it unset for a public client, which is safe because PKCE is always
+used.
+
+--link-by-email is off by default and should stay off outside a migration. It
+adopts an existing local account whose verified address matches on first
+login, which is how an organization moves its users onto SSO -- and also how a
+recycled address becomes an account takeover once the migration is done.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			for flag, value := range map[string]string{
+				"--slug": slug, "--name": name, "--issuer": issuer, "--client-id": clientID,
+			} {
+				if value == "" {
+					return fmt.Errorf("%s is required", flag)
+				}
+			}
+
+			if defaultRole != "" && !authz.IsBuiltinRole(authz.Relation(defaultRole)) {
+				return validRole(defaultRole)
+			}
+
+			db, repos, err := openRepos(cmd, env, flags)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = db.Close() }()
+
+			orgID, orgName, err := resolveOrg(cmd, repos, orgSlug)
+			if err != nil {
+				return err
+			}
+
+			scope, err := tenant.NewSystemScope(orgID)
+			if err != nil {
+				return err
+			}
+
+			ctx := tenant.WithScope(cmd.Context(), scope)
+
+			lookup := env.Lookup
+			if lookup == nil {
+				lookup = os.LookupEnv
+			}
+
+			secret, _ := lookup("PIVOT_OIDC_CLIENT_SECRET")
+
+			provider, err := repos.IdentityProviders.Create(ctx, repo.CreateIdentityProvider{
+				Slug:          slug,
+				Name:          name,
+				Issuer:        strings.TrimRight(issuer, "/"),
+				ClientID:      clientID,
+				ClientSecret:  secret,
+				Scopes:        scopes,
+				IsEnabled:     true,
+				AutoProvision: !noProvision,
+				LinkByEmail:   linkByEmail,
+				DefaultRole:   defaultRole,
+			})
+			if err != nil {
+				if errors.Is(err, repo.ErrDuplicate) {
+					return fmt.Errorf("a provider with slug %q already exists in %q", slug, orgName)
+				}
+
+				return err
+			}
+
+			fmt.Fprintf(env.Stdout, "Configured %s (%s) in organization %s.\n",
+				provider.Name, provider.Slug, orgName)
+			fmt.Fprintf(env.Stdout, "Register this redirect URI with the provider:\n  %s\n",
+				"<your base URL>/api/v1/auth/oidc/"+provider.Slug+"/callback")
+
+			if secret == "" {
+				fmt.Fprintln(env.Stderr,
+					"note: no client secret set; this is a public client relying on PKCE")
+			}
+
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&slug, "slug", "", "URL segment for this provider (required)")
+	cmd.Flags().StringVar(&name, "name", "", "Display name shown on the login page (required)")
+	cmd.Flags().StringVar(&issuer, "issuer", "", "OIDC issuer URL (required)")
+	cmd.Flags().StringVar(&clientID, "client-id", "", "OAuth client ID (required)")
+	cmd.Flags().StringVar(&orgSlug, "org", "", "Organization slug; omit when only one exists")
+	cmd.Flags().StringVar(&scopes, "scopes", "openid profile email", "Space-separated scopes")
+	cmd.Flags().StringVar(&defaultRole, "default-role", "viewer", "Role granted to provisioned users")
+	cmd.Flags().BoolVar(&linkByEmail, "link-by-email", false,
+		"Adopt an existing account with a matching verified address on first login")
+	cmd.Flags().BoolVar(&noProvision, "no-provision", false,
+		"Refuse unknown identities rather than creating accounts for them")
 
 	return cmd
 }

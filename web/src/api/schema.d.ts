@@ -170,6 +170,146 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The single sign-on buttons a login page should offer
+         * @description Unauthenticated by necessity: the login page needs these before anyone
+         *     has a session. It therefore returns the slug and display name and
+         *     nothing else — issuer and client id are not secret, but publishing an
+         *     organization's vendor relationships to anonymous callers buys nothing.
+         *
+         *     An unresolvable organization returns an empty list rather than an
+         *     error, which is true and reveals nothing about which organizations
+         *     exist.
+         */
+        get: operations["listAuthProviders"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/oidc/{provider}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Begin a single sign-on login
+         * @description Redirects the browser to the identity provider, and sets a short-lived
+         *     `HttpOnly` cookie holding this login's `state`, `nonce` and PKCE
+         *     verifier.
+         *
+         *     That cookie is `SameSite=Lax` and must be: the callback is a top-level
+         *     navigation *from the identity provider's origin*, and `Strict` would
+         *     withhold the cookie there and break every login.
+         */
+        get: operations["startSSO"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/oidc/{provider}/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Complete a single sign-on login
+         * @description Verifies the returned `state` against the flow cookie, redeems the
+         *     authorization code, verifies the ID token, provisions or resolves the
+         *     user, and issues a Pivot session — the same session a password login
+         *     produces.
+         *
+         *     The flow cookie is cleared whatever the outcome: a login is single-use,
+         *     and leaving it behind invites a replay.
+         *
+         *     Responds with a redirect for a browser, or the session envelope when
+         *     the caller asks for `application/json`.
+         */
+        get: operations["completeSSO"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organization/identity-providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The organization's configured identity providers
+         * @description Requires `manage_organization`. Pointing an organization at a different
+         *     directory is deciding who its users are, which is the same power as
+         *     granting roles by another route.
+         *
+         *     **`clientSecret` is never returned**, to an administrator or anyone
+         *     else. `hasClientSecret` says whether one is configured.
+         */
+        get: operations["listIdentityProviders"];
+        put?: never;
+        /**
+         * Configure an identity provider
+         * @description Requires `manage_organization`.
+         */
+        post: operations["createIdentityProvider"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organization/identity-providers/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Change an identity provider
+         * @description Requires `manage_organization`.
+         *
+         *     An omitted `clientSecret` keeps the stored one. That is what makes a
+         *     write-only field usable: an administration screen reads the provider,
+         *     edits the name, and writes it back without ever having seen the secret
+         *     and without blanking it.
+         */
+        put: operations["updateIdentityProvider"];
+        post?: never;
+        /**
+         * Remove an identity provider
+         * @description Requires `manage_organization`.
+         */
+        delete: operations["deleteIdentityProvider"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/roles": {
         parameters: {
             query?: never;
@@ -355,6 +495,102 @@ export interface components {
              *     ]
              */
             permissions?: string[];
+        };
+        AuthProvider: {
+            /** @example okta */
+            slug: string;
+            /** @example Okta */
+            name: string;
+        };
+        AuthProviderList: {
+            providers: components["schemas"]["AuthProvider"][];
+        };
+        /**
+         * @description Which claim means what. Identity providers disagree about names, so
+         *     this is configuration rather than a constant. Omitted fields use the
+         *     standard OpenID Connect names.
+         */
+        ClaimMapping: {
+            /** @example email */
+            email?: string;
+            /** @example email_verified */
+            emailVerified?: string;
+            name?: string;
+            /** @example groups */
+            groups?: string;
+            /**
+             * @description Claim name to user-attribute key. Only the claims listed here are
+             *     copied: a provider's token routinely carries things Pivot has no
+             *     business storing.
+             */
+            attributes?: {
+                [key: string]: string;
+            };
+        };
+        IdentityProvider: {
+            /** Format: uuid */
+            id: string;
+            slug: string;
+            name: string;
+            /** @enum {string} */
+            kind: "oidc";
+            /** Format: uri */
+            issuer: string;
+            clientId: string;
+            scopes?: string[];
+            isEnabled: boolean;
+            /** @description Create a Pivot user on first login. */
+            autoProvision: boolean;
+            /**
+             * @description Adopt an existing local account whose **verified** address matches,
+             *     on first login. **Off by default, and meant to stay off outside a
+             *     migration.** Directories reassign addresses, and with this on the
+             *     next holder of an address inherits the previous holder's account.
+             */
+            linkByEmail: boolean;
+            defaultRole: string;
+            claimMapping?: components["schemas"]["ClaimMapping"];
+            /** Format: int64 */
+            version: number;
+            /**
+             * @description Whether a client secret is configured, without saying what it is.
+             *     There is no read path for the secret itself.
+             */
+            hasClientSecret: boolean;
+        };
+        IdentityProviderList: {
+            providers: components["schemas"]["IdentityProvider"][];
+        };
+        IdentityProviderRequest: {
+            /** @description URL segment; lowercase letters, digits and hyphens. */
+            slug: string;
+            name: string;
+            /**
+             * Format: uri
+             * @description Must be an `https` URL, or `http` on a loopback host for a local
+             *     provider.
+             */
+            issuer: string;
+            clientId: string;
+            /**
+             * Format: password
+             * @description **Write-only.** Omit on update to keep the stored value. May be
+             *     empty: PKCE is always used, so a provider configured as a public
+             *     client needs no secret.
+             */
+            clientSecret?: string;
+            scopes?: string[];
+            isEnabled?: boolean;
+            autoProvision?: boolean;
+            linkByEmail?: boolean;
+            /** @enum {string} */
+            defaultRole?: "admin" | "editor" | "analyst" | "viewer";
+            claimMapping?: components["schemas"]["ClaimMapping"];
+            /**
+             * Format: int64
+             * @description Required on update, for optimistic concurrency.
+             */
+            version?: number;
         };
         RoleDescription: {
             /** @example analyst */
@@ -722,6 +958,241 @@ export interface operations {
                     "application/json": components["schemas"]["HealthResponse"];
                 };
             };
+        };
+    };
+    listAuthProviders: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Organization slug. May be omitted when the instance hosts exactly
+                 *     one organization.
+                 */
+                organization?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The providers to offer */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthProviderList"];
+                };
+            };
+        };
+    };
+    startSSO: {
+        parameters: {
+            query?: {
+                organization?: string;
+                /**
+                 * @description Where to send the browser after the session exists. **Only a
+                 *     same-site absolute path is honored.** An absolute URL, a
+                 *     protocol-relative `//host`, or anything a browser might normalize
+                 *     into one is dropped — an open redirect on the login path is what
+                 *     turns a phishing link into a convincing one.
+                 */
+                return?: string;
+            };
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Redirect to the identity provider */
+            302: {
+                headers: {
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /**
+             * @description No such provider. A disabled provider is deliberately
+             *     indistinguishable from one that does not exist.
+             */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    completeSSO: {
+        parameters: {
+            query?: {
+                code?: string;
+                state?: string;
+            };
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Signed in; the session cookie is set */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionEnvelope"];
+                };
+            };
+            /** @description Signed in; the browser is redirected onward */
+            302: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /**
+             * @description The login could not be verified. Every reason returns this same
+             *     answer — which step of a token's validation failed is of interest
+             *     to an attacker and to nobody else.
+             */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /**
+             * @description Verified, but not allowed an account here — provisioning is off,
+             *     the account is disabled, or the provider sent no verified address.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listIdentityProviders: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The configured providers */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentityProviderList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    createIdentityProvider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IdentityProviderRequest"];
+            };
+        };
+        responses: {
+            /** @description Configured */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentityProvider"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    updateIdentityProvider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IdentityProviderRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentityProvider"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    deleteIdentityProvider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     listRoles: {

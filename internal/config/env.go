@@ -83,6 +83,15 @@ func bindings() []binding {
 			},
 		},
 		{
+			key:  EnvPrefix + "SERVER_BASE_URL",
+			help: "Externally reachable root, e.g. https://pivot.example; required behind a proxy",
+			apply: func(c *Config, v string) error {
+				c.Server.BaseURL = v
+
+				return nil
+			},
+		},
+		{
 			key:  EnvPrefix + "DATABASE_URL",
 			help: "Metadata database: a SQLite path, sqlite://, :memory:, or postgres://",
 			apply: func(c *Config, v string) error {

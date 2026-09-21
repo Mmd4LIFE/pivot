@@ -216,19 +216,52 @@ func (s *Service) Login(ctx context.Context, in Credentials) (*LoginResult, erro
 		s.log.Warn("could not clear login attempts", logging.Err(cerr))
 	}
 
+	return s.StartSession(ctx, user, in.IP, in.UserAgent)
+}
+
+// StartSession issues a session for an already-authenticated user.
+//
+// This is the second half of [Login], factored out so that single sign-on
+// produces a session by the same code path rather than a parallel one. Two
+// ways to mint a session is two places for the expiry policy to drift, and
+// only one of them would be covered by the tests that matter.
+//
+// It does NOT authenticate. Every caller must have established identity
+// already — a password check here, a verified ID token in internal/oidc —
+// which is why it is named for what it does rather than for what it looks
+// like.
+func (s *Service) StartSession(
+	ctx context.Context, user model.User, ip, userAgent string,
+) (*LoginResult, error) {
+	now := s.now()
+
+	// A disabled account cannot hold a session, whatever route asked for one.
+	// The password path checks this too; repeating it here means a new caller
+	// cannot skip it by not knowing about it.
+	if !user.IsActive.Bool() {
+		return nil, ErrInvalidCredentials
+	}
+
+	scope, err := tenant.NewSystemScope(user.OrgID)
+	if err != nil {
+		return nil, ErrInvalidCredentials
+	}
+
+	scoped := tenant.WithScope(ctx, scope)
+
 	token, err := NewToken()
 	if err != nil {
 		return nil, fmt.Errorf("auth: %w", err)
 	}
 
-	session, err := sys.CreateSession(ctx, repo.CreateSession{
+	session, err := s.repos.System().CreateSession(ctx, repo.CreateSession{
 		OrgID:             user.OrgID,
 		UserID:            user.ID,
 		TokenHash:         HashToken(token),
 		ExpiresAt:         now.Add(s.policy.IdleTimeout),
 		AbsoluteExpiresAt: now.Add(s.policy.AbsoluteTimeout),
-		IP:                in.IP,
-		UserAgent:         in.UserAgent,
+		IP:                ip,
+		UserAgent:         userAgent,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("auth: create session: %w", err)
@@ -238,7 +271,7 @@ func (s *Service) Login(ctx context.Context, in Credentials) (*LoginResult, erro
 		s.log.Warn("could not record login timestamp", logging.Err(rerr))
 	}
 
-	s.log.Info("login succeeded",
+	s.log.Info("session started",
 		slog.String("user_id", user.ID.String()),
 		slog.String("org_id", user.OrgID.String()),
 		slog.String("session_id", session.ID.String()),

@@ -34,6 +34,10 @@ type RouterConfig struct {
 	// from Roles when Roles is present.
 	Checker authz.Checker
 
+	// OIDC serves the single sign-on flow and provider administration. Nil
+	// registers no SSO surface.
+	OIDC *OIDCHandler
+
 	// TenantResolver attributes a request to an organization. When Auth is
 	// configured this defaults to [SessionTenantResolver]; nil with no Auth
 	// leaves the API unscoped, which is valid only in tests.
@@ -166,6 +170,7 @@ func (r *Router) routes() {
 
 	r.authRoutes(authed)
 	r.roleRoutes(authed)
+	r.oidcRoutes(authed)
 
 	// A catch-all so an unknown API path produces the standard error envelope
 	// rather than net/http's plain-text 404, which a client cannot parse.
@@ -251,6 +256,47 @@ func (r *Router) roleRoutes(authed Middleware) {
 	r.mux.Handle("DELETE "+APIPrefix+"/admin/sessions/{id}",
 		Chain(authed, r.require(authz.PermManageSessions))(
 			http.HandlerFunc(h.handleRevokeAnySession)))
+}
+
+// oidcRoutes registers the single sign-on surface.
+//
+// The flow endpoints are deliberately outside the tenant chain. Starting an
+// SSO login is what *produces* a session, so requiring one first would be
+// circular — the same reason password login sits outside it.
+//
+// Both are throttled with the strict auth limiter: /start does provider
+// discovery and /callback does a token exchange plus password-free account
+// creation, and neither should be available to an anonymous caller at an
+// unbounded rate.
+func (r *Router) oidcRoutes(authed Middleware) {
+	h := r.cfg.OIDC
+	if h == nil {
+		return
+	}
+
+	public := Chain(WithRateLimit(r.authLimiter, KeyByIPAndPath))
+
+	r.mux.Handle("GET "+APIPrefix+"/auth/providers",
+		Chain(WithRateLimit(r.defaultLimiter, KeyByIP))(http.HandlerFunc(h.handleList)))
+
+	r.mux.Handle("GET "+APIPrefix+"/auth/oidc/{provider}/start",
+		public(http.HandlerFunc(h.handleStart)))
+	r.mux.Handle("GET "+APIPrefix+"/auth/oidc/{provider}/callback",
+		public(http.HandlerFunc(h.handleCallback)))
+
+	// Administration. Pointing an organization at a different directory is
+	// deciding who its users are, which is the same power as granting roles by
+	// another route - so it takes the same class of permission.
+	manage := Chain(authed, r.require(authz.PermManageOrganization))
+
+	r.mux.Handle("GET "+APIPrefix+"/organization/identity-providers",
+		manage(http.HandlerFunc(h.handleAdminList)))
+	r.mux.Handle("POST "+APIPrefix+"/organization/identity-providers",
+		manage(http.HandlerFunc(h.handleAdminCreate)))
+	r.mux.Handle("PUT "+APIPrefix+"/organization/identity-providers/{id}",
+		manage(http.HandlerFunc(h.handleAdminUpdate)))
+	r.mux.Handle("DELETE "+APIPrefix+"/organization/identity-providers/{id}",
+		manage(http.HandlerFunc(h.handleAdminDelete)))
 }
 
 // require builds the permission middleware for a route.

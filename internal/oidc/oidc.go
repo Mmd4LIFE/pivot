@@ -58,11 +58,17 @@ var (
 	ErrNoSubject = errors.New("oidc: id token has no subject")
 )
 
-// Provider is a configured identity provider.
+// Provider is what the protocol needs to talk to an identity provider.
 //
-// It is the database row turned into something usable, and deliberately holds
-// no network state — discovery lives in [Registry], so a provider value can be
-// passed around and compared without dragging an HTTP client behind it.
+// It is deliberately narrower than the stored row: provisioning policy
+// (LinkByEmail, and the rest of what a login *does* once verified) is read
+// from model.IdentityProvider by [Provisioner], not from here. Carrying those
+// fields on both would mean two copies of the same setting, and eventually one
+// of them being the one nothing reads.
+//
+// It also holds no network state — discovery lives in [Registry] — so a
+// provider value can be passed around without dragging an HTTP client behind
+// it.
 type Provider struct {
 	Slug   string
 	Name   string

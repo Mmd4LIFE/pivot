@@ -19,6 +19,7 @@ import (
 	"github.com/Mmd4LIFE/pivot/internal/auth"
 	"github.com/Mmd4LIFE/pivot/internal/authz"
 	"github.com/Mmd4LIFE/pivot/internal/config"
+	"github.com/Mmd4LIFE/pivot/internal/oidc"
 	"github.com/Mmd4LIFE/pivot/internal/store"
 	"github.com/Mmd4LIFE/pivot/internal/store/model"
 	"github.com/Mmd4LIFE/pivot/internal/store/repo"
@@ -49,6 +50,11 @@ type authFixture struct {
 	org     model.Organization
 	user    model.User
 	ctx     context.Context
+
+	// svc and cfg are kept so a test can re-serve the fixture with more wired
+	// up — see rebuildWithOIDC.
+	svc *auth.Service
+	cfg api.RouterConfig
 }
 
 // fullRouter builds the complete HTTP surface — authentication included —
@@ -221,12 +227,52 @@ func newAuthFixture(t *testing.T, db *store.DB, opts ...func(*api.RouterConfig))
 	return &authFixture{
 		server:  srv,
 		handler: handler,
-		client:  &http.Client{Jar: jar},
+		client:  newTestClient(jar),
 		repos:   repos,
 		org:     org,
 		user:    user,
 		ctx:     ctx,
+		svc:     svc,
+		cfg:     cfg,
 	}
+}
+
+// newTestClient returns a client that does not follow redirects.
+//
+// The SSO flow is a chain of them, and a test that wants to assert what each
+// hop does has to see each hop. Following automatically would collapse the
+// whole flow into its destination.
+func newTestClient(jar http.CookieJar) *http.Client {
+	return &http.Client{
+		Jar: jar,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
+// rebuildWithOIDC re-serves the fixture with single sign-on wired up.
+//
+// The OIDC handler needs this instance's externally reachable URL to build the
+// redirect URI, and that only exists once the test server is listening — so
+// the router is built twice rather than guessing a port.
+func (f *authFixture) rebuildWithOIDC(t *testing.T, registry *oidc.Registry) {
+	t.Helper()
+
+	f.cfg.OIDC = api.NewOIDCHandler(
+		f.repos, registry, f.svc, api.DefaultCookie(), f.server.URL, discardLogger())
+
+	handler := api.NewRouter(f.cfg).Handler()
+
+	f.server.Config.Handler = handler
+	f.handler = handler
+}
+
+// loginPassword logs the fixture's seeded user in over the password endpoint.
+func (f *authFixture) loginPassword(t *testing.T) response {
+	t.Helper()
+
+	return f.login(t, fixtureEmail, fixturePassword)
 }
 
 // response is a completed exchange: the body is already read and closed, so a
@@ -234,9 +280,13 @@ func newAuthFixture(t *testing.T, db *store.DB, opts ...func(*api.RouterConfig))
 // juggling an open reader.
 type response struct {
 	status  int
+	headers http.Header
 	cookies []*http.Cookie
 	body    []byte
 }
+
+// header returns one response header.
+func (r response) header(name string) string { return r.headers.Get(name) }
 
 // String renders the body, for failure messages.
 func (r response) String() string { return string(r.body) }
@@ -268,7 +318,12 @@ func send(t *testing.T, client *http.Client, req *http.Request) response {
 		t.Fatalf("read body: %v", err)
 	}
 
-	return response{status: resp.StatusCode, cookies: resp.Cookies(), body: body}
+	return response{
+		status:  resp.StatusCode,
+		headers: resp.Header.Clone(),
+		cookies: resp.Cookies(),
+		body:    body,
+	}
 }
 
 // request issues a call against the fixture's server, carrying cookies.

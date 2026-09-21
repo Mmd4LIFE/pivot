@@ -84,6 +84,15 @@ type ServerConfig struct {
 	// process exits anyway.
 	ShutdownTimeout Duration `yaml:"shutdownTimeout"`
 
+	// BaseURL is the externally reachable root, like https://pivot.example.
+	//
+	// It matters for exactly one thing today: the OpenID Connect redirect URI,
+	// which must match what is registered at the identity provider byte for
+	// byte. Empty derives it from each request's scheme and Host header, which
+	// is right for a local install and wrong behind a proxy that rewrites
+	// either — so a real deployment sets it.
+	BaseURL string `yaml:"baseURL"`
+
 	// PreShutdownDelay is the "lame duck" period: on SIGTERM the server fails
 	// its readiness probe, keeps serving for this long, and only then stops
 	// accepting connections.
@@ -166,6 +175,7 @@ func Default() *Config {
 			WriteTimeout:      Duration(120 * time.Second),
 			IdleTimeout:       Duration(90 * time.Second),
 			ShutdownTimeout:   Duration(30 * time.Second),
+			BaseURL:           "",
 			PreShutdownDelay:  0,
 		},
 		Database: DatabaseConfig{

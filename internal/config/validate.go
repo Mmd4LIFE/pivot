@@ -101,6 +101,16 @@ func (c *Config) Validate() error {
 		})
 	}
 
+	// Empty is valid - it means "derive from the request".
+	if u := strings.TrimSpace(c.Server.BaseURL); u != "" &&
+		!strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
+		errs = append(errs, FieldError{
+			Field: "server.baseURL",
+			Value: c.Server.BaseURL,
+			Want:  "an absolute http:// or https:// URL, or empty to derive it per request",
+		})
+	}
+
 	if strings.TrimSpace(c.Database.URL) == "" {
 		errs = append(errs, FieldError{
 			Field: "database.url",

@@ -13,6 +13,30 @@ newest first within each section.
 
 ### Added
 
+**Single sign-on over HTTP — Part 8-b**
+- `GET /api/v1/auth/oidc/{provider}/start` and `/callback`, plus
+  `GET /api/v1/auth/providers` for the login page's buttons — unauthenticated
+  by necessity, and returning only slug and display name because of it
+- The flow's `state`, `nonce` and PKCE verifier live in a short-lived
+  `HttpOnly` cookie scoped to the SSO path. **`SameSite=Lax` is required and
+  `Strict` would break every login**: the callback is a top-level navigation
+  from the identity provider's origin, which is exactly what Strict withholds
+- SSO issues a session through the same code path a password login uses, so
+  there is one expiry policy rather than two
+- The post-login `return` path accepts only a same-site absolute path. An
+  absolute URL, a protocol-relative `//host`, or anything a browser might
+  normalize into one is dropped — an open redirect on the login route is what
+  turns a phishing link into a convincing one
+- Identity provider administration, gated on `manage_organization`. The client
+  secret is **write-only**: omitting it on update keeps the stored value, and
+  `hasClientSecret` reports presence without disclosing it
+- `pivot admin add-provider`, so SSO can be configured on an instance nobody
+  can yet log in to. The secret comes from the environment, not a flag, since
+  an argument lands in shell history and the process list
+- `server.baseURL` for the redirect URI. Empty derives it from the request,
+  which is right for a local install and wrong behind a proxy that rewrites
+  the scheme or Host
+
 **OpenID Connect — Part 8-a**
 - `internal/oidc`: Authorization Code with PKCE, auto-discovery, and ID token
   verification. Tokens are **verified**, never merely decoded — signature
