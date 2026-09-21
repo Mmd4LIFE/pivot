@@ -139,6 +139,9 @@ needs an entry in `sqlc.yaml`'s SQLite override list**, or the packages silently
   detector — enough to get the run killed outright on a 22-core machine, and worse on a
   2-core CI runner. Serialized, the whole suite is ~30s. Do not remove it in Part 12.
 - `make tools` must be run once per clone to populate `./bin/golangci-lint`.
+- **`make gen-check` only means anything on a clean tree.** It diffs `internal/store/`
+  against `HEAD`, so run on a dirty one it reports every uncommitted change as stale
+  generated code. Run it after committing, not before.
 - **Lint enforces US spelling** (`misspell`, `locale: US`) and rejects both `err` shadowing
   (govet) and `err` reassignment (gocritic) — give the inner error a distinct name.
 
