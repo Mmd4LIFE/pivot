@@ -34,6 +34,12 @@ const (
 	CodeTenantUnknown  Code = "PIVOT-AUTH-003"
 	CodeSessionExpired Code = "PIVOT-AUTH-004"
 
+	// CodeAccountLocked is a 429, like CodeRateLimited, and the pair is the
+	// reason codes exist independently of status: a client that can only see
+	// "429" cannot tell "slow down" from "this account is locked", and the two
+	// call for completely different handling in the UI.
+	CodeAccountLocked Code = "PIVOT-AUTH-005"
+
 	// Request shape.
 	CodeMalformedJSON    Code = "PIVOT-REQ-001"
 	CodeValidationFailed Code = "PIVOT-REQ-002"
@@ -67,6 +73,7 @@ var codes = map[Code]codeInfo{
 	CodeForbidden:      {http.StatusForbidden, "The caller is authenticated but not permitted"},
 	CodeTenantUnknown:  {http.StatusUnauthorized, "The request could not be attributed to an organization"},
 	CodeSessionExpired: {http.StatusUnauthorized, "The session is no longer valid"},
+	CodeAccountLocked:  {http.StatusTooManyRequests, "Too many failed attempts; the account is temporarily locked"},
 
 	CodeMalformedJSON:    {http.StatusBadRequest, "The request body is not valid JSON"},
 	CodeValidationFailed: {http.StatusUnprocessableEntity, "The request body failed validation"},

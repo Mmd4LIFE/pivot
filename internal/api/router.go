@@ -18,8 +18,14 @@ type RouterConfig struct {
 	// CORS is closed by default; opening it is deliberate.
 	CORS CORSConfig
 
-	// TenantResolver attributes a request to an organization. Nil leaves the
-	// API unscoped, which is only valid before Part 6 wires up sessions.
+	// Auth serves the authentication endpoints and backs the session-derived
+	// tenant scope. Nil registers no authentication surface, which is what
+	// tests that only exercise middleware want.
+	Auth *AuthHandler
+
+	// TenantResolver attributes a request to an organization. When Auth is
+	// configured this defaults to [SessionTenantResolver]; nil with no Auth
+	// leaves the API unscoped, which is valid only in tests.
 	TenantResolver TenantResolver
 
 	// Checks are readiness probes.
@@ -71,10 +77,15 @@ func (r *Router) ready() bool {
 //	CORS           so a preflight is answered before any work happens
 //	body limit     so an oversized body is refused before it is read
 //	rate limit     so throttling costs as little as possible
+//	session        so the tenant resolver has an identity to read
 //	tenant         so no handler ever runs without a scope
 //
 // Recovery sits inside logging so that a panicking request still produces an
 // access log line; the reverse order loses the record of what crashed.
+//
+// Rate limiting before session resolution is load-bearing in the same way: a
+// throttled request must not cost a database round trip, and on the login
+// endpoint it must not cost an Argon2 hash.
 func NewRouter(cfg RouterConfig) *Router {
 	if cfg.MaxBodyBytes <= 0 {
 		cfg.MaxBodyBytes = DefaultMaxBodyBytes
@@ -86,6 +97,13 @@ func NewRouter(cfg RouterConfig) *Router {
 
 	if cfg.AuthLimit.Rate <= 0 {
 		cfg.AuthLimit = LimitAuth
+	}
+
+	// Authentication implies session-derived scoping. Making it the default
+	// rather than something the caller remembers to pass is what stops an
+	// instance booting with login endpoints and no tenant enforcement.
+	if cfg.Auth != nil && cfg.TenantResolver == nil {
+		cfg.TenantResolver = SessionTenantResolver()
 	}
 
 	r := &Router{
@@ -123,15 +141,19 @@ func (r *Router) routes() {
 	r.mux.HandleFunc("GET /healthz", r.handleLive)
 	r.mux.HandleFunc("GET /readyz", r.handleReady)
 
-	// Everything under the API prefix is rate limited and tenant scoped.
-	api := Chain(
+	// Everything under the API prefix is rate limited, session-aware and
+	// tenant scoped.
+	authed := Chain(
 		WithRateLimit(r.defaultLimiter, KeyByIP),
+		r.withSession(),
 		r.withTenant(),
 	)
 
+	r.authRoutes(authed)
+
 	// A catch-all so an unknown API path produces the standard error envelope
 	// rather than net/http's plain-text 404, which a client cannot parse.
-	r.mux.Handle(APIPrefix+"/", api(http.HandlerFunc(r.handleAPINotFound)))
+	r.mux.Handle(APIPrefix+"/", authed(http.HandlerFunc(r.handleAPINotFound)))
 
 	// Anything outside the API prefix that is not a probe. Part 9 replaces
 	// this with the SPA fallback.
@@ -147,8 +169,45 @@ func (r *Router) withTenant() Middleware {
 	return WithTenant(r.cfg.TenantResolver, r.cfg.Log)
 }
 
-// AuthLimiter returns the limiter for authentication endpoints, which Part 6
-// applies to login.
+// withSession resolves the session cookie when authentication is configured.
+func (r *Router) withSession() Middleware {
+	if r.cfg.Auth == nil {
+		return func(next http.Handler) http.Handler { return next }
+	}
+
+	return WithSession(r.cfg.Auth.Service(), r.cfg.Auth.Cookie(), r.cfg.Log)
+}
+
+// authRoutes registers the authentication surface.
+//
+// Login and logout are registered outside the tenant chain on purpose. Login
+// has no organization to be scoped to yet — resolving one is what it does —
+// and logout revokes by token hash, so requiring a valid session in order to
+// end one would mean an expired session could never be cleaned up.
+func (r *Router) authRoutes(authed Middleware) {
+	h := r.cfg.Auth
+	if h == nil {
+		return
+	}
+
+	// The strict limiter, keyed by address *and* path so that hammering login
+	// does not consume the allowance for any other endpoint. This is the only
+	// thing standing between an anonymous caller and a 64 MiB Argon2
+	// allocation per request, which is why it sits outside the handler rather
+	// than inside it.
+	login := Chain(WithRateLimit(r.authLimiter, KeyByIPAndPath))
+
+	r.mux.Handle("POST "+APIPrefix+"/auth/login", login(http.HandlerFunc(h.handleLogin)))
+
+	r.mux.Handle("POST "+APIPrefix+"/auth/logout",
+		Chain(WithRateLimit(r.defaultLimiter, KeyByIP))(http.HandlerFunc(h.handleLogout)))
+
+	r.mux.Handle("GET "+APIPrefix+"/auth/me", authed(http.HandlerFunc(h.handleMe)))
+	r.mux.Handle("GET "+APIPrefix+"/auth/sessions", authed(http.HandlerFunc(h.handleListSessions)))
+	r.mux.Handle("DELETE "+APIPrefix+"/auth/sessions/{id}", authed(http.HandlerFunc(h.handleRevokeSession)))
+}
+
+// AuthLimiter returns the limiter for authentication endpoints.
 func (r *Router) AuthLimiter() *Limiter { return r.authLimiter }
 
 // Mux exposes the underlying mux so later parts can register handlers without

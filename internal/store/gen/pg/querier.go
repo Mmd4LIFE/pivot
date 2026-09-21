@@ -69,6 +69,12 @@ type Querier interface {
 	RecordUserLogin(ctx context.Context, arg RecordUserLoginParams) (int64, error)
 	RemoveGroupMember(ctx context.Context, arg RemoveGroupMemberParams) (int64, error)
 	RevokeSession(ctx context.Context, arg RevokeSessionParams) (int64, error)
+	// Revoking one's own session names the user as well as the organization.
+	// RevokeSession above is the administrative form: scoped to the organization
+	// only, it would let any member end any other member's session. That is right
+	// for an administrator and wrong for the "my sessions" endpoint, so the two
+	// are separate queries rather than one with a conditional clause.
+	RevokeSessionForUser(ctx context.Context, arg RevokeSessionForUserParams) (int64, error)
 	// Revoking every session for a user is what a password change and a
 	// compromise response both need.
 	RevokeUserSessions(ctx context.Context, arg RevokeUserSessionsParams) (int64, error)

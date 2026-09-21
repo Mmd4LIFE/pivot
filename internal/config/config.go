@@ -16,6 +16,7 @@ import (
 type Config struct {
 	Server   ServerConfig   `yaml:"server"`
 	Database DatabaseConfig `yaml:"database"`
+	Auth     AuthConfig     `yaml:"auth"`
 	Log      LogConfig      `yaml:"log"`
 }
 
@@ -97,6 +98,44 @@ type ServerConfig struct {
 	PreShutdownDelay Duration `yaml:"preShutdownDelay"`
 }
 
+// AuthConfig controls sessions and the session cookie.
+type AuthConfig struct {
+	// SessionIdleTimeout ends a session that has not been used. It moves
+	// forward on use.
+	SessionIdleTimeout Duration `yaml:"sessionIdleTimeout"`
+
+	// SessionAbsoluteTimeout is a hard cap that is never extended. Without it
+	// a stolen token stays valid indefinitely as long as the thief keeps
+	// using it.
+	SessionAbsoluteTimeout Duration `yaml:"sessionAbsoluteTimeout"`
+
+	// MaxFailedAttempts before an address is locked out.
+	MaxFailedAttempts int `yaml:"maxFailedAttempts"`
+
+	// LockoutDuration is the base lockout window; it doubles with each further
+	// lockout up to LockoutMaxDuration.
+	LockoutDuration    Duration `yaml:"lockoutDuration"`
+	LockoutMaxDuration Duration `yaml:"lockoutMaxDuration"`
+
+	// CookieName is the session cookie. Changing it invalidates every browser
+	// session, since the old cookie is simply no longer read.
+	CookieName string `yaml:"cookieName"`
+
+	// CookieDomain scopes the cookie. Empty means host-only, which is both the
+	// safest default and what a single-host install wants.
+	CookieDomain string `yaml:"cookieDomain"`
+
+	// CookieSecure forces the Secure attribute even on a plaintext request.
+	//
+	// It is off by default so that `pivot serve` on http://localhost works
+	// without configuration — a Secure cookie is simply discarded by the
+	// browser over plain HTTP, which would make the 30-second install end at a
+	// login page that never logs anyone in. A TLS request gets Secure
+	// regardless. Behind a proxy that terminates TLS, Pivot sees plain HTTP
+	// and cannot tell, so **set this to true in that deployment**.
+	CookieSecure bool `yaml:"cookieSecure"`
+}
+
 // LogConfig controls structured logging.
 type LogConfig struct {
 	// Level is one of debug, info, warn, error.
@@ -136,6 +175,16 @@ func Default() *Config {
 			ConnMaxLifetime: Duration(time.Hour),
 			ConnMaxIdleTime: Duration(10 * time.Minute),
 			AutoMigrate:     true,
+		},
+		Auth: AuthConfig{
+			SessionIdleTimeout:     Duration(8 * time.Hour),
+			SessionAbsoluteTimeout: Duration(30 * 24 * time.Hour),
+			MaxFailedAttempts:      10,
+			LockoutDuration:        Duration(time.Minute),
+			LockoutMaxDuration:     Duration(time.Hour),
+			CookieName:             "pivot_session",
+			CookieDomain:           "",
+			CookieSecure:           false,
 		},
 		Log: LogConfig{
 			Level:     "info",

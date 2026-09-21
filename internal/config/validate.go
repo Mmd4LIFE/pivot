@@ -75,6 +75,10 @@ func (c *Config) Validate() error {
 		{"server.writeTimeout", c.Server.WriteTimeout},
 		{"server.idleTimeout", c.Server.IdleTimeout},
 		{"server.shutdownTimeout", c.Server.ShutdownTimeout},
+		{"auth.sessionIdleTimeout", c.Auth.SessionIdleTimeout},
+		{"auth.sessionAbsoluteTimeout", c.Auth.SessionAbsoluteTimeout},
+		{"auth.lockoutDuration", c.Auth.LockoutDuration},
+		{"auth.lockoutMaxDuration", c.Auth.LockoutMaxDuration},
 	}
 
 	for _, d := range durations {
@@ -118,6 +122,41 @@ func (c *Config) Validate() error {
 			Field: "database.maxIdleConns",
 			Value: c.Database.MaxIdleConns,
 			Want:  "a non-negative count, or 0 for the engine default",
+		})
+	}
+
+	// An idle timeout beyond the absolute cap is not an error the server would
+	// ever notice — the cap simply wins — but it means the operator believes
+	// sessions last longer than they do, which is worth saying out loud.
+	if c.Auth.SessionIdleTimeout > 0 && c.Auth.SessionIdleTimeout > c.Auth.SessionAbsoluteTimeout {
+		errs = append(errs, FieldError{
+			Field: "auth.sessionIdleTimeout",
+			Value: c.Auth.SessionIdleTimeout.String(),
+			Want:  "no longer than auth.sessionAbsoluteTimeout (" + c.Auth.SessionAbsoluteTimeout.String() + ")",
+		})
+	}
+
+	if c.Auth.LockoutDuration > 0 && c.Auth.LockoutDuration > c.Auth.LockoutMaxDuration {
+		errs = append(errs, FieldError{
+			Field: "auth.lockoutDuration",
+			Value: c.Auth.LockoutDuration.String(),
+			Want:  "no longer than auth.lockoutMaxDuration (" + c.Auth.LockoutMaxDuration.String() + ")",
+		})
+	}
+
+	if c.Auth.MaxFailedAttempts < 1 {
+		errs = append(errs, FieldError{
+			Field: "auth.maxFailedAttempts",
+			Value: c.Auth.MaxFailedAttempts,
+			Want:  "at least 1; there is no way to disable lockout",
+		})
+	}
+
+	if strings.TrimSpace(c.Auth.CookieName) == "" {
+		errs = append(errs, FieldError{
+			Field: "auth.cookieName",
+			Value: `""`,
+			Want:  "a cookie name such as pivot_session",
 		})
 	}
 

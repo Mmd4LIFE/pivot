@@ -26,9 +26,13 @@ type Server struct {
 	router *Router
 	checks []Check
 
-	// tenantResolver attributes requests to an organization. Nil until Part 6
-	// supplies sessions; the server is explicitly unscoped until then.
+	// tenantResolver attributes requests to an organization. Left nil when
+	// authentication is configured, which makes it session-derived.
 	tenantResolver TenantResolver
+
+	// auth serves the authentication endpoints. Nil means no login surface,
+	// which is only useful in tests.
+	auth *AuthHandler
 
 	// ready gates /readyz. It flips false the instant shutdown begins, before
 	// draining starts, so a load balancer stops sending new work while
@@ -50,10 +54,18 @@ func WithCheck(c Check) Option {
 
 // WithTenantResolver attributes requests to an organization.
 //
-// Without it the API is unscoped, which is valid only until Part 6 supplies
-// sessions — and is why this is an explicit option rather than a default.
+// [WithAuth] already supplies the session-backed resolver, so this exists for
+// the cases that deliberately want a different one. Passing both means the
+// explicit resolver wins, which is worth knowing before using it to bypass
+// authentication.
 func WithTenantResolver(tr TenantResolver) Option {
 	return func(s *Server) { s.tenantResolver = tr }
+}
+
+// WithAuth serves the authentication endpoints and scopes every request to
+// the organization on the caller's session.
+func WithAuth(h *AuthHandler) Option {
+	return func(s *Server) { s.auth = h }
 }
 
 // New builds a server. It does not bind a port; [Server.Run] does that.
@@ -67,6 +79,7 @@ func New(cfg config.ServerConfig, log *slog.Logger, opts ...Option) *Server {
 	s.router = NewRouter(RouterConfig{
 		Log:            log,
 		CORS:           DefaultCORS(),
+		Auth:           s.auth,
 		TenantResolver: s.tenantResolver,
 		Checks:         s.checks,
 	})

@@ -53,8 +53,8 @@ At the end of every part, in this order:
 
 | | |
 |---|---|
-| **Last completed** | Part 6-a — Passwords, sessions, and lockout |
-| **Next up** | **Part 6-b — Auth endpoints and session-backed scoping** |
+| **Last completed** | Part 6-b — Auth endpoints and session-backed scoping |
+| **Next up** | **Part 7 — Authorization skeleton (OpenFGA)** |
 | **Current phase** | Phase 0 — Foundations |
 | **Branch** | `main` |
 | **Blockers** | None |
@@ -62,10 +62,11 @@ At the end of every part, in this order:
 
 **Where the code stands:** `./bin/pivot serve` runs an HTTP server with structured JSON
 logging, `/healthz`, `/readyz` (including a database check), and a graceful drain on
-SIGTERM. `pivot migrate up|status|version|create` manages schema v1 on **both** SQLite and
+SIGTERM. **A user can log in over HTTP and call an authenticated endpoint.**
+`pivot migrate up|status|version|create` manages schema v3 on **both** SQLite and
 Postgres. `pivot config show|env` reports configuration. Packages with real code:
-`version`, `config`, `logging`, `api`, `cli`, `store`. Still `doc.go` stubs: `authz`,
-`connectors`, `semantic`, `query`.
+`version`, `config`, `logging`, `api`, `auth`, `cli`, `store`. Still `doc.go` stubs:
+`authz`, `connectors`, `semantic`, `query`.
 
 **Dependencies:** cobra, yaml.v3, goose, pgx/v5, modernc.org/sqlite (pure Go — no CGo, so
 Part 13's six-platform cross-compile stays a single build matrix), google/uuid,
@@ -78,15 +79,27 @@ account still pays for an Argon2 verification against a dummy hash, because matc
 response but not the timing leaves the enumeration oracle open. Lockout is keyed by the
 **attempted** email, so it covers addresses that do not exist.
 
+`/api/v1/auth/{login,logout,me,sessions}` are live. The session cookie is `HttpOnly` and
+`SameSite=Lax`, neither configurable — `HttpOnly` stops an XSS bug becoming a stolen
+session, and `Lax` is the CSRF defense, since a browser does not attach the cookie to a
+cross-site POST or DELETE. `Secure` is set on any TLS request and otherwise only when
+`auth.cookieSecure` is on, because a browser discards a `Secure` cookie over plain HTTP
+and the local install would never log anyone in. **Behind a TLS-terminating proxy, set
+`auth.cookieSecure`** — Pivot only sees plain HTTP and cannot tell. Login is throttled
+per IP *outside* the handler, so a throttled request never reaches Argon2.
+
 **Tenant isolation:** `internal/tenant.Scope` has unexported fields and no usable zero
 value. Repositories take **no org parameter at all** — they read the scope from the
 context — so a caller cannot pass the wrong tenant because there is nothing to pass.
 `OrganizationRepo` acts on the caller's own org; unscoped provisioning lives on
 `SystemRepo`, named so every call site says what it is doing. A reflection test walks
 `Repositories`' exported fields, so **a repository is covered the moment it is registered
-in that struct** — it asserts all 30 methods refuse an unscoped context, and it is
+in that struct** — it asserts all 34 methods refuse an unscoped context, and it is
 mutation-verified. `api.WithTenant` rejects an unresolvable request with 401 before any
-handler runs; swap `SingleTenantResolver` for a session-backed one in Part 6.
+handler runs, and the scope now comes from `api.SessionTenantResolver` — the organization
+is read off the session row and from nowhere in the request, so a caller cannot name a
+tenant they have not authenticated against. `SingleTenantResolver` survives for tests
+only and is wired nowhere.
 
 **Schema is at v3.** Migration 00003 added `sessions` and `login_attempts`.
 
@@ -121,6 +134,10 @@ needs an entry in `sqlc.yaml`'s SQLite override list**, or the packages silently
   module 403s or crawls, ask the user to switch location before redesigning around it.**
 - **Postgres for development is `make dev-db`** (container on :5433). `make test-all` runs
   the suite against both engines; plain `make test` **silently skips** Postgres.
+- **The test targets pass `-p 1`.** Without it `go test ./...` starts one binary per
+  package at once, and several packages hash with Argon2 at 64 MiB under the race
+  detector — enough to get the run killed outright on a 22-core machine, and worse on a
+  2-core CI runner. Serialized, the whole suite is ~30s. Do not remove it in Part 12.
 - `make tools` must be run once per clone to populate `./bin/golangci-lint`.
 - **Lint enforces US spelling** (`misspell`, `locale: US`) and rejects both `err` shadowing
   (govet) and `err` reassignment (gocritic) — give the inner error a distinct name.
@@ -130,7 +147,7 @@ needs an entry in `sqlc.yaml`'s SQLite override list**, or the packages silently
 ## Progress
 
 ```
-Phase 0  Foundations        [█████████           ]  8/18   (Parts 3, 4 and 6 each split)
+Phase 0  Foundations        [██████████          ]  9/18   (Parts 3, 4 and 6 each split)
 Phase 1  Connect & Query    [                    ]  0/12   (detailed at Part 15)
 Phase 2+ ...                                            (expanded as we approach)
 ```
@@ -369,7 +386,7 @@ Plus: `make gen` produces the TS client from the OpenAPI spec without errors.
 
 ---
 
-### - [ ] Part 6-b — Auth endpoints and session-backed scoping
+### - [x] Part 6-b — Auth endpoints and session-backed scoping ✅ 2026-09-21
 
 **Deliverable:** A user logs in over HTTP and calls an authenticated endpoint.
 
@@ -385,16 +402,18 @@ Plus: `make gen` produces the TS client from the OpenAPI spec without errors.
 - Extend `api/openapi.yaml` with every new endpoint and regenerate the TS client
 
 **Done when:**
-- `curl` login → cookie set → `/auth/me` returns the user → logout → next call 401
-- A response body never contains a password hash (assert on the JSON, not just logs)
-- Rapid login attempts from one IP are throttled *before* Argon2 runs — an unauthenticated
-  endpoint that allocates 64 MiB per call is a denial-of-service surface
-- The spec-drift tests still pass with the new paths
+- `curl` login → cookie set → `/auth/me` returns the user → logout → next call 401 ✅
+  *(verified live, not only in tests)*
+- A response body never contains a password hash ✅ *(asserted on the JSON of every
+  auth response, for `$argon2id$`, `passwordHash`, `tokenHash`, and the password itself)*
+- Rapid login attempts from one IP are throttled before Argon2 runs ✅
+  *(mutation-verified: removing the limiter from the login chain fails the test)*
+- The spec-drift tests still pass with the new paths ✅ *(all 7 documented paths served)*
 
-**Notes:** Login needs an organization before a scope exists. `auth.Credentials` takes an
-`OrgID`; the handler resolves it from a `organization` slug in the body, or from the only
-organization when exactly one exists (the self-hosted case). Do not let it default to
-"the first one" when several exist.
+**Notes:** Login needs an organization before a scope exists. The handler resolves it
+from an `organization` slug in the body, or from the only organization when exactly one
+exists (the self-hosted case); with several it returns 422 naming the field rather than
+picking one.
 
 **Refs:** `P0-AUTH-006` … `P0-AUTH-008`, `P0-API-007`
 
@@ -423,6 +442,13 @@ organization when exactly one exists (the self-hosted case). Do not let it defau
 hand-rolled RBAC behind the same interface — if embedded OpenFGA proves immature. **Spike
 this first.** If it's not viable, take the fallback and write the ADR update rather than
 fighting it.
+
+Part 6-b leaves two things for this part to pick up. `SessionRepo.Revoke` — the
+organization-scoped one — is currently called by nothing, because the "my sessions"
+endpoint uses the user-scoped `RevokeOwn`; it is the administrative form and wants a
+permission check, not a caller. And `SystemRepo` as a whole is still ungated: every
+method on it is unscoped by design, which was correct while the only callers were the
+CLI and login, and stops being correct the moment an endpoint reaches one.
 
 **Refs:** `P0-AUTHZ-001` … `P0-AUTHZ-006`
 
@@ -652,6 +678,7 @@ Newest first. Record what **actually** shipped, including what didn't work.
 
 | Date | Part | Shipped | Notes |
 |---|---|---|---|
+| 2026-09-21 | 6-b | The five `/api/v1/auth/*` endpoints, the session cookie, `api.SessionTenantResolver` replacing the single-tenant stand-in, an `auth` configuration section, spec + TS client, startup sweep of expired sessions | **A test found a real authorization hole.** `SessionRepo.Revoke` is scoped to the organization but not to the user, so any member could have ended any other member's session — the right power for an administrator, the wrong one for the endpoint that manages your own devices. Added `RevokeSessionForUser`, which names the user in the `WHERE` clause, so someone else's session is simply not found. Fixed in SQL rather than with a check in the handler, for the same reason Part 4-b fixed its hole in the schema. **Mutation-verified twice:** swapping `RevokeOwn` back to `Revoke` produces `returned 204, want 404` *and* ends the victim's session; removing the limiter from the login chain makes the throttling test fail. That second test asserts indirectly and is stronger for it — every login that reaches the service records a failed attempt, so the recorded count *is* the number of requests that got past the limiter. **`make test-all` was being killed outright**, which I had assumed was a timeout: `go test ./...` starts one binary per package at once, and several hash with Argon2 at 64 MiB under the race detector. Test targets now pass `-p 1`; the suite runs in ~30s and this matters more on a 2-core CI runner than it did here. All five `Done when` items verified against a live server, including the lockout: 429 `PIVOT-RATE-001` and 429 `PIVOT-AUTH-005` are distinguishable on the wire, which is the concrete case the error registry's "codes are independent of status" rule was written for. |
 | 2026-09-21 | 6-a | Schema v3 (`sessions`, `login_attempts`), Argon2id hashing, session tokens, `auth.Service` (login / authenticate / logout / set-password / sweep), progressive lockout, `pivot admin create-user` and `reset-password` | **Split Part 6** — security core is a session, HTTP surface is another. 16 Postgres subtests, 0 skips. Three security properties are tested rather than asserted in a comment: every failed login costs the same (a nonexistent account pays for a dummy Argon2 verification, and the test compares timing ratios); lockout is keyed by the **attempted** email so it applies to addresses that do not exist, which is what stops it being an enumeration oracle; and case variation cannot reset the counter. Two expiries — sliding idle plus a never-extended absolute cap — because with only the idle timeout a stolen token stays valid forever as long as the thief keeps using it. **Two test-fixture bugs found by the code, not by me:** the schema contract test caught the new tables missing from `expectedTables`, and the sessions unique index caught a fixture that truncated UUIDs to 8 characters — UUID v7 is time-sortable, so rows created milliseconds apart share their prefix. Also fixed a portability bug flagged by `unconvert`: `int(syscall.Stdin)` is redundant on Unix but `syscall.Stdin` is a Handle on Windows, so it became `int(os.Stdin.Fd())`. |
 | 2026-09-21 | 5 | Error envelope with a 15-code registry, middleware chain (request ID, logging, recovery, security headers, CORS, body limit, rate limit), hand-rolled token-bucket limiter, boundary decoding with validation, `api/openapi.yaml` + TS client generation | All `Done when` checks verified live: unknown API path returns the envelope with a code and request ID; 100 rapid requests produced 43 × 429 with `Retry-After`; a panicking handler returns a coded 500 without leaking the panic value, and the server serves the next request. **Health probes are deliberately exempt from rate limiting** — throttling a readiness probe makes an orchestrator kill a healthy instance exactly when it is busiest. **CORS defaults to closed**, and a wildcard origin combined with credentials is refused rather than silently downgraded, since that combination turns any website into an authenticated client. The request-ID middleware sanitizes and length-bounds a client-supplied value: it lands in every log line for that request, so an unvalidated one is log injection. Spec-drift tests keep `openapi.yaml` honest — a documented path that 404s fails the build. Needed a `Router` type, so `Server.routes` moved and the shutdown tests were rewired to `router.Mux()`. |
 | 2026-09-20 | 4-b | `GroupRepo` (CRUD, nesting, membership), `UserAttributeRepo` (provenance-aware upsert), 34 adapter methods, `api.WithTenant` middleware, audit subscriber, **schema v2** | **A test found a real cross-tenant write hole.** The v1 foreign keys on `group_members` and `user_attributes` referenced `groups(id)` and `users(id)` alone, so each key was satisfied independently and `(org_id=A, group_id=A's, user_id=B's)` was accepted — every ID existed, nothing tied the user to the organization the row claimed. Migration 00002 makes the keys composite on `(id, org_id)`; SQLite needed full table rebuilds since it cannot alter a constraint. Fixed at the database level rather than with a check in Go, because "structural, not conventional" is the whole point of Part 4. **Also corrected fiction in this checklist:** the reflection test claimed to pick up new repositories automatically but hardcoded its target list. It now walks `Repositories`' exported fields — 30 methods across 4 repositories — and was mutation-verified on a *newly added* method (`GroupRepo.IsMember`) to prove the discovery works. |

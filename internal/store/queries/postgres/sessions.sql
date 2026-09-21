@@ -23,6 +23,16 @@ UPDATE sessions
 SET revoked_at = $1
 WHERE id = $2 AND org_id = $3 AND revoked_at IS NULL;
 
+-- Revoking one's own session names the user as well as the organization.
+-- RevokeSession above is the administrative form: scoped to the organization
+-- only, it would let any member end any other member's session. That is right
+-- for an administrator and wrong for the "my sessions" endpoint, so the two
+-- are separate queries rather than one with a conditional clause.
+-- name: RevokeSessionForUser :execrows
+UPDATE sessions
+SET revoked_at = $1
+WHERE id = $2 AND user_id = $3 AND org_id = $4 AND revoked_at IS NULL;
+
 -- Revoking every session for a user is what a password change and a
 -- compromise response both need.
 -- name: RevokeUserSessions :execrows

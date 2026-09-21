@@ -75,6 +75,7 @@ type Querier interface {
 	GetSessionByTokenHash(context.Context, string) (model.Session, error)
 	TouchSession(context.Context, model.TouchSessionParams) (int64, error)
 	RevokeSession(context.Context, model.RevokeSessionParams) (int64, error)
+	RevokeSessionForUser(context.Context, model.RevokeSessionForUserParams) (int64, error)
 	RevokeUserSessions(context.Context, model.RevokeUserSessionsParams) (int64, error)
 	ListUserSessions(context.Context, model.ListUserSessionsParams) ([]model.Session, error)
 	DeleteExpiredSessions(context.Context, model.DeleteExpiredSessionsParams) (int64, error)

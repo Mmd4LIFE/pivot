@@ -13,6 +13,29 @@ newest first within each section.
 
 ### Added
 
+**Authentication over HTTP — Part 6-b**
+- `POST /api/v1/auth/login`, `POST /api/v1/auth/logout`, `GET /api/v1/auth/me`,
+  `GET /api/v1/auth/sessions`, and `DELETE /api/v1/auth/sessions/{id}`
+- Session cookie: `HttpOnly` and `SameSite=Lax`, neither configurable.
+  `HttpOnly` is what keeps a cross-site scripting bug from becoming a stolen
+  session; `SameSite=Lax` is the CSRF defense, since a browser will not attach
+  the cookie to a cross-site `POST` or `DELETE`. `Secure` is set on any TLS
+  request and otherwise only when `auth.cookieSecure` is on — a browser
+  discards a `Secure` cookie sent over plain HTTP, which would leave the
+  30-second local install at a login form that never logs anyone in
+- **Requests are now scoped by their session**, not by a single-tenant stand-in.
+  The organization comes from the session row and from nowhere in the request,
+  so a caller cannot name a tenant they have not authenticated against
+- Login is throttled per address *outside* the handler, so a throttled request
+  never reaches Argon2 — an unauthenticated endpoint that allocates 64 MiB per
+  call is a denial-of-service surface
+- `PIVOT-AUTH-005` for a locked account. It shares its 429 with
+  `PIVOT-RATE-001` and means something entirely different, which is the case
+  the code registry exists for
+- `auth` configuration section: session timeouts, lockout thresholds, and the
+  cookie's name, domain and `Secure` flag
+- Expired sessions and stale login-attempt records are swept at startup
+
 **Authentication — Part 6-a**
 - Argon2id password hashing (m=64MB, t=3), PHC-encoded so the cost can be
   raised later without invalidating existing hashes
@@ -105,6 +128,13 @@ newest first within each section.
   [ADR-0001](docs/architecture/adr/0001-backend-language.md#amendments)
 
 ### Fixed
+
+- **Any member could have ended any other member's session.** The session
+  repository's revoke was scoped to the organization but not to the user, which
+  is the right power for an administrator and the wrong one for the endpoint
+  that manages your own devices. `RevokeSessionForUser` names the user in the
+  `WHERE` clause, so a session belonging to someone else is simply not found —
+  enforced in SQL rather than by a check a handler could forget
 
 - **Cross-tenant write hole in the v1 schema.** Foreign keys on `group_members`
   and `user_attributes` referenced `groups(id)` and `users(id)` alone, so each

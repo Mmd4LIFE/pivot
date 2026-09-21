@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 
@@ -12,9 +13,11 @@ import (
 
 // TenantResolver determines which organization a request belongs to.
 //
-// Part 6 replaces the resolver with one that reads the authenticated session.
-// Keeping it an interface means that swap touches one constructor rather than
-// the middleware, and lets tests drive the middleware without a session layer.
+// [SessionTenantResolver] is the production implementation: it reads the
+// organization off the authenticated session. Keeping this an interface is
+// what made that swap a one-line change in the server rather than surgery on
+// the middleware, and it still lets tests drive the middleware without a
+// database behind it.
 type TenantResolver interface {
 	// Resolve returns the scope for a request, or an error if none applies.
 	Resolve(*http.Request) (tenant.Scope, error)
@@ -28,9 +31,11 @@ func (f ResolverFunc) Resolve(r *http.Request) (tenant.Scope, error) { return f(
 
 // SingleTenantResolver resolves every request to one organization.
 //
-// This is the stand-in until Part 6 provides real sessions. It is deliberately
-// explicit rather than a default buried in the middleware: a single-tenant
-// assumption that nobody can see is exactly the kind of thing that survives
+// This is **not** the production resolver — [SessionTenantResolver] is. It
+// answers "which tenant?" without asking "who are you?", which is useful for
+// exercising middleware in tests and nowhere else. Nothing in the server wires
+// it up; a caller has to pass it deliberately, which is the point. A
+// single-tenant assumption nobody can see is exactly the kind that survives
 // into a multi-tenant deployment.
 func SingleTenantResolver(orgID uuid.UUID) TenantResolver {
 	scope, err := tenant.NewSystemScope(orgID)
@@ -61,11 +66,20 @@ func WithTenant(resolver TenantResolver, log *slog.Logger) func(http.Handler) ht
 					logging.Err(err),
 				)
 
-				WriteError(w, r, &APIError{
-					Code:    CodeTenantUnknown,
-					Message: CodeTenantUnknown.Summary(),
-					Err:     err,
-				})
+				// A resolver that has a more precise answer gets to give it:
+				// the session-backed one says "not authenticated", which is
+				// what a client needs in order to redirect to the login page,
+				// rather than the vaguer "could not attribute to a tenant".
+				var apiErr *APIError
+				if !errors.As(err, &apiErr) {
+					apiErr = &APIError{
+						Code:    CodeTenantUnknown,
+						Message: CodeTenantUnknown.Summary(),
+						Err:     err,
+					}
+				}
+
+				WriteError(w, r, apiErr)
 
 				return
 			}

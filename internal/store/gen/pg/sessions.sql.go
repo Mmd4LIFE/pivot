@@ -170,6 +170,37 @@ func (q *Queries) RevokeSession(ctx context.Context, arg RevokeSessionParams) (i
 	return result.RowsAffected()
 }
 
+const revokeSessionForUser = `-- name: RevokeSessionForUser :execrows
+UPDATE sessions
+SET revoked_at = $1
+WHERE id = $2 AND user_id = $3 AND org_id = $4 AND revoked_at IS NULL
+`
+
+type RevokeSessionForUserParams struct {
+	RevokedAt dbtypes.NullTime
+	ID        uuid.UUID
+	UserID    uuid.UUID
+	OrgID     uuid.UUID
+}
+
+// Revoking one's own session names the user as well as the organization.
+// RevokeSession above is the administrative form: scoped to the organization
+// only, it would let any member end any other member's session. That is right
+// for an administrator and wrong for the "my sessions" endpoint, so the two
+// are separate queries rather than one with a conditional clause.
+func (q *Queries) RevokeSessionForUser(ctx context.Context, arg RevokeSessionForUserParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, revokeSessionForUser,
+		arg.RevokedAt,
+		arg.ID,
+		arg.UserID,
+		arg.OrgID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const revokeUserSessions = `-- name: RevokeUserSessions :execrows
 UPDATE sessions
 SET revoked_at = $1

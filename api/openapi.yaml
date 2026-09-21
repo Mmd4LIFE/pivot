@@ -33,10 +33,144 @@ servers:
 tags:
   - name: health
     description: Liveness and readiness probes
+  - name: auth
+    description: Login, logout, and session management
   - name: system
     description: Instance metadata
 
 paths:
+  /api/v1/auth/login:
+    post:
+      tags: [auth]
+      operationId: login
+      summary: Authenticate and open a session
+      description: |
+        On success the session token is set as an `HttpOnly`, `SameSite=Lax`
+        cookie. It is **not** returned in the body: putting it there would
+        hand it to any script on the page, which is what `HttpOnly` exists to
+        prevent.
+
+        The `Secure` attribute is set on any TLS request, and otherwise only
+        when `auth.cookieSecure` is configured — a browser discards a `Secure`
+        cookie sent over plain HTTP, which would break a local install. Behind
+        a proxy that terminates TLS, set that option.
+
+        Every failure returns `PIVOT-AUTH-001` with the same message and at
+        the same cost, whether the account is unknown, the password is wrong,
+        or the account is disabled. Distinguishing them — in the body or in
+        the timing — tells an attacker which addresses are real.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Authenticated; the session cookie is set
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+              description: The session cookie, `HttpOnly` and `SameSite=Lax`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          description: |
+            Throttled, or the account is locked after repeated failures. The
+            two are the same status and different codes — `PIVOT-RATE-001`
+            means "slow down", `PIVOT-AUTH-005` means "this account is locked"
+            — and they call for different handling, so branch on the code.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/auth/logout:
+    post:
+      tags: [auth]
+      operationId: logout
+      summary: End the current session
+      description: |
+        Revokes the session immediately: the very next request carrying the
+        token is rejected, with no window to wait out. That immediacy is why
+        sessions are server-side rather than stateless tokens.
+
+        Succeeds whether or not a valid session was present. The caller asked
+        to be logged out, and they are.
+      security: []
+      responses:
+        "204":
+          description: Logged out; the session cookie is cleared
+
+  /api/v1/auth/me:
+    get:
+      tags: [auth]
+      operationId: getCurrentUser
+      summary: The authenticated user and session
+      responses:
+        "200":
+          description: The caller's identity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/auth/sessions:
+    get:
+      tags: [auth]
+      operationId: listSessions
+      summary: The caller's own active sessions
+      description: |
+        Returns only the caller's sessions, never anyone else's. The one
+        making this request is marked `current`.
+      responses:
+        "200":
+          description: Active sessions, most recent activity first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/auth/sessions/{id}:
+    delete:
+      tags: [auth]
+      operationId: revokeSession
+      summary: End one of the caller's own sessions
+      description: |
+        Scoped to the caller, not merely to their organization: naming another
+        member's session returns 404 rather than ending it.
+
+        Revoking the session making the request is a logout, and clears the
+        cookie.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: The session was revoked
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
   /healthz:
     get:
       tags: [health]
@@ -98,9 +232,113 @@ components:
       description: |
         Server-side session. Stateless tokens are deliberately not used for
         browser sessions: they cannot be revoked before expiry, and "remove
-        this person's access" has to mean now. Added in Part 6.
+        this person's access" has to mean now.
+
+        Set by `POST /api/v1/auth/login` and sent automatically by the
+        browser. It is `HttpOnly`, so no client code reads or writes it.
 
   schemas:
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 320
+          examples: [ada@example.com]
+        password:
+          type: string
+          format: password
+          maxLength: 1024
+        organization:
+          type: string
+          maxLength: 100
+          description: |
+            The organization slug to authenticate against. May be omitted when
+            the instance hosts exactly one organization, which is the
+            self-hosted case. With several it is required — defaulting to one
+            of them would authenticate people against a tenant they never
+            named.
+          examples: [acme]
+
+    User:
+      type: object
+      required: [id, organizationId, email, name, locale, timezone, isActive]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        avatarUrl:
+          type: string
+        locale:
+          type: string
+          examples: [en]
+        timezone:
+          type: string
+          examples: [UTC]
+        isActive:
+          type: boolean
+
+    Session:
+      type: object
+      required: [id, issuedAt, expiresAt, absoluteExpiresAt, lastSeenAt, current]
+      properties:
+        id:
+          type: string
+          format: uuid
+        issuedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+          description: |
+            The idle expiry. It moves forward as the session is used.
+        absoluteExpiresAt:
+          type: string
+          format: date-time
+          description: |
+            The hard cap. Never extended, so an actively used session still
+            ends — without it, a stolen token stays valid indefinitely as long
+            as the thief keeps using it.
+        lastSeenAt:
+          type: string
+          format: date-time
+        ip:
+          type: string
+        userAgent:
+          type: string
+        current:
+          type: boolean
+          description: Whether this is the session making the request.
+
+    SessionEnvelope:
+      type: object
+      required: [user, session]
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+        session:
+          $ref: "#/components/schemas/Session"
+
+    SessionList:
+      type: object
+      required: [sessions]
+      properties:
+        sessions:
+          type: array
+          items:
+            $ref: "#/components/schemas/Session"
+
     HealthResponse:
       type: object
       required: [status, version]

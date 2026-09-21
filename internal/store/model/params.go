@@ -258,6 +258,13 @@ type RevokeSessionParams struct {
 	OrgID     uuid.UUID
 }
 
+type RevokeSessionForUserParams struct {
+	RevokedAt dbtypes.NullTime
+	ID        uuid.UUID
+	UserID    uuid.UUID
+	OrgID     uuid.UUID
+}
+
 type RevokeUserSessionsParams struct {
 	RevokedAt dbtypes.NullTime
 	UserID    uuid.UUID

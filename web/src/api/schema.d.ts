@@ -4,6 +4,126 @@
  */
 
 export interface paths {
+    "/api/v1/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Authenticate and open a session
+         * @description On success the session token is set as an `HttpOnly`, `SameSite=Lax`
+         *     cookie. It is **not** returned in the body: putting it there would
+         *     hand it to any script on the page, which is what `HttpOnly` exists to
+         *     prevent.
+         *
+         *     The `Secure` attribute is set on any TLS request, and otherwise only
+         *     when `auth.cookieSecure` is configured — a browser discards a `Secure`
+         *     cookie sent over plain HTTP, which would break a local install. Behind
+         *     a proxy that terminates TLS, set that option.
+         *
+         *     Every failure returns `PIVOT-AUTH-001` with the same message and at
+         *     the same cost, whether the account is unknown, the password is wrong,
+         *     or the account is disabled. Distinguishing them — in the body or in
+         *     the timing — tells an attacker which addresses are real.
+         */
+        post: operations["login"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End the current session
+         * @description Revokes the session immediately: the very next request carrying the
+         *     token is rejected, with no window to wait out. That immediacy is why
+         *     sessions are server-side rather than stateless tokens.
+         *
+         *     Succeeds whether or not a valid session was present. The caller asked
+         *     to be logged out, and they are.
+         */
+        post: operations["logout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The authenticated user and session */
+        get: operations["getCurrentUser"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The caller's own active sessions
+         * @description Returns only the caller's sessions, never anyone else's. The one
+         *     making this request is marked `current`.
+         */
+        get: operations["listSessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/sessions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * End one of the caller's own sessions
+         * @description Scoped to the caller, not merely to their organization: naming another
+         *     member's session returns 404 rather than ending it.
+         *
+         *     Revoking the session making the request is a logout, and clears the
+         *     cookie.
+         */
+        delete: operations["revokeSession"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/healthz": {
         parameters: {
             query?: never;
@@ -54,6 +174,70 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        LoginRequest: {
+            /**
+             * Format: email
+             * @example ada@example.com
+             */
+            email: string;
+            /** Format: password */
+            password: string;
+            /**
+             * @description The organization slug to authenticate against. May be omitted when
+             *     the instance hosts exactly one organization, which is the
+             *     self-hosted case. With several it is required — defaulting to one
+             *     of them would authenticate people against a tenant they never
+             *     named.
+             * @example acme
+             */
+            organization?: string;
+        };
+        User: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            organizationId: string;
+            /** Format: email */
+            email: string;
+            name: string;
+            avatarUrl?: string;
+            /** @example en */
+            locale: string;
+            /** @example UTC */
+            timezone: string;
+            isActive: boolean;
+        };
+        Session: {
+            /** Format: uuid */
+            id: string;
+            /** Format: date-time */
+            issuedAt: string;
+            /**
+             * Format: date-time
+             * @description The idle expiry. It moves forward as the session is used.
+             */
+            expiresAt: string;
+            /**
+             * Format: date-time
+             * @description The hard cap. Never extended, so an actively used session still
+             *     ends — without it, a stolen token stays valid indefinitely as long
+             *     as the thief keeps using it.
+             */
+            absoluteExpiresAt: string;
+            /** Format: date-time */
+            lastSeenAt: string;
+            ip?: string;
+            userAgent?: string;
+            /** @description Whether this is the session making the request. */
+            current: boolean;
+        };
+        SessionEnvelope: {
+            user: components["schemas"]["User"];
+            session: components["schemas"]["Session"];
+        };
+        SessionList: {
+            sessions: components["schemas"]["Session"][];
+        };
         HealthResponse: {
             /**
              * @description One of `ok`, `not_ready`, or `shutting_down`.
@@ -183,6 +367,131 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    login: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Authenticated; the session cookie is set */
+            200: {
+                headers: {
+                    /** @description The session cookie, `HttpOnly` and `SameSite=Lax`. */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionEnvelope"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            422: components["responses"]["UnprocessableEntity"];
+            /**
+             * @description Throttled, or the account is locked after repeated failures. The
+             *     two are the same status and different codes — `PIVOT-RATE-001`
+             *     means "slow down", `PIVOT-AUTH-005` means "this account is locked"
+             *     — and they call for different handling, so branch on the code.
+             */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    logout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Logged out; the session cookie is cleared */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getCurrentUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller's identity */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionEnvelope"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    listSessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Active sessions, most recent activity first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    revokeSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The session was revoked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
     getLiveness: {
         parameters: {
             query?: never;

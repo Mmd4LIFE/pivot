@@ -98,17 +98,27 @@ dev-db-url: ## Print the development Postgres URL
 	@echo '$(DEV_PG_URL)'
 
 # ── Quality ──────────────────────────────────────────────────────────────────
+#
+# TEST_FLAGS carries -p 1, which serializes *packages* (subtests inside a
+# package still run in parallel). Without it, `go test ./...` starts one test
+# binary per package at once — up to GOMAXPROCS of them — and several of ours
+# hash passwords with Argon2 at 64 MiB a time under the race detector, whose
+# shadow memory multiplies that several fold. On a 22-core machine that was
+# enough to get the run killed outright, and a 2-core CI runner with 7 GiB has
+# far less headroom. Serialized, the whole suite is about 30 seconds.
+TEST_FLAGS := -race -count=1 -p 1
+
 .PHONY: test
 test: ## Run all tests with race detection (SQLite only; Postgres tests skip)
-	go test -race -count=1 $(PKG)
+	go test $(TEST_FLAGS) $(PKG)
 
 .PHONY: test-all
 test-all: dev-db ## Run all tests against BOTH SQLite and Postgres
-	PIVOT_TEST_POSTGRES_URL='$(DEV_PG_URL)' go test -race -count=1 $(PKG)
+	PIVOT_TEST_POSTGRES_URL='$(DEV_PG_URL)' go test $(TEST_FLAGS) $(PKG)
 
 .PHONY: cover
 cover: ## Run tests and open an HTML coverage report
-	go test -race -count=1 -coverprofile=coverage.out -covermode=atomic $(PKG)
+	go test $(TEST_FLAGS) -coverprofile=coverage.out -covermode=atomic $(PKG)
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "coverage report: coverage.html"
 

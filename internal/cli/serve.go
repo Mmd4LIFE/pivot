@@ -4,14 +4,22 @@ import (
 	"log/slog"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/Mmd4LIFE/pivot/internal/api"
+	"github.com/Mmd4LIFE/pivot/internal/auth"
 	"github.com/Mmd4LIFE/pivot/internal/logging"
 	"github.com/Mmd4LIFE/pivot/internal/store"
+	"github.com/Mmd4LIFE/pivot/internal/store/repo"
 	"github.com/Mmd4LIFE/pivot/internal/version"
 )
+
+// sweepRetention keeps revoked and expired rows around briefly rather than
+// deleting them the moment they die. An investigation into "who was logged in
+// when" needs them, and Phase 4's audit work will read them.
+const sweepRetention = 7 * 24 * time.Hour
 
 func newServeCmd(env Env, flags *globalFlags) *cobra.Command {
 	return &cobra.Command{
@@ -63,10 +71,41 @@ readiness change before the drain begins, so no request is dropped.`,
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 
-			srv := api.New(cfg.Server, log, api.WithCheck(api.Check{
-				Name: "database",
-				Func: db.HealthCheck,
-			}))
+			repos := repo.New(db)
+			authSvc := auth.NewService(repos, auth.PolicyFrom(cfg.Auth), log)
+
+			// Expired sessions and stale login-attempt rows accumulate
+			// otherwise — including one row per address a dictionary attack
+			// ever tried. Phase 5's scheduler takes this over; until then,
+			// once at startup is enough for a single-node install.
+			if sessions, attempts, serr := authSvc.Sweep(ctx, sweepRetention); serr != nil {
+				log.Warn("could not sweep expired sessions", logging.Err(serr))
+			} else if sessions > 0 || attempts > 0 {
+				log.Info("swept expired authentication records",
+					slog.Int64("sessions", sessions),
+					slog.Int64("login_attempts", attempts),
+				)
+			}
+
+			if !cfg.Auth.CookieSecure {
+				log.Warn("session cookie is not forced Secure",
+					slog.String("hint",
+						"set auth.cookieSecure when serving over TLS or behind a TLS proxy"),
+				)
+			}
+
+			srv := api.New(cfg.Server, log,
+				api.WithCheck(api.Check{
+					Name: "database",
+					Func: db.HealthCheck,
+				}),
+				api.WithAuth(api.NewAuthHandler(authSvc, repos, api.CookieConfig{
+					Name:   cfg.Auth.CookieName,
+					Path:   "/",
+					Domain: cfg.Auth.CookieDomain,
+					Secure: cfg.Auth.CookieSecure,
+				}, log)),
+			)
 
 			return srv.Run(ctx)
 		},

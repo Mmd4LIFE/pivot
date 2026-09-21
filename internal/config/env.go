@@ -127,6 +127,66 @@ func bindings() []binding {
 			},
 		},
 		{
+			key:  EnvPrefix + "AUTH_SESSION_IDLE_TIMEOUT",
+			help: "End a session unused for this long; slides forward on use",
+			apply: func(c *Config, v string) error {
+				return setDuration(&c.Auth.SessionIdleTimeout, v)
+			},
+		},
+		{
+			key:  EnvPrefix + "AUTH_SESSION_ABSOLUTE_TIMEOUT",
+			help: "Hard session cap, never extended",
+			apply: func(c *Config, v string) error {
+				return setDuration(&c.Auth.SessionAbsoluteTimeout, v)
+			},
+		},
+		{
+			key:  EnvPrefix + "AUTH_MAX_FAILED_ATTEMPTS",
+			help: "Failed logins before an address is locked out",
+			apply: func(c *Config, v string) error {
+				return setInt(&c.Auth.MaxFailedAttempts, v)
+			},
+		},
+		{
+			key:  EnvPrefix + "AUTH_LOCKOUT_DURATION",
+			help: "Base lockout window; doubles with each further lockout",
+			apply: func(c *Config, v string) error {
+				return setDuration(&c.Auth.LockoutDuration, v)
+			},
+		},
+		{
+			key:  EnvPrefix + "AUTH_LOCKOUT_MAX_DURATION",
+			help: "Cap on the doubling lockout window",
+			apply: func(c *Config, v string) error {
+				return setDuration(&c.Auth.LockoutMaxDuration, v)
+			},
+		},
+		{
+			key:  EnvPrefix + "AUTH_COOKIE_NAME",
+			help: "Session cookie name; changing it ends every browser session",
+			apply: func(c *Config, v string) error {
+				c.Auth.CookieName = v
+
+				return nil
+			},
+		},
+		{
+			key:  EnvPrefix + "AUTH_COOKIE_DOMAIN",
+			help: "Cookie domain; empty is host-only",
+			apply: func(c *Config, v string) error {
+				c.Auth.CookieDomain = v
+
+				return nil
+			},
+		},
+		{
+			key:  EnvPrefix + "AUTH_COOKIE_SECURE",
+			help: "Force the Secure cookie attribute; set this behind a TLS proxy",
+			apply: func(c *Config, v string) error {
+				return setBool(&c.Auth.CookieSecure, v)
+			},
+		},
+		{
 			key:  EnvPrefix + "LOG_LEVEL",
 			help: "debug, info, warn, or error",
 			apply: func(c *Config, v string) error {

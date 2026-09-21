@@ -560,6 +560,10 @@ func (a *pgQuerier) RevokeSession(ctx context.Context, p model.RevokeSessionPara
 	return a.q.RevokeSession(ctx, pg.RevokeSessionParams(p))
 }
 
+func (a *pgQuerier) RevokeSessionForUser(ctx context.Context, p model.RevokeSessionForUserParams) (int64, error) {
+	return a.q.RevokeSessionForUser(ctx, pg.RevokeSessionForUserParams(p))
+}
+
 func (a *pgQuerier) RevokeUserSessions(ctx context.Context, p model.RevokeUserSessionsParams) (int64, error) {
 	return a.q.RevokeUserSessions(ctx, pg.RevokeUserSessionsParams(p))
 }
@@ -626,6 +630,10 @@ func (a *liteQuerier) TouchSession(ctx context.Context, p model.TouchSessionPara
 
 func (a *liteQuerier) RevokeSession(ctx context.Context, p model.RevokeSessionParams) (int64, error) {
 	return a.q.RevokeSession(ctx, lite.RevokeSessionParams(p))
+}
+
+func (a *liteQuerier) RevokeSessionForUser(ctx context.Context, p model.RevokeSessionForUserParams) (int64, error) {
+	return a.q.RevokeSessionForUser(ctx, lite.RevokeSessionForUserParams(p))
 }
 
 func (a *liteQuerier) RevokeUserSessions(ctx context.Context, p model.RevokeUserSessionsParams) (int64, error) {

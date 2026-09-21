@@ -68,7 +68,7 @@ func TestOpenAPIPathsExist(t *testing.T) {
 		t.Fatal("the spec documents no paths")
 	}
 
-	handler := testRouter(t)
+	handler := fullRouter(t)
 
 	for path, item := range paths {
 		methods, ok := item.(map[string]any)

@@ -39,7 +39,40 @@ func (r *SessionRepo) List(ctx context.Context, userID uuid.UUID) ([]model.Sessi
 	return sessions, nil
 }
 
-// Revoke ends one session immediately.
+// RevokeOwn ends one of a specific user's own sessions.
+//
+// This is what the "my sessions" endpoint needs, and it is separate from
+// [SessionRepo.Revoke] for a reason worth stating: Revoke is scoped to the
+// organization alone, so any member could end any other member's session with
+// it. That is correct for an administrator and wrong for a user managing their
+// own devices, and the difference is enforced in the WHERE clause rather than
+// by an if statement in a handler.
+//
+// A session that belongs to someone else returns [ErrNotFound], the same as
+// one that does not exist — the caller has no business learning the difference.
+func (r *SessionRepo) RevokeOwn(ctx context.Context, userID, sessionID uuid.UUID) error {
+	s, err := r.scope(ctx)
+	if err != nil {
+		return err
+	}
+
+	n, rerr := r.q.RevokeSessionForUser(ctx, model.RevokeSessionForUserParams{
+		RevokedAt: dbtypes.NewNullTime(r.now().Time),
+		ID:        sessionID,
+		UserID:    userID,
+		OrgID:     s.OrgID(),
+	})
+
+	if verr := affectedOrNotFound(n, rerr); verr != nil {
+		return verr
+	}
+
+	r.emit(ctx, ChangeDeleted, entitySession, sessionID, s.OrgID(), s.ActorID())
+
+	return nil
+}
+
+// Revoke ends one session immediately, anywhere in the caller's organization.
 func (r *SessionRepo) Revoke(ctx context.Context, sessionID uuid.UUID) error {
 	s, err := r.scope(ctx)
 	if err != nil {

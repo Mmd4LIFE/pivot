@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Mmd4LIFE/pivot/internal/config"
 	"github.com/Mmd4LIFE/pivot/internal/logging"
 	"github.com/Mmd4LIFE/pivot/internal/store/model"
 	"github.com/Mmd4LIFE/pivot/internal/store/repo"
@@ -67,6 +68,23 @@ func DefaultPolicy() Policy {
 		MaxLockoutDuration: 1 * time.Hour,
 		TouchInterval:      5 * time.Minute,
 	}
+}
+
+// PolicyFrom builds a policy from configuration.
+//
+// TouchInterval is deliberately absent from the configuration surface: it is
+// a write-amplification tuning knob with no security meaning, and every
+// setting an operator can reach is one they can get wrong.
+func PolicyFrom(cfg config.AuthConfig) Policy {
+	p := DefaultPolicy()
+
+	p.IdleTimeout = cfg.SessionIdleTimeout.Duration()
+	p.AbsoluteTimeout = cfg.SessionAbsoluteTimeout.Duration()
+	p.MaxFailedAttempts = int64(cfg.MaxFailedAttempts)
+	p.LockoutDuration = cfg.LockoutDuration.Duration()
+	p.MaxLockoutDuration = cfg.LockoutMaxDuration.Duration()
+
+	return p
 }
 
 // Service performs authentication.
