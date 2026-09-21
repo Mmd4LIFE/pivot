@@ -208,3 +208,41 @@ sql:
             go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
           - column: role_assignments.created_by
             go_type: github.com/google/uuid.NullUUID
+
+          # -- identity_providers ---------------------------------------------
+          - column: identity_providers.id
+            go_type: github.com/google/uuid.UUID
+          - column: identity_providers.org_id
+            go_type: github.com/google/uuid.UUID
+          - column: identity_providers.is_enabled
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Bool
+          - column: identity_providers.auto_provision
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Bool
+          - column: identity_providers.link_by_email
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Bool
+          - column: identity_providers.claim_mapping
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.JSON
+          - column: identity_providers.created_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
+          - column: identity_providers.updated_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
+          - column: identity_providers.created_by
+            go_type: github.com/google/uuid.NullUUID
+          - column: identity_providers.updated_by
+            go_type: github.com/google/uuid.NullUUID
+          - column: identity_providers.deleted_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.NullTime
+
+          # -- federated_identities -------------------------------------------
+          - column: federated_identities.id
+            go_type: github.com/google/uuid.UUID
+          - column: federated_identities.org_id
+            go_type: github.com/google/uuid.UUID
+          - column: federated_identities.provider_id
+            go_type: github.com/google/uuid.UUID
+          - column: federated_identities.user_id
+            go_type: github.com/google/uuid.UUID
+          - column: federated_identities.created_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
+          - column: federated_identities.last_login_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.NullTime

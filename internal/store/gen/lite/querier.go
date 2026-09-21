@@ -18,6 +18,14 @@ type Querier interface {
 	CountRoleHolders(ctx context.Context, arg CountRoleHoldersParams) (int64, error)
 	CountUsers(ctx context.Context, orgID uuid.UUID) (int64, error)
 	CreateGroup(ctx context.Context, arg CreateGroupParams) (Group, error)
+	// Identity providers and the federated identities they issue.
+	//
+	// Placeholders are positional in both dialects and must appear in the same
+	// order, because the two generated parameter structs are converted directly
+	// into one another and a differing field order breaks the conversion - the
+	// lesson of Part 4-a. Query files are ASCII: sqlc's SQLite generator miscounts
+	// byte offsets on multibyte characters and corrupts generation.
+	CreateIdentityProvider(ctx context.Context, arg CreateIdentityProviderParams) (IdentityProvider, error)
 	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error)
 	// Session lookup by token is deliberately NOT org-scoped: resolving a session
 	// is how the tenant is discovered in the first place, so it cannot require
@@ -45,8 +53,16 @@ type Querier interface {
 	// Replacing an IdP's attributes must not disturb manually assigned ones, so
 	// deletion is scoped by source.
 	DeleteUserAttributesBySource(ctx context.Context, arg DeleteUserAttributesBySourceParams) (int64, error)
+	// Federated identities.
+	//
+	// Lookup is by (provider, subject) and never by email: an address can be
+	// reassigned inside a directory, and matching on it would hand the new holder
+	// the old one's account.
+	GetFederatedIdentity(ctx context.Context, arg GetFederatedIdentityParams) (FederatedIdentity, error)
 	GetGroup(ctx context.Context, arg GetGroupParams) (Group, error)
 	GetGroupByName(ctx context.Context, arg GetGroupByNameParams) (Group, error)
+	GetIdentityProvider(ctx context.Context, arg GetIdentityProviderParams) (IdentityProvider, error)
+	GetIdentityProviderBySlug(ctx context.Context, arg GetIdentityProviderBySlugParams) (IdentityProvider, error)
 	// Failed login tracking, keyed by the ATTEMPTED email rather than a user id:
 	// a row must exist even when the account does not, or the lockout itself
 	// becomes a user-enumeration oracle.
@@ -61,10 +77,13 @@ type Querier interface {
 	// and a fact is either stored or not.
 	GrantRole(ctx context.Context, arg GrantRoleParams) error
 	IsGroupMember(ctx context.Context, arg IsGroupMemberParams) (bool, error)
+	LinkFederatedIdentity(ctx context.Context, arg LinkFederatedIdentityParams) (FederatedIdentity, error)
 	ListChildGroups(ctx context.Context, arg ListChildGroupsParams) ([]Group, error)
+	ListFederatedIdentitiesForUser(ctx context.Context, arg ListFederatedIdentitiesForUserParams) ([]FederatedIdentity, error)
 	ListGrantsOnObject(ctx context.Context, arg ListGrantsOnObjectParams) ([]RoleAssignment, error)
 	ListGroupMembers(ctx context.Context, arg ListGroupMembersParams) ([]User, error)
 	ListGroups(ctx context.Context, arg ListGroupsParams) ([]Group, error)
+	ListIdentityProviders(ctx context.Context, orgID uuid.UUID) ([]IdentityProvider, error)
 	// Role assignments are Zanzibar tuples. See ADR-0009's amendment.
 	//
 	// Placeholders are positional in both dialects and must appear in the same
@@ -93,6 +112,7 @@ type Querier interface {
 	ListUserSessions(ctx context.Context, arg ListUserSessionsParams) ([]Session, error)
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]User, error)
 	RecordFailedLogin(ctx context.Context, arg RecordFailedLoginParams) (LoginAttempt, error)
+	RecordFederatedLogin(ctx context.Context, arg RecordFederatedLoginParams) (int64, error)
 	RecordUserLogin(ctx context.Context, arg RecordUserLoginParams) (int64, error)
 	RemoveGroupMember(ctx context.Context, arg RemoveGroupMemberParams) (int64, error)
 	// Removing a user or group takes its grants with it.
@@ -111,12 +131,14 @@ type Querier interface {
 	// Applied after a lockout threshold is crossed, once the new count is known.
 	SetLoginLock(ctx context.Context, arg SetLoginLockParams) (int64, error)
 	SoftDeleteGroup(ctx context.Context, arg SoftDeleteGroupParams) (int64, error)
+	SoftDeleteIdentityProvider(ctx context.Context, arg SoftDeleteIdentityProviderParams) (int64, error)
 	SoftDeleteOrganization(ctx context.Context, arg SoftDeleteOrganizationParams) (int64, error)
 	SoftDeleteUser(ctx context.Context, arg SoftDeleteUserParams) (int64, error)
 	// Sliding idle expiry. The absolute cap is never touched, so an active session
 	// still ends when it reaches it.
 	TouchSession(ctx context.Context, arg TouchSessionParams) (int64, error)
 	UpdateGroup(ctx context.Context, arg UpdateGroupParams) (Group, error)
+	UpdateIdentityProvider(ctx context.Context, arg UpdateIdentityProviderParams) (IdentityProvider, error)
 	// Optimistic concurrency: the WHERE clause carries the caller's expected
 	// version, so a stale update affects zero rows instead of silently winning.
 	UpdateOrganization(ctx context.Context, arg UpdateOrganizationParams) (Organization, error)

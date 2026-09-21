@@ -368,3 +368,85 @@ type CountRoleHoldersParams struct {
 	ObjectType string
 	ObjectID   uuid.UUID
 }
+
+// --- identity providers ---------------------------------------------------
+
+type CreateIdentityProviderParams struct {
+	ID            uuid.UUID
+	OrgID         uuid.UUID
+	Slug          string
+	Name          string
+	Kind          string
+	Issuer        string
+	ClientID      string
+	ClientSecret  string
+	Scopes        string
+	IsEnabled     dbtypes.Bool
+	AutoProvision dbtypes.Bool
+	LinkByEmail   dbtypes.Bool
+	DefaultRole   string
+	ClaimMapping  dbtypes.JSON
+	CreatedBy     uuid.NullUUID
+	UpdatedBy     uuid.NullUUID
+}
+
+type GetIdentityProviderParams struct {
+	ID    uuid.UUID
+	OrgID uuid.UUID
+}
+
+type GetIdentityProviderBySlugParams struct {
+	OrgID uuid.UUID
+	Slug  string
+}
+
+type UpdateIdentityProviderParams struct {
+	Slug          string
+	Name          string
+	Issuer        string
+	ClientID      string
+	ClientSecret  string
+	Scopes        string
+	IsEnabled     dbtypes.Bool
+	AutoProvision dbtypes.Bool
+	LinkByEmail   dbtypes.Bool
+	DefaultRole   string
+	ClaimMapping  dbtypes.JSON
+	UpdatedBy     uuid.NullUUID
+	UpdatedAt     dbtypes.Time
+	ID            uuid.UUID
+	OrgID         uuid.UUID
+	Version       int64
+}
+
+type SoftDeleteIdentityProviderParams struct {
+	DeletedAt dbtypes.NullTime
+	UpdatedBy uuid.NullUUID
+	ID        uuid.UUID
+	OrgID     uuid.UUID
+}
+
+type GetFederatedIdentityParams struct {
+	ProviderID uuid.UUID
+	Subject    string
+}
+
+type ListFederatedIdentitiesForUserParams struct {
+	OrgID  uuid.UUID
+	UserID uuid.UUID
+}
+
+type LinkFederatedIdentityParams struct {
+	ID          uuid.UUID
+	OrgID       uuid.UUID
+	ProviderID  uuid.UUID
+	UserID      uuid.UUID
+	Subject     string
+	LastLoginAt dbtypes.NullTime
+}
+
+type RecordFederatedLoginParams struct {
+	LastLoginAt dbtypes.NullTime
+	ProviderID  uuid.UUID
+	Subject     string
+}

@@ -193,3 +193,46 @@ type RoleAssignment struct {
 	CreatedAt       dbtypes.Time
 	CreatedBy       uuid.NullUUID
 }
+
+// IdentityProvider is an organization's configured SSO connection.
+//
+// ClientSecret is stored as written: envelope encryption is Part 15's, and it
+// will cover this column and Phase 1's connection credentials together. The
+// API never returns it.
+type IdentityProvider struct {
+	ID            uuid.UUID
+	OrgID         uuid.UUID
+	Slug          string
+	Name          string
+	Kind          string
+	Issuer        string
+	ClientID      string
+	ClientSecret  string
+	Scopes        string
+	IsEnabled     dbtypes.Bool
+	AutoProvision dbtypes.Bool
+	DefaultRole   string
+	LinkByEmail   dbtypes.Bool
+	ClaimMapping  dbtypes.JSON
+	CreatedAt     dbtypes.Time
+	UpdatedAt     dbtypes.Time
+	CreatedBy     uuid.NullUUID
+	UpdatedBy     uuid.NullUUID
+	DeletedAt     dbtypes.NullTime
+	Version       int64
+}
+
+// FederatedIdentity links an external subject to a Pivot user.
+//
+// The link is (provider, subject) and never the email address: an address can
+// be reassigned inside a directory, and matching on it would hand the new
+// holder the old one\'s account.
+type FederatedIdentity struct {
+	ID          uuid.UUID
+	OrgID       uuid.UUID
+	ProviderID  uuid.UUID
+	UserID      uuid.UUID
+	Subject     string
+	CreatedAt   dbtypes.Time
+	LastLoginAt dbtypes.NullTime
+}

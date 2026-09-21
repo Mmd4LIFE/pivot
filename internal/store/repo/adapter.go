@@ -801,3 +801,151 @@ func (a *liteQuerier) RevokeAllForSubject(ctx context.Context, p model.RevokeAll
 func (a *liteQuerier) CountRoleHolders(ctx context.Context, p model.CountRoleHoldersParams) (int64, error) {
 	return a.q.CountRoleHolders(ctx, lite.CountRoleHoldersParams(p))
 }
+
+// --- identity providers (postgres) -----------------------------------------
+
+func (a *pgQuerier) CreateIdentityProvider(ctx context.Context, p model.CreateIdentityProviderParams) (model.IdentityProvider, error) {
+	row, err := a.q.CreateIdentityProvider(ctx, pg.CreateIdentityProviderParams(p))
+
+	return model.IdentityProvider(row), err
+}
+
+func (a *pgQuerier) GetIdentityProvider(ctx context.Context, p model.GetIdentityProviderParams) (model.IdentityProvider, error) {
+	row, err := a.q.GetIdentityProvider(ctx, pg.GetIdentityProviderParams(p))
+
+	return model.IdentityProvider(row), err
+}
+
+func (a *pgQuerier) GetIdentityProviderBySlug(ctx context.Context, p model.GetIdentityProviderBySlugParams) (model.IdentityProvider, error) {
+	row, err := a.q.GetIdentityProviderBySlug(ctx, pg.GetIdentityProviderBySlugParams(p))
+
+	return model.IdentityProvider(row), err
+}
+
+func (a *pgQuerier) ListIdentityProviders(ctx context.Context, orgID uuid.UUID) ([]model.IdentityProvider, error) {
+	rows, err := a.q.ListIdentityProviders(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.IdentityProvider, len(rows))
+	for i, r := range rows {
+		out[i] = model.IdentityProvider(r)
+	}
+
+	return out, nil
+}
+
+func (a *pgQuerier) UpdateIdentityProvider(ctx context.Context, p model.UpdateIdentityProviderParams) (model.IdentityProvider, error) {
+	row, err := a.q.UpdateIdentityProvider(ctx, pg.UpdateIdentityProviderParams(p))
+
+	return model.IdentityProvider(row), err
+}
+
+func (a *pgQuerier) SoftDeleteIdentityProvider(ctx context.Context, p model.SoftDeleteIdentityProviderParams) (int64, error) {
+	return a.q.SoftDeleteIdentityProvider(ctx, pg.SoftDeleteIdentityProviderParams(p))
+}
+
+func (a *pgQuerier) GetFederatedIdentity(ctx context.Context, p model.GetFederatedIdentityParams) (model.FederatedIdentity, error) {
+	row, err := a.q.GetFederatedIdentity(ctx, pg.GetFederatedIdentityParams(p))
+
+	return model.FederatedIdentity(row), err
+}
+
+func (a *pgQuerier) ListFederatedIdentitiesForUser(ctx context.Context, p model.ListFederatedIdentitiesForUserParams) ([]model.FederatedIdentity, error) {
+	rows, err := a.q.ListFederatedIdentitiesForUser(ctx, pg.ListFederatedIdentitiesForUserParams(p))
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.FederatedIdentity, len(rows))
+	for i, r := range rows {
+		out[i] = model.FederatedIdentity(r)
+	}
+
+	return out, nil
+}
+
+func (a *pgQuerier) LinkFederatedIdentity(ctx context.Context, p model.LinkFederatedIdentityParams) (model.FederatedIdentity, error) {
+	row, err := a.q.LinkFederatedIdentity(ctx, pg.LinkFederatedIdentityParams(p))
+
+	return model.FederatedIdentity(row), err
+}
+
+func (a *pgQuerier) RecordFederatedLogin(ctx context.Context, p model.RecordFederatedLoginParams) (int64, error) {
+	return a.q.RecordFederatedLogin(ctx, pg.RecordFederatedLoginParams(p))
+}
+
+// --- identity providers (sqlite) -----------------------------------------
+
+func (a *liteQuerier) CreateIdentityProvider(ctx context.Context, p model.CreateIdentityProviderParams) (model.IdentityProvider, error) {
+	row, err := a.q.CreateIdentityProvider(ctx, lite.CreateIdentityProviderParams(p))
+
+	return model.IdentityProvider(row), err
+}
+
+func (a *liteQuerier) GetIdentityProvider(ctx context.Context, p model.GetIdentityProviderParams) (model.IdentityProvider, error) {
+	row, err := a.q.GetIdentityProvider(ctx, lite.GetIdentityProviderParams(p))
+
+	return model.IdentityProvider(row), err
+}
+
+func (a *liteQuerier) GetIdentityProviderBySlug(ctx context.Context, p model.GetIdentityProviderBySlugParams) (model.IdentityProvider, error) {
+	row, err := a.q.GetIdentityProviderBySlug(ctx, lite.GetIdentityProviderBySlugParams(p))
+
+	return model.IdentityProvider(row), err
+}
+
+func (a *liteQuerier) ListIdentityProviders(ctx context.Context, orgID uuid.UUID) ([]model.IdentityProvider, error) {
+	rows, err := a.q.ListIdentityProviders(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.IdentityProvider, len(rows))
+	for i, r := range rows {
+		out[i] = model.IdentityProvider(r)
+	}
+
+	return out, nil
+}
+
+func (a *liteQuerier) UpdateIdentityProvider(ctx context.Context, p model.UpdateIdentityProviderParams) (model.IdentityProvider, error) {
+	row, err := a.q.UpdateIdentityProvider(ctx, lite.UpdateIdentityProviderParams(p))
+
+	return model.IdentityProvider(row), err
+}
+
+func (a *liteQuerier) SoftDeleteIdentityProvider(ctx context.Context, p model.SoftDeleteIdentityProviderParams) (int64, error) {
+	return a.q.SoftDeleteIdentityProvider(ctx, lite.SoftDeleteIdentityProviderParams(p))
+}
+
+func (a *liteQuerier) GetFederatedIdentity(ctx context.Context, p model.GetFederatedIdentityParams) (model.FederatedIdentity, error) {
+	row, err := a.q.GetFederatedIdentity(ctx, lite.GetFederatedIdentityParams(p))
+
+	return model.FederatedIdentity(row), err
+}
+
+func (a *liteQuerier) ListFederatedIdentitiesForUser(ctx context.Context, p model.ListFederatedIdentitiesForUserParams) ([]model.FederatedIdentity, error) {
+	rows, err := a.q.ListFederatedIdentitiesForUser(ctx, lite.ListFederatedIdentitiesForUserParams(p))
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.FederatedIdentity, len(rows))
+	for i, r := range rows {
+		out[i] = model.FederatedIdentity(r)
+	}
+
+	return out, nil
+}
+
+func (a *liteQuerier) LinkFederatedIdentity(ctx context.Context, p model.LinkFederatedIdentityParams) (model.FederatedIdentity, error) {
+	row, err := a.q.LinkFederatedIdentity(ctx, lite.LinkFederatedIdentityParams(p))
+
+	return model.FederatedIdentity(row), err
+}
+
+func (a *liteQuerier) RecordFederatedLogin(ctx context.Context, p model.RecordFederatedLoginParams) (int64, error) {
+	return a.q.RecordFederatedLogin(ctx, lite.RecordFederatedLoginParams(p))
+}

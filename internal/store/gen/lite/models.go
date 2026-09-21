@@ -11,6 +11,16 @@ import (
 	"github.com/google/uuid"
 )
 
+type FederatedIdentity struct {
+	ID          uuid.UUID
+	OrgID       uuid.UUID
+	ProviderID  uuid.UUID
+	UserID      uuid.UUID
+	Subject     string
+	CreatedAt   dbtypes.Time
+	LastLoginAt dbtypes.NullTime
+}
+
 type Group struct {
 	ID            uuid.UUID
 	OrgID         uuid.UUID
@@ -32,6 +42,29 @@ type GroupMember struct {
 	UserID  uuid.UUID
 	AddedAt dbtypes.Time
 	AddedBy uuid.NullUUID
+}
+
+type IdentityProvider struct {
+	ID            uuid.UUID
+	OrgID         uuid.UUID
+	Slug          string
+	Name          string
+	Kind          string
+	Issuer        string
+	ClientID      string
+	ClientSecret  string
+	Scopes        string
+	IsEnabled     dbtypes.Bool
+	AutoProvision dbtypes.Bool
+	DefaultRole   string
+	LinkByEmail   dbtypes.Bool
+	ClaimMapping  dbtypes.JSON
+	CreatedAt     dbtypes.Time
+	UpdatedAt     dbtypes.Time
+	CreatedBy     uuid.NullUUID
+	UpdatedBy     uuid.NullUUID
+	DeletedAt     dbtypes.NullTime
+	Version       int64
 }
 
 type LoginAttempt struct {

@@ -92,6 +92,18 @@ type Querier interface {
 	RevokeAllForSubject(context.Context, model.RevokeAllForSubjectParams) (int64, error)
 	CountRoleHolders(context.Context, model.CountRoleHoldersParams) (int64, error)
 
+	// Identity providers and the federated identities they issue.
+	CreateIdentityProvider(context.Context, model.CreateIdentityProviderParams) (model.IdentityProvider, error)
+	GetIdentityProvider(context.Context, model.GetIdentityProviderParams) (model.IdentityProvider, error)
+	GetIdentityProviderBySlug(context.Context, model.GetIdentityProviderBySlugParams) (model.IdentityProvider, error)
+	ListIdentityProviders(context.Context, uuid.UUID) ([]model.IdentityProvider, error)
+	UpdateIdentityProvider(context.Context, model.UpdateIdentityProviderParams) (model.IdentityProvider, error)
+	SoftDeleteIdentityProvider(context.Context, model.SoftDeleteIdentityProviderParams) (int64, error)
+	GetFederatedIdentity(context.Context, model.GetFederatedIdentityParams) (model.FederatedIdentity, error)
+	ListFederatedIdentitiesForUser(context.Context, model.ListFederatedIdentitiesForUserParams) ([]model.FederatedIdentity, error)
+	LinkFederatedIdentity(context.Context, model.LinkFederatedIdentityParams) (model.FederatedIdentity, error)
+	RecordFederatedLogin(context.Context, model.RecordFederatedLoginParams) (int64, error)
+
 	// Login attempts, for progressive lockout.
 	GetLoginAttempt(context.Context, model.GetLoginAttemptParams) (model.LoginAttempt, error)
 	RecordFailedLogin(context.Context, model.RecordFailedLoginParams) (model.LoginAttempt, error)

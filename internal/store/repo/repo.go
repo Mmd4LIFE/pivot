@@ -37,12 +37,13 @@ var (
 // covered by the unscoped-context check automatically — and one that is not
 // registered is not covered.
 type Repositories struct {
-	Organizations  *OrganizationRepo
-	Users          *UserRepo
-	Groups         *GroupRepo
-	UserAttributes *UserAttributeRepo
-	Sessions       *SessionRepo
-	Roles          *RoleRepo
+	Organizations     *OrganizationRepo
+	Users             *UserRepo
+	Groups            *GroupRepo
+	UserAttributes    *UserAttributeRepo
+	Sessions          *SessionRepo
+	Roles             *RoleRepo
+	IdentityProviders *IdentityProviderRepo
 
 	q      Querier
 	events *EventBus
@@ -61,14 +62,15 @@ func NewWithQuerier(q Querier) *Repositories {
 	b := base{q: q, events: events}
 
 	return &Repositories{
-		q:              q,
-		events:         events,
-		Organizations:  &OrganizationRepo{base: b},
-		Users:          &UserRepo{base: b},
-		Groups:         &GroupRepo{base: b},
-		UserAttributes: &UserAttributeRepo{base: b},
-		Sessions:       &SessionRepo{base: b},
-		Roles:          &RoleRepo{base: b},
+		q:                 q,
+		events:            events,
+		Organizations:     &OrganizationRepo{base: b},
+		Users:             &UserRepo{base: b},
+		Groups:            &GroupRepo{base: b},
+		UserAttributes:    &UserAttributeRepo{base: b},
+		Sessions:          &SessionRepo{base: b},
+		Roles:             &RoleRepo{base: b},
+		IdentityProviders: &IdentityProviderRepo{base: b},
 	}
 }
 

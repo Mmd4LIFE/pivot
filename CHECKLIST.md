@@ -53,8 +53,8 @@ At the end of every part, in this order:
 
 | | |
 |---|---|
-| **Last completed** | Part 7-b — Permission middleware and the administrative surface |
-| **Next up** | **Part 8 — OIDC single sign-on** |
+| **Last completed** | Part 8-a — OIDC protocol, claim mapping, and JIT provisioning |
+| **Next up** | **Part 8-b — SSO endpoints and Keycloak conformance** |
 | **Current phase** | Phase 0 — Foundations |
 | **Branch** | `main` |
 | **Blockers** | None |
@@ -65,12 +65,13 @@ logging, `/healthz`, `/readyz` (including a database check), and a graceful drai
 SIGTERM. **A user can log in over HTTP and call an authenticated endpoint.**
 `pivot migrate up|status|version|create` manages schema v4 on **both** SQLite and
 Postgres. `pivot config show|env` reports configuration. Packages with real code:
-`version`, `config`, `logging`, `api`, `auth`, `authz`, `cli`, `store`. Still `doc.go`
-stubs: `connectors`, `semantic`, `query`.
+`version`, `config`, `logging`, `api`, `auth`, `authz`, `oidc`, `cli`, `store`. Still
+`doc.go` stubs: `connectors`, `semantic`, `query`.
 
 **Dependencies:** cobra, yaml.v3, goose, pgx/v5, modernc.org/sqlite (pure Go — no CGo, so
 Part 13's six-platform cross-compile stays a single build matrix), google/uuid,
-x/crypto (argon2), x/term (no-echo password prompt).
+x/crypto (argon2), x/term (no-echo password prompt), coreos/go-oidc (ID token
+verification — two direct requires, and not something to hand-roll).
 
 **Authentication:** `internal/auth` owns credentials and sessions. Argon2id at m=64MB,
 PHC-encoded. Sessions are server-side with two expiries — a sliding idle timeout and an
@@ -113,21 +114,35 @@ install would have nobody who could ever grant anything; the second user gets no
 Removing the last administrator is refused over the API and merely warned about in the
 CLI, which is the recovery path.
 
+**SSO:** `internal/oidc` does Authorization Code + PKCE with auto-discovery, and verifies
+every ID token rather than decoding it. **A returning user is matched on the provider's
+`sub` claim and never on their email**: directories reassign addresses, and matching on
+one hands the next holder of ada@example.com the previous Ada's account. Adopting an
+existing local account by address is **opt-in per provider and off by default**
+(`link_by_email`), and even then requires `email_verified` — it exists for the window in
+which an organization migrates onto SSO. Group membership follows the directory in both
+directions; groups are matched by name and **never created**, because a directory with
+hundreds of them would otherwise fill the organization with empty ones. Attributes are
+written with `source = 'oidc'`, so a sync replaces exactly what the provider owns and
+leaves anything set by hand alone. **`identity_providers.client_secret` is stored in
+plaintext** — Part 15 owns envelope encryption for this column and Phase 1's connection
+credentials together.
+
 **Tenant isolation:** `internal/tenant.Scope` has unexported fields and no usable zero
 value. Repositories take **no org parameter at all** — they read the scope from the
 context — so a caller cannot pass the wrong tenant because there is nothing to pass.
 `OrganizationRepo` acts on the caller's own org; unscoped provisioning lives on
 `SystemRepo`, named so every call site says what it is doing. A reflection test walks
 `Repositories`' exported fields, so **a repository is covered the moment it is registered
-in that struct** — it asserts all 41 methods refuse an unscoped context, and it is
+in that struct** — it asserts all 48 methods refuse an unscoped context, and it is
 mutation-verified. `api.WithTenant` rejects an unresolvable request with 401 before any
 handler runs, and the scope now comes from `api.SessionTenantResolver` — the organization
 is read off the session row and from nowhere in the request, so a caller cannot name a
 tenant they have not authenticated against. `SingleTenantResolver` survives for tests
 only and is wired nowhere.
 
-**Schema is at v4.** Migration 00003 added `sessions` and `login_attempts`; 00004 added
-`role_assignments`.
+**Schema is at v5.** 00003 added `sessions` and `login_attempts`; 00004 added
+`role_assignments`; 00005 added `identity_providers` and `federated_identities`.
 
 **Polymorphic subjects, closed in 7-b.** `role_assignments.subject_id` and `object_id`
 are polymorphic — a subject is a user *or* a group — so they carry no foreign key and
@@ -189,7 +204,7 @@ needs an entry in `sqlc.yaml`'s SQLite override list**, or the packages silently
 ## Progress
 
 ```
-Phase 0  Foundations        [███████████         ] 11/19   (Parts 3, 4, 6 and 7 each split)
+Phase 0  Foundations        [████████████        ] 12/20   (Parts 3, 4, 6, 7 and 8 each split)
 Phase 1  Connect & Query    [                    ]  0/12   (detailed at Part 15)
 Phase 2+ ...                                            (expanded as we approach)
 ```
@@ -546,21 +561,73 @@ verifiable rather than hopeful.
 
 ---
 
-### - [ ] Part 8 — OIDC single sign-on
+### - [x] Part 8-a — OIDC protocol, claim mapping, and JIT provisioning ✅ 2026-09-21
+
+*Part 8 was split: the protocol and provisioning domain is a session; the HTTP
+endpoints and Keycloak conformance are another. The same domain-then-surface split as
+Parts 6 and 7.*
+
+**Deliverable:** A verified OpenID Connect identity becomes a Pivot user, with no HTTP
+surface of Pivot's own yet.
+
+**Built:**
+- `internal/oidc`: Authorization Code + PKCE, auto-discovery with caching, ID token
+  verification, nonce checking, claim mapping
+- Schema v5: `identity_providers` and `federated_identities`
+- `IdentityProviderRepo` (7 scoped methods) plus the unscoped lookups login needs
+- JIT provisioning: user creation, group sync, attribute sync with `source = 'oidc'`,
+  default role grant
+- A fake identity provider in the tests that signs real RS256 tokens
+
+**Done when:**
+- A new user is JIT-provisioned on first login with correct group mapping ✅
+- Claims land in `user_attributes` with `source = 'oidc'` ✅
+- *(The Keycloak testcontainer check moves to 8-b, with the endpoints it exercises.)*
+
+**The protocol checks are tested by making tokens wrong on purpose** — a bad signature, a
+foreign issuer, a replayed nonce, a mismatched PKCE verifier. A real identity provider
+will not issue you a token it has broken, which is why the in-process fake exists
+alongside the Keycloak test rather than instead of it. Signature verification is
+mutation-verified.
+
+**Refs:** `P0-AUTH-003`, `P0-AUTH-010`
+
+---
+
+### - [ ] Part 8-b — SSO endpoints and Keycloak conformance
 
 **Deliverable:** SSO login working end to end against a real identity provider.
 
 **Build:**
-- OIDC Authorization Code + PKCE with auto-discovery
-- `identity_providers` table and admin configuration
-- Attribute and group claim mapping → `user_attributes` (this feeds RLS in Phase 4)
-- Just-in-time user provisioning
-- Multi-provider support scaffolding
+- `GET /api/v1/auth/oidc/{provider}/start` and `/callback`
+- Flow state across the redirect: `state`, `nonce` and the PKCE verifier in a short-lived
+  `HttpOnly` cookie. `SameSite=Lax` is required rather than `Strict` — the callback is a
+  top-level navigation *from the identity provider*, and Strict would drop the cookie and
+  break every login
+- Issue a Pivot session on success, reusing `auth.Service` so SSO and password logins
+  produce the same thing
+- `GET /api/v1/auth/providers` — the login page needs the buttons before anyone is
+  authenticated, so this is unauthenticated and must expose **only** slug and display
+  name
+- Admin CRUD for providers, gated on `manage_organization`; the client secret is
+  write-only in the API
+- `pivot admin add-provider`, so a first provider can be configured before anyone can log
+  in to configure one
+- Multi-provider: resolve the organization before the slug
+- Extend `api/openapi.yaml` and regenerate the TS client
 
 **Done when:**
 - An integration test logs in via a **Keycloak testcontainer**, end to end
-- A new user is JIT-provisioned on first login with correct group mapping
-- Claims land in `user_attributes` with `source = 'oidc'`
+- The callback rejects a mismatched `state`, and a second use of the same code fails
+- A provider response never contains `clientSecret` (assert on the JSON)
+- Logging in through SSO produces a session indistinguishable from a password login
+
+**Notes:** The Keycloak image is a large pull on this network — **hand the user the
+`docker pull` rather than running it in-session**, and skip the test when the image is
+absent so the suite stays green without it.
+
+`internal/oidc` is already done and tested; this part is the surface on top of it.
+`oidc.Registry` caches discovery, so build one per process and share it.
 
 **Refs:** `P0-AUTH-003`, `P0-AUTH-010`
 
@@ -770,6 +837,7 @@ Newest first. Record what **actually** shipped, including what didn't work.
 
 | Date | Part | Shipped | Notes |
 |---|---|---|---|
+| 2026-09-21 | 8-a | `internal/oidc` (discovery with caching, PKCE, ID token verification, claim mapping), schema v5 `identity_providers` + `federated_identities`, `IdentityProviderRepo`, JIT provisioning with group and attribute sync, and an in-process identity provider that signs real RS256 tokens | **Split Part 8** — the protocol and provisioning domain is a session, the endpoints and Keycloak conformance are another. **A test of mine found a real hole in my own design.** I asserted that a recycled email address must not hand over the original account; it did, because my provisioning linked by email unconditionally. Closing the front door (match on `sub`) while leaving the side door open (link on email) is worth exactly nothing. Fixed by making `link_by_email` **opt-in per provider and off by default**, and requiring `email_verified` even when it is on. Two new tests pin the default down. The migration was edited in place rather than amended, because it had not been committed or applied anywhere. Also added email sync for returning users, which is safe precisely because identity was already settled by subject — the address moves, the account cannot. **The rejection paths are tested by breaking tokens on purpose:** bad signature, foreign issuer, replayed nonce, mismatched PKCE verifier. That is the whole reason for the in-process provider — a real Keycloak will not issue you a token it has broken — and it sits alongside 8-b's container test rather than replacing it. Signature verification is mutation-verified: turning it off fails two tests by name. `go-oidc` was chosen over hand-rolling because ID token verification is not something to hand-roll; it costs two direct requires. 12 Postgres subtests, 0 skips. |
 | 2026-09-21 | 7-b | `api.RequirePermission`, the role catalog and role-assignment endpoints, administrative session revoke, effective permissions on `/auth/me`, `pivot admin grant-role` / `revoke-role`, first-user-becomes-admin, last-admin protection, and 13 endpoint-level rows added to the same assertion file | **The endpoint table is the part worth keeping.** `internal/authz` asserts what the checker *decides*; this asserts that the HTTP surface actually *asks* it — a different failure, and the likelier one, since a model can be perfectly correct while a route forgets to be gated. Both halves read one specification file. **Mutation-verified:** dropping `RequirePermission` from the role routes fails three rows by name with `= 200, want 403`. **403 and 503 are deliberately different answers.** A denial is a decision; an unreachable checker is not. Answering 403 during an outage would send a properly-permitted user to argue with an administrator about a permission they already have. A nil checker denies as well, so an instance that booted without authorization wired up cannot serve as though everyone were an admin. **Closed the referential gap 7-a recorded**: grants now verify the subject exists in the caller's organization, and deleting a user or group revokes its grants — the columns are polymorphic so nothing cascades on its own. **The first user in an organization becomes its admin**, without which a fresh install has nobody who can grant anything and is complete and unusable; the second user gets nothing, so it is not a standing escalation. All four `Done when` items verified against a live server, including the last-admin refusal (422, and the admin keeps access afterwards). **US spelling caught me again** — `catalogue` failed lint three times; the environment note exists and I still wrote it. |
 | 2026-09-21 | 7-a | `internal/authz` (Checker, Resolver, Cache, Enforce), authorization model v1 with four built-in roles, schema v4 `role_assignments` as Zanzibar tuples, `RoleRepo`, and a declarative assertion file of 26 rows run against both engines | **Split Part 7** — the model and the decision engine are a session, the middleware and admin surface are another. **The OpenFGA spike came back positive, which is not what this part expected.** `openfga v1.21.0` embeds in-process, pure Go, on `modernc.org/sqlite` and `pgx/v5` — our own drivers — so ADR-0009's "if embedded mode proves immature" trigger was *not* met. Measured: 115 → 244 modules, 16 MB → 26 MB. Deferred anyway, on the narrower ground that Phase 0's model is flat and exercises none of Zanzibar's recursion, with the reasoning and numbers recorded as a dated ADR amendment rather than a silent choice. **This is a judgment call worth the user's review**, which is why the spike output is in the ADR rather than only in a commit message. The deferral is made safe by three things, not by hope: grants are stored as tuples so migration is an export plus a `Write`; everything asks through `authz.Checker`; and the model is specified as *data* in `testdata/model_v1.yaml`, which a future OpenFGA checker must satisfy unchanged. **Mutation-verified twice:** making `Enforce` swallow an unavailable backend fails the fail-closed suite by name, and deleting group expansion fails the harness on exactly the inherited-role rows. **A test of mine was wrong and the code was right:** I asserted that a cycle in group nesting should error, but the visited set already resolves it correctly — a cycle means membership in both groups. Split into two honest tests: cycles terminate with an answer, unbounded *chains* hit the depth cap. **An em dash cost an hour.** sqlc's SQLite generator rewrites queries by byte offset and miscounts on multibyte characters, corrupting output into `SELECid` while pointing at valid SQL — the same mechanism as Part 3-b's `?`-in-a-comment bug. `TestQueryFilesAreASCII` and `TestSQLiteQueriesAvoidNamedArguments` now fail by name instead. |
 | 2026-09-21 | 6-b | The five `/api/v1/auth/*` endpoints, the session cookie, `api.SessionTenantResolver` replacing the single-tenant stand-in, an `auth` configuration section, spec + TS client, startup sweep of expired sessions | **A test found a real authorization hole.** `SessionRepo.Revoke` is scoped to the organization but not to the user, so any member could have ended any other member's session — the right power for an administrator, the wrong one for the endpoint that manages your own devices. Added `RevokeSessionForUser`, which names the user in the `WHERE` clause, so someone else's session is simply not found. Fixed in SQL rather than with a check in the handler, for the same reason Part 4-b fixed its hole in the schema. **Mutation-verified twice:** swapping `RevokeOwn` back to `Revoke` produces `returned 204, want 404` *and* ends the victim's session; removing the limiter from the login chain makes the throttling test fail. That second test asserts indirectly and is stronger for it — every login that reaches the service records a failed attempt, so the recorded count *is* the number of requests that got past the limiter. **`make test-all` was being killed outright**, which I had assumed was a timeout: `go test ./...` starts one binary per package at once, and several hash with Argon2 at 64 MiB under the race detector. Test targets now pass `-p 1`; the suite runs in ~30s and this matters more on a 2-core CI runner than it did here. All five `Done when` items verified against a live server, including the lockout: 429 `PIVOT-RATE-001` and 429 `PIVOT-AUTH-005` are distinguishable on the wire, which is the concrete case the error registry's "codes are independent of status" rule was written for. |

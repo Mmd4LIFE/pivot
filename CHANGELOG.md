@@ -13,6 +13,26 @@ newest first within each section.
 
 ### Added
 
+**OpenID Connect — Part 8-a**
+- `internal/oidc`: Authorization Code with PKCE, auto-discovery, and ID token
+  verification. Tokens are **verified**, never merely decoded — signature
+  against the provider's published keys, issuer, audience, expiry, and the
+  nonce this login issued. A decoded-but-unverified token is a string the
+  caller supplied
+- **A returning user is matched on the provider's `sub` claim, never on their
+  email.** Directories reassign addresses; matching on one hands the next
+  holder of an address the previous holder's account
+- Adopting an existing local account by address is opt-in per provider and off
+  by default, and requires `email_verified` even when enabled. It exists for
+  the window in which an organization migrates its users onto SSO
+- Just-in-time provisioning, with a default role so a new user can do something
+- Group membership follows the directory both ways. Groups are matched by name
+  and never created: a directory with hundreds of them would otherwise fill the
+  organization with empty ones. Unmatched names are reported
+- Claims land in `user_attributes` with `source = 'oidc'`, so a later sync
+  replaces exactly what the provider owns and leaves manual entries alone
+- Schema v5: `identity_providers` and `federated_identities`
+
 **Permission enforcement — Part 7-b**
 - `api.RequirePermission` gates a route after the tenant chain, so a handler
   never runs without both an identity and a decision
