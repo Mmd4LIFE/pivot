@@ -133,10 +133,23 @@ vet: ## Run go vet
 check: fmt vet lint test ## Run everything CI runs
 
 # ── Tooling ──────────────────────────────────────────────────────────────────
+OPENAPI_SPEC := api/openapi.yaml
+TS_CLIENT    := web/src/api/schema.d.ts
+
 .PHONY: gen
 gen: $(TOOLS_DIR)/sqlc ## Generate typed query code from SQL
 	$(TOOLS_DIR)/sqlc generate
 	@echo "generated; run 'git diff --exit-code' to confirm it is committed"
+
+.PHONY: gen-client
+gen-client: ## Generate the TypeScript client from the OpenAPI spec
+	@mkdir -p $(dir $(TS_CLIENT))
+	npx --yes openapi-typescript@7 $(OPENAPI_SPEC) -o $(TS_CLIENT)
+	@echo "generated $(TS_CLIENT)"
+
+.PHONY: validate-spec
+validate-spec: ## Check that the OpenAPI spec parses and is self-consistent
+	go test ./internal/api/ -run TestOpenAPISpec -count=1 -v 2>&1 | grep -E "^(=== RUN|--- |ok|FAIL)"
 
 .PHONY: gen-check
 gen-check: gen ## Fail if generated code is out of date (for CI)

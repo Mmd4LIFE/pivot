@@ -1,0 +1,231 @@
+openapi: 3.1.0
+
+# This spec is the source of truth for Pivot's HTTP surface.
+#
+# The UI is a client of this API, not a privileged caller (architectural rule
+# 2), so anything the frontend can do is described here. The TypeScript client
+# is generated from this file — see `make gen-client` — which means an endpoint
+# that is not documented here is one the frontend cannot call.
+#
+# Handlers are added here first, then implemented. That ordering is what stops
+# the public API becoming an afterthought shaped by whatever the UI happened to
+# need.
+
+info:
+  title: Pivot API
+  version: 0.1.0
+  summary: The open business intelligence platform for the AI era.
+  description: |
+    Every non-2xx response uses the same error envelope, carrying a stable
+    machine-readable `code`. Codes never change meaning and are never reused,
+    so a client may branch on them safely.
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+  contact:
+    name: Pivot
+    url: https://github.com/Mmd4LIFE/pivot
+
+servers:
+  - url: /
+    description: This instance
+
+tags:
+  - name: health
+    description: Liveness and readiness probes
+  - name: system
+    description: Instance metadata
+
+paths:
+  /healthz:
+    get:
+      tags: [health]
+      operationId: getLiveness
+      summary: Liveness probe
+      description: |
+        Reports only that the process is running and should not be restarted.
+
+        It deliberately does **not** consult dependencies: a database outage
+        must not cause an orchestrator to kill every Pivot pod, which would
+        turn a recoverable dependency failure into a total outage.
+      security: []
+      responses:
+        "200":
+          description: The process is alive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              example:
+                status: ok
+                version: 1.0.0
+
+  /readyz:
+    get:
+      tags: [health]
+      operationId: getReadiness
+      summary: Readiness probe
+      description: |
+        Reports whether this instance should receive traffic. Fails while the
+        instance is shutting down, and whenever a registered dependency check
+        fails.
+      security: []
+      responses:
+        "200":
+          description: Ready for traffic
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "503":
+          description: Not ready — shutting down, or a dependency is failing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              example:
+                status: not_ready
+                version: 1.0.0
+                checks:
+                  database: "error: connection refused"
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: pivot_session
+      description: |
+        Server-side session. Stateless tokens are deliberately not used for
+        browser sessions: they cannot be revoked before expiry, and "remove
+        this person's access" has to mean now. Added in Part 6.
+
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status, version]
+      properties:
+        status:
+          type: string
+          description: One of `ok`, `not_ready`, or `shutting_down`.
+          examples: [ok]
+        version:
+          type: string
+          description: The running build's version.
+        checks:
+          type: object
+          description: Per-dependency results. Present only on the readiness probe.
+          additionalProperties:
+            type: string
+
+    ErrorDetail:
+      type: object
+      required: [message]
+      properties:
+        field:
+          type: string
+          description: The offending field, for validation failures.
+          examples: [email]
+        message:
+          type: string
+          examples: [is required]
+
+    ErrorBody:
+      type: object
+      required: [code, message, docs]
+      properties:
+        code:
+          type: string
+          pattern: "^PIVOT-[A-Z]+-[0-9]{3}$"
+          description: |
+            A stable, machine-readable identifier. Independent of the HTTP
+            status: the status says how the transport should behave, the code
+            says what went wrong. Branch on this, never on the message.
+          examples: [PIVOT-REQ-003]
+        message:
+          type: string
+          description: A human-readable explanation. May change; do not parse it.
+        details:
+          type: array
+          description: Per-field problems, for validation failures.
+          items:
+            $ref: "#/components/schemas/ErrorDetail"
+        requestId:
+          type: string
+          description: Correlation ID, echoed in the `X-Request-Id` header.
+        docs:
+          type: string
+          format: uri
+          description: Documentation for this error code.
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorBody"
+
+  responses:
+    BadRequest:
+      description: The request was malformed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    Unauthorized:
+      description: Authentication is required, or the tenant could not be resolved
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    Forbidden:
+      description: Authenticated, but not permitted
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    NotFound:
+      description: No such resource
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    Conflict:
+      description: A version conflict or a duplicate
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    UnprocessableEntity:
+      description: The body failed validation
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    TooManyRequests:
+      description: Rate limited. `Retry-After` gives the wait in seconds.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: Seconds to wait before retrying.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    InternalServerError:
+      description: An unexpected error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+security:
+  - sessionCookie: []

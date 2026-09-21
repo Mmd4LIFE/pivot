@@ -9,6 +9,18 @@ breaking API changes bump major, no exceptions.
 ## [Unreleased]
 
 ### Added
+- Standard error envelope on every non-2xx response, carrying a stable
+  machine-readable code (`PIVOT-<AREA>-<NNN>`), a correlation ID, and a
+  documentation link. Codes are independent of HTTP status so two failures
+  that share a status stay distinguishable — *Part 5*
+- Middleware chain: request ID, structured access logging, panic recovery,
+  security headers, CORS (closed by default), body-size limit, rate limiting
+- Per-endpoint-class rate limiting with `Retry-After`; health probes are
+  exempt, so an orchestrator never kills a healthy instance for being busy
+- Request decoding that validates at the boundary and rejects unknown fields,
+  rather than silently discarding a misspelled one
+- `api/openapi.yaml` as the source of truth, with tests asserting the spec
+  against the code, and `make gen-client` for the TypeScript client
 - Group repository with nesting and membership, and a user-attribute
   repository that tracks provenance so an identity-provider sync can replace
   what it owns without disturbing manual assignments — *Part 4-b*

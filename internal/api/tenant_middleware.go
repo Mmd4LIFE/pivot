@@ -61,8 +61,10 @@ func WithTenant(resolver TenantResolver, log *slog.Logger) func(http.Handler) ht
 					logging.Err(err),
 				)
 
-				writeJSON(r.Context(), w, http.StatusUnauthorized, healthResponse{
-					Status: "unauthorized",
+				WriteError(w, r, &APIError{
+					Code:    CodeTenantUnknown,
+					Message: CodeTenantUnknown.Summary(),
+					Err:     err,
 				})
 
 				return

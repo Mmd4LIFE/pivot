@@ -23,7 +23,12 @@ type Server struct {
 	cfg    config.ServerConfig
 	log    *slog.Logger
 	http   *http.Server
+	router *Router
 	checks []Check
+
+	// tenantResolver attributes requests to an organization. Nil until Part 6
+	// supplies sessions; the server is explicitly unscoped until then.
+	tenantResolver TenantResolver
 
 	// ready gates /readyz. It flips false the instant shutdown begins, before
 	// draining starts, so a load balancer stops sending new work while
@@ -38,11 +43,17 @@ type Server struct {
 // Option configures a [Server].
 type Option func(*Server)
 
-// WithCheck registers a readiness check. Checks run on every /readyz request;
-// none are registered yet, so readiness currently reflects only whether the
-// server is serving.
+// WithCheck registers a readiness check. Checks run on every /readyz request.
 func WithCheck(c Check) Option {
 	return func(s *Server) { s.checks = append(s.checks, c) }
+}
+
+// WithTenantResolver attributes requests to an organization.
+//
+// Without it the API is unscoped, which is valid only until Part 6 supplies
+// sessions — and is why this is an explicit option rather than a default.
+func WithTenantResolver(tr TenantResolver) Option {
+	return func(s *Server) { s.tenantResolver = tr }
 }
 
 // New builds a server. It does not bind a port; [Server.Run] does that.
@@ -53,11 +64,16 @@ func New(cfg config.ServerConfig, log *slog.Logger, opts ...Option) *Server {
 		opt(s)
 	}
 
-	mux := http.NewServeMux()
-	s.routes(mux)
+	s.router = NewRouter(RouterConfig{
+		Log:            log,
+		CORS:           DefaultCORS(),
+		TenantResolver: s.tenantResolver,
+		Checks:         s.checks,
+	})
+	s.router.setReady(&s.ready)
 
 	s.http = &http.Server{
-		Handler:           mux,
+		Handler:           s.router.Handler(),
 		ReadHeaderTimeout: cfg.ReadHeaderTimeout.Duration(),
 		ReadTimeout:       cfg.ReadTimeout.Duration(),
 		WriteTimeout:      cfg.WriteTimeout.Duration(),
@@ -69,13 +85,6 @@ func New(cfg config.ServerConfig, log *slog.Logger, opts ...Option) *Server {
 	}
 
 	return s
-}
-
-// routes registers the HTTP surface. Part 5 replaces this with the full
-// middleware chain and the versioned API router.
-func (s *Server) routes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /healthz", s.handleLive)
-	mux.HandleFunc("GET /readyz", s.handleReady)
 }
 
 // Addr returns the bound address, or "" before [Server.Run] has bound one.

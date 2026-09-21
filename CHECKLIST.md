@@ -53,8 +53,8 @@ At the end of every part, in this order:
 
 | | |
 |---|---|
-| **Last completed** | Part 4-b — Groups, membership, and request scoping |
-| **Next up** | **Part 5 — HTTP API foundations** |
+| **Last completed** | Part 5 — HTTP API foundations |
+| **Next up** | **Part 6 — Authentication: passwords & sessions** |
 | **Current phase** | Phase 0 — Foundations |
 | **Branch** | `main` |
 | **Blockers** | None |
@@ -85,6 +85,16 @@ foreign keys composite on `(id, org_id)`. The v1 single-column keys let a row na
 organization while pointing at another's user — **a real cross-tenant write hole**, found
 by a test. Any new child table must use composite keys for the same reason.
 
+**HTTP surface:** `api.NewRouter` composes the middleware chain — request ID, logging,
+recovery, security headers, CORS, body limit, rate limit, tenant — in that order, and the
+order is a security property documented on the function. Every non-2xx response uses one
+envelope with a stable `PIVOT-<AREA>-<NNN>` code; `api.FromError` is the single
+translation point from repository and tenancy errors. Codes live in a registry that a test
+checks for uniqueness, format, and a sane status. **`api/openapi.yaml` is the source of
+truth** and tests assert it against the code: documented paths must not 404, and the
+spec's code pattern must match every registered code. `make gen-client` regenerates the
+TypeScript client (needs Node, which is installed).
+
 **Generated code:** `make gen` runs sqlc; output in `internal/store/gen/{pg,lite}` is
 committed. The two packages are byte-identical apart from the package clause, so Go allows
 direct struct conversion between them — Part 4 needs one conversion per type, not a
@@ -110,7 +120,7 @@ needs an entry in `sqlc.yaml`'s SQLite override list**, or the packages silently
 ## Progress
 
 ```
-Phase 0  Foundations        [███████             ]  6/17   (Parts 3 and 4 each split)
+Phase 0  Foundations        [████████▏           ]  7/17   (Parts 3 and 4 each split)
 Phase 1  Connect & Query    [                    ]  0/12   (detailed at Part 15)
 Phase 2+ ...                                            (expanded as we approach)
 ```
@@ -300,7 +310,7 @@ mutating one, exactly as Part 4-a did — a test that cannot fail is worth nothi
 
 ---
 
-### - [ ] Part 5 — HTTP API foundations
+### - [x] Part 5 — HTTP API foundations ✅ 2026-09-21
 
 **Deliverable:** A middleware stack and error contract that every future endpoint inherits.
 
@@ -602,6 +612,7 @@ Newest first. Record what **actually** shipped, including what didn't work.
 
 | Date | Part | Shipped | Notes |
 |---|---|---|---|
+| 2026-09-21 | 5 | Error envelope with a 15-code registry, middleware chain (request ID, logging, recovery, security headers, CORS, body limit, rate limit), hand-rolled token-bucket limiter, boundary decoding with validation, `api/openapi.yaml` + TS client generation | All `Done when` checks verified live: unknown API path returns the envelope with a code and request ID; 100 rapid requests produced 43 × 429 with `Retry-After`; a panicking handler returns a coded 500 without leaking the panic value, and the server serves the next request. **Health probes are deliberately exempt from rate limiting** — throttling a readiness probe makes an orchestrator kill a healthy instance exactly when it is busiest. **CORS defaults to closed**, and a wildcard origin combined with credentials is refused rather than silently downgraded, since that combination turns any website into an authenticated client. The request-ID middleware sanitizes and length-bounds a client-supplied value: it lands in every log line for that request, so an unvalidated one is log injection. Spec-drift tests keep `openapi.yaml` honest — a documented path that 404s fails the build. Needed a `Router` type, so `Server.routes` moved and the shutdown tests were rewired to `router.Mux()`. |
 | 2026-09-20 | 4-b | `GroupRepo` (CRUD, nesting, membership), `UserAttributeRepo` (provenance-aware upsert), 34 adapter methods, `api.WithTenant` middleware, audit subscriber, **schema v2** | **A test found a real cross-tenant write hole.** The v1 foreign keys on `group_members` and `user_attributes` referenced `groups(id)` and `users(id)` alone, so each key was satisfied independently and `(org_id=A, group_id=A's, user_id=B's)` was accepted — every ID existed, nothing tied the user to the organization the row claimed. Migration 00002 makes the keys composite on `(id, org_id)`; SQLite needed full table rebuilds since it cannot alter a constraint. Fixed at the database level rather than with a check in Go, because "structural, not conventional" is the whole point of Part 4. **Also corrected fiction in this checklist:** the reflection test claimed to pick up new repositories automatically but hardcoded its target list. It now walks `Repositories`' exported fields — 30 methods across 4 repositories — and was mutation-verified on a *newly added* method (`GroupRepo.IsMember`) to prove the discovery works. |
 | 2026-09-20 | 4-a | `internal/tenant` scope, `internal/store/model` domain types, `repo` package with both engine adapters, base (scoping + soft delete + version + change events), organizations and users repositories, isolation suite | **Split Part 4** — scoping machinery plus two repositories is a session; groups and HTTP wiring is another. All four `Done when` criteria verified on both engines, 19 Postgres subtests with 0 skips. **The key test was mutation-verified:** removing the scope check from `UserRepo.Get` made `TestEveryMethodRefusesAnUnscopedContext` fail by name on both engines, so the reflection walk genuinely catches drift rather than passing vacuously. Three Go subtleties cost time: struct conversion requires field types to be *identical*, so `model.NullString` had to become an alias for `sql.NullString` rather than an equivalent struct; the limit/offset field-order difference I called cosmetic in 3-b actually **breaks** conversion, so those two adapter methods construct params by name; and `sqlc`'s `rename:` was needed to emit `AvatarURL`, since staticcheck rejects `AvatarUrl` but renaming only in `model` would have broken every conversion. |
 | 2026-09-20 | 3-b | sqlc wired for both dialects: 22 queries x 2, generated packages in `internal/store/gen/{pg,lite}`, `dbtypes` custom column types, `make gen` / `gen-check`, round-trip tests on both engines | **Two sqlc bugs cost most of the session.** (1) A literal `?` inside a SQL *comment* is counted as a placeholder, shifting substitution offsets and corrupting output into tokens like `RETURNINid` — the comment explaining the placeholder rule was itself breaking generation. (2) A placeholder in a SQLite `DO UPDATE` clause is emitted in the SQL but *omitted from the bound arguments*, so the upsert would have failed at runtime with an argument-count mismatch; fixed by routing `updated_at` through the INSERT column list and reading it back via `excluded`. Also: numbered params are mis-substituted, and `LIMIT` infers `int32` on Postgres vs `int64` on SQLite (fixed with `sqlc.arg(...)::bigint`). **Portability tax measured: ~16%**, marginally over ADR-0003's threshold — recorded as a dated measurement in the ADR with the reasoning for keeping SQLite. The `dbtypes` overrides make both generated packages byte-identical apart from the package clause, so Go permits direct struct conversion and Part 4 needs one conversion per type rather than a per-engine mapping. |

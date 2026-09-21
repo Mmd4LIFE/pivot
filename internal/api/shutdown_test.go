@@ -31,11 +31,9 @@ func drainTestServer(
 	log := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	srv := New(cfg, log)
 
-	// Replace the mux with one that also serves the slow endpoint.
-	mux := http.NewServeMux()
-	srv.routes(mux)
-	mux.HandleFunc("GET /slow", handler)
-	srv.http.Handler = mux
+	// The server's handler already wraps this mux, so registering here adds
+	// the endpoint to the live chain without rebuilding it.
+	srv.router.Mux().HandleFunc("GET /slow", handler)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
@@ -243,14 +241,11 @@ func TestShutdownTimeoutReportsError(t *testing.T) {
 
 	started := make(chan struct{})
 
-	mux := http.NewServeMux()
-	srv.routes(mux)
-	mux.HandleFunc("GET /stuck", func(w http.ResponseWriter, _ *http.Request) {
+	srv.router.Mux().HandleFunc("GET /stuck", func(w http.ResponseWriter, _ *http.Request) {
 		close(started)
 		<-release
 		w.WriteHeader(http.StatusOK)
 	})
-	srv.http.Handler = mux
 
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
