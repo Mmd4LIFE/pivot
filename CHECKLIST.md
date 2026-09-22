@@ -1061,9 +1061,11 @@ and `make check | audit | coverage-gate | bundle-size | image`.
       threshold, the audit at a lowered one, the bundle budget's own arithmetic
 - [x] The image builds and starts — 22.9 MB distroless, `docker run pivot:ci version`
 - [x] No third-party actions at all: only `actions/*`, pinned binaries, and pinned images
-- [x] **First run on GitHub: four of five jobs green** — Go 4m, End to end 2m, Frontend 1m,
-      Image 1m. Security went red for a real reason, now fixed: see the toolchain note in
-      Current state.
+- [x] **Green on GitHub.** The first run was four of five: Security went red because CI was
+      building with the `go` directive rather than a patched toolchain, which is a real
+      finding and is fixed. The second run is **five of five in ~4 minutes wall-clock on a
+      cold cache** — Go 4m, End to end 1m, Image 1m, Security 47s, Frontend 43s — against a
+      ten-minute budget.
 
 **Refs:** `P0-CI-001` … `P0-CI-006`
 
@@ -1080,8 +1082,9 @@ the runner has different Go and Node versions, a two-core machine, a service con
 instead of a compose file, and no warm caches.
 
 **Done when:**
-- All five jobs pass on `main` — four did on the first run; the Security fix is pushed and
-  unverified
+- [x] All five jobs pass on `main` — five of five, ~4 minutes cold
+- [x] **Total wall-clock under 10 minutes** on a cold cache; the warm number still wants
+      recording
 - A deliberately broken pull request is correctly blocked — break one thing per gate and
   confirm the right job goes red: a `gofmt` violation, an uncovered new package, an
   oversized bundle, a planted fake secret, a Dockerfile typo
