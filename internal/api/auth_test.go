@@ -909,3 +909,12 @@ func TestTenantComesFromTheSessionNotTheRequest(t *testing.T) {
 		}
 	})
 }
+
+// decodeInto unmarshals a response body into any destination.
+func decodeInto(resp response, into any) error {
+	return json.Unmarshal(resp.body, into)
+}
+
+// contains is strings.Contains, named locally so the intent reads at the call
+// site: "the response body contains the secret".
+func contains(haystack, needle string) bool { return strings.Contains(haystack, needle) }

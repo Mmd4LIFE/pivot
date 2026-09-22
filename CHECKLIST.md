@@ -53,8 +53,8 @@ At the end of every part, in this order:
 
 | | |
 |---|---|
-| **Last completed** | Part 13-b — The release pipeline |
-| **Next up** | **Part 14 — Observability** |
+| **Last completed** | Part 14-a — The API's untested half |
+| **Next up** | **Part 14-b — Observability** |
 | **Current phase** | Phase 0 — Foundations |
 | **Branch** | `main` |
 | **Blockers** | None |
@@ -282,18 +282,17 @@ It runs with `-coverpkg=./...` **and Postgres**, which matters: `internal/store/
 65.8% without Postgres and 82.5% with it. Generated code and `cmd/pivot` are excluded, and
 that list is meant to stay short.
 
-**Five packages are below the line today**, and the first pull request to touch one has to
-bring it up. `internal/cli` was the sixth and worst at 30.4%; Part 13-a paid it to 86.1%
-because the container's `HEALTHCHECK` needed a command in that package:
+**Three packages are below the line today**, and the first pull request to touch one has
+to bring it up. Three others have been paid off, each because a part needed to touch them:
+`internal/cli` 30.4% → 86.1% (Part 13-a), `internal/api` 70.0% → 80.5% and
+`internal/config` 65.7% → 87.3% (Part 14-a). The remaining three are all small:
 
 | Package | Coverage | Statements |
 |---|---|---|
 | `internal/store/model` | 50.0% | 6 |
 | `internal/store/dbtypes` | 61.1% | 95 |
-| `internal/config` | 65.7% | 204 |
 | `internal/version` | 68.4% | 19 |
 | `internal/auth` | 69.3% | 264 |
-| `internal/api` | 70.0% | 1475 |
 
 That is the gate working as designed and it will not feel like it. `internal/api` is the
 expensive one.
@@ -443,7 +442,7 @@ needs an entry in `sqlc.yaml`'s SQLite override list**, or the packages silently
 ## Progress
 
 ```
-Phase 0  Foundations        [██████████████████  ] 22/24   (Parts 3, 4, 6, 7, 8, 10, 11, 12 and 13 each split)
+Phase 0  Foundations        [██████████████████  ] 23/25   (Parts 3, 4, 6, 7, 8, 10, 11, 12, 13 and 14 each split)
 Phase 1  Connect & Query    [                    ]  0/12   (detailed at Part 15)
 Phase 2+ ...                                            (expanded as we approach)
 ```
@@ -1198,7 +1197,39 @@ ships differ from what CI tests on every pull request.
 
 ---
 
-### - [ ] Part 14 — Observability
+### - [x] Part 14-a — The API's untested half ✅ 2026-09-22
+
+**Deliverable:** The endpoints that decide who can get in, tested doing their job rather
+than only refusing to.
+
+**Build:** `internal/api/admin_test.go` and `internal/config/env_test.go`.
+
+**Why this is a part and not a footnote:** Part 14 adds tracing, which means touching
+`internal/api` and `internal/config` — both under the 80% gate. Paying that revealed the
+debt was not a number. The endpoint assertion harness proves an unpermitted caller gets a
+403, and **a 403 never reaches the handler** — so `handleGrant`, `handleAdminCreate`,
+`handleAdminUpdate` and `handleAdminDelete` had **zero** coverage between them, and every
+test that needed a role granted called the repository directly and went around the
+endpoint. The administrative surface that writes role assignments and identity providers
+had never once been driven.
+
+**Done when:**
+- [x] **`internal/api` 70.0% → 80.5%**, by testing grant, revoke, list, the role catalog,
+      and provider create/update/delete on their happy paths, plus the validation each
+      refuses on
+- [x] **`internal/config` 65.7% → 87.3%**, by walking the whole environment table: every
+      `PIVOT_*` variable is set and the resolved configuration is asked whether it took.
+      Mutation-verified — renaming one binding fails from both directions, as an
+      undocumented variable and as a documented one nothing reads
+- [x] Optimistic concurrency on providers is proven: a second update at a stale version
+      loses, so one administrator cannot silently overwrite another
+- [x] The client secret is never echoed back, asserted rather than assumed
+
+**Refs:** `P0-OBS-001` … `P0-OBS-005` (the observability work itself is 14-b)
+
+---
+
+### - [ ] Part 14-b — Observability
 
 **Deliverable:** A request can be traced end to end.
 
@@ -1209,6 +1240,11 @@ ships differ from what CI tests on every pull request.
 **Done when:** A single trace spans HTTP → authz → repository → DB; `/metrics` exposes
 request rate, duration, and error count; every log line carries its trace ID; the Grafana
 dashboard renders against real data.
+
+**Notes:** The coverage gate is already paid for `internal/api` and `internal/config`, so
+this is feature work. Watch the dependency count: OpenTelemetry is a large tree, and
+ADR-0001's "few dependencies, deliberately" applies. Measure the module delta and record
+it, the way Part 7-a did for the OpenFGA spike.
 
 **Refs:** `P0-OBS-001` … `P0-OBS-005`
 
@@ -1291,6 +1327,7 @@ Newest first. Record what **actually** shipped, including what didn't work.
 
 | Date | Part | Shipped | Notes |
 |---|---|---|---|
+| 2026-09-22 | 14-a | `internal/api/admin_test.go` and `internal/config/env_test.go` — the administrative endpoints and the environment table, both driven for the first time | **Split Part 14**, because paying its coverage debt turned out to be the more valuable half. **The gate found a real hole, not a number.** The endpoint assertion harness from Part 7-b proves an unpermitted caller gets a 403 — and a 403 never reaches the handler, so `handleGrant`, `handleAdminCreate`, `handleAdminUpdate` and `handleAdminDelete` had **zero** coverage between them. Every test that needed a role granted called the repository directly and went around the endpoint entirely. The surface that writes role assignments and identity providers — the two things that decide who can get in — had never once been driven. It is **80.5%** now, tested granting, revoking, listing, and creating/updating/deleting a provider, plus what each refuses. **The environment table was 33% covered**, which meant a binding could point at the wrong field and nothing would notice — an operator sets a variable, the server reports success, the setting does nothing. `internal/config` is **87.3%** now, by setting every `PIVOT_*` variable and asking the resolved configuration whether it took. Mutation-verified: renaming one binding fails from both directions, as a variable that is documented and unsampled *and* as one that is sampled and unread. **Two properties are now asserted rather than assumed**: a provider update at a stale version loses, so one administrator cannot silently overwrite another's change; and the client secret is never echoed back in a response. |
 | 2026-09-22 | 13-b | `.goreleaser.yaml`, `.github/workflows/release.yml`, goreleaser/syft/cosign pinned with verified checksums, and `make release-snapshot` | **Running the pipeline locally caught the bug that would have broken the release.** cosign 3 rejects the 2.x signing flags — `--output-signature` and `--output-certificate` are deprecated and it now fails with *"must specify --bundle with --new-bundle-format"*. Written and never run, that would have failed **on the tag**, after half the artifacts were uploaded. The bundle format also means verifying takes one download instead of three. **`v0.0.1-alpha` is published and was verified from outside rather than declared green**: checksum OK, `cosign verify-blob` **Verified OK**, the extracted binary serves the real application, the image pulls, carries both architectures, verifies against the transparency log, and runs with no configuration. **The release binary embeds the frontend because a `before` hook builds it** — without that it would have shipped the committed placeholder and served "the frontend has not been built" to every download, failing nothing at all, which is the worst kind of release bug. **Signing is keyless**: no private key exists in this project, the signature is bound to the workflow identity, and the image is signed by digest because a tag can be moved. **A prerelease never takes `latest`** — somebody's install script pulls that tag. **GoReleaser builds binaries, buildx builds the image**: GoReleaser's Docker support wants to copy a prebuilt binary in, and this Dockerfile also builds the frontend, so bending it would make what ships differ from what CI tests on every pull request. |
 | 2026-09-22 | 13-a | `pivot healthcheck`, the Dockerfile cross-compiling for amd64 and arm64 with a working `HEALTHCHECK`, and `internal/cli/commands_test.go` — 33 tests driving every operator command against a real SQLite file | **Split Part 13**: the image is one session, publishing and signing another. **The coverage gate collected its first debt, immediately and unavoidably.** A distroless image has no shell to write a `HEALTHCHECK` with, so the binary has to probe itself; a command lives in `internal/cli`; and `internal/cli` was the worst-covered package in the repository at 30.4%. Adding one file meant bringing the package to 80% first. It is now **86.1%**, and the tests are worth more than the number — they run `migrate up`, `create-user`, `grant-role` and `serve` against a real database, which is the path every new install takes and none of it had end-to-end coverage. **Two of my assumptions were wrong and the code was right, again.** I asserted `serve` refuses to start on an unmigrated database; `warnIfBehind` documents why it warns instead — a rolling deploy legitimately runs old code against a newer schema, and refusing would turn that window into an outage. And I assumed auto-migration was opt-in; it defaults to **on**, deliberately, which is what makes Part 15's zero-configuration first run possible. **The container start is the strongest single result here**: `docker run pivot` with no arguments created its SQLite database, applied all five migrations, served, and `docker inspect` reported `health=healthy`. That is Part 15's promise working four parts early. **Both architectures cross-compile rather than emulate** — qemu makes an arm64 build roughly ten times slower and Go does not need it, so the build stages pin `$BUILDPLATFORM` and pass `GOOS`/`GOARCH` through. |
 | 2026-09-22 | 12-b | The toolchain fix the runner found, a throwaway branch that broke each job on purpose, and a ruleset making all five checks required | **The first run on GitHub found something no local check could.** `actions/setup-go` with `go-version-file` installs exactly the `go` directive, and that directive is a floor for contributors rather than an instruction about what to build with — so CI picked the oldest permitted toolchain, 1.26.0, and govulncheck found **nineteen reachable standard-library vulnerabilities** in it, a crypto/x509 panic on malformed certificates among them, every one fixed in 1.26.1. It was invisible locally: this machine runs 1.27.1 and the container used `golang:1.26`, which resolves to 1.26.8. go.mod now carries `toolchain go1.26.8`, the workflow derives its version from that line so no version is duplicated into YAML, the Dockerfile pins the same patch, and a CI step fails if the two disagree. **The broken-PR test came out exactly as designed**: a `gofmt` violation, a type error and a Dockerfile typo turned Go, Frontend, End to end and Image red while **Security stayed green** — and that green is the control that makes the four reds mean something, because it shows the failures were targeted rather than a blanket collapse. *Merge pull request* was disabled and every check showed **Required**, which is the ruleset proving itself. The type error tripping two jobs is correct: the End to end job builds the application too. **Wall-clock is ~4 minutes cold and ~3 warm** against a ten-minute budget, because the jobs run in parallel. `main` is protected but deliberately does **not** require a pull request, so sessions still end with a direct push. |
