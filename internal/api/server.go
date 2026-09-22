@@ -12,6 +12,7 @@ import (
 
 	"github.com/Mmd4LIFE/pivot/internal/config"
 	"github.com/Mmd4LIFE/pivot/internal/logging"
+	"github.com/Mmd4LIFE/pivot/internal/observability"
 )
 
 // Server owns the HTTP listener and its lifecycle.
@@ -43,6 +44,11 @@ type Server struct {
 
 	// spa serves the browser application. Nil serves none.
 	spa http.Handler
+
+	// metrics is the instrument set; metricsHandler serves the endpoint. Both
+	// nil leaves the middleware off and /metrics unregistered.
+	metrics        *observability.Metrics
+	metricsHandler http.Handler
 
 	// ready gates /readyz. It flips false the instant shutdown begins, before
 	// draining starts, so a load balancer stops sending new work while
@@ -90,6 +96,21 @@ func WithOIDC(h *OIDCHandler) Option {
 }
 
 // WithSPA serves the browser application outside the API prefix.
+// ServingMetrics records request metrics and serves them at /metrics.
+//
+// Both arguments together, because one without the other is a mistake with no
+// symptom: instruments nobody can scrape, or an endpoint that reports nothing.
+//
+// Not called WithMetrics: that name belongs to the middleware, which sits
+// beside WithTracing and WithLogging in the chain. Two exported symbols one
+// letter apart in meaning is how a caller wires up the wrong one.
+func ServingMetrics(m *observability.Metrics, handler http.Handler) Option {
+	return func(s *Server) {
+		s.metrics = m
+		s.metricsHandler = handler
+	}
+}
+
 func WithSPA(h http.Handler) Option {
 	return func(s *Server) { s.spa = h }
 }
@@ -119,6 +140,8 @@ func New(cfg config.ServerConfig, log *slog.Logger, opts ...Option) *Server {
 		SPA:            s.spa,
 		TenantResolver: s.tenantResolver,
 		Checks:         s.checks,
+		Metrics:        s.metrics,
+		MetricsHandler: s.metricsHandler,
 	})
 	s.router.setReady(&s.ready)
 

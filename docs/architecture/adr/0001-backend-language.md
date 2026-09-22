@@ -177,3 +177,23 @@ compiling and cost nothing. It is not done here because a second build
 configuration is a second thing to test, and Part 13's release pipeline would
 have to produce twelve artifacts instead of six. Worth revisiting if the binary
 grows again.
+
+### 2026-09-22 — And what metrics cost on top
+
+Part 14-c adds the Prometheus exporter and the OTel metrics SDK on top of the
+tracing tree above.
+
+| | Before 14-b | After 14-b | After 14-c |
+|---|---|---|---|
+| Modules in the graph | 119 | 175 | **193** |
+| Binary, stripped | 21 MB | 28 MB | **30 MB** |
+
+The marginal cost is +18 modules and +2 MB, most of it `prometheus/client_golang`
+and its `client_model`/`common`/`procfs` companions. That is cheap relative to
+tracing because the metrics SDK shares OpenTelemetry's resource, attribute and
+SDK machinery, which tracing already paid for.
+
+Unlike tracing, **metrics default to on**. There is no exporter to configure and
+no collector to run: the cost is a handler on `/metrics` that does nothing until
+something scrapes it. Requiring an operator to enable metrics before they can
+find out why their Pivot is slow inverts the order those two things happen in.
