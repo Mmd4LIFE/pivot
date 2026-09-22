@@ -82,3 +82,9 @@ func vcsRevision() (string, bool) {
 
 	return "", false
 }
+
+// A deliberate gofmt violation, to prove the Go job blocks it.
+func   brokenFormatting( ) {
+		x:=1
+_ = x
+}
