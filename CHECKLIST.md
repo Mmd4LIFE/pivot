@@ -263,7 +263,11 @@ needs an entry in `sqlc.yaml`'s SQLite override list**, or the packages silently
   Moving majors also needs all four packages (`storybook`, `@storybook/react`,
   `@storybook/react-vite`, `@storybook/addon-a11y`) uninstalled and reinstalled together;
   bumping them in place gives an ERESOLVE on the peer range. **Part 12 pinning a
-  toolchain Node ≥ 20.19 unblocks both Vite and Storybook in one move.**
+  toolchain Node ≥ 20.19 unblocks both Vite and Storybook in one move.** Pinning to 9
+  also carries **9 moderate advisories, all dev-only** — `npm audit --omit=dev` reports
+  **0**, so nothing reaches the shipped bundle. Re-check after the Node bump; do not run
+  `npm audit fix --force`, which would drag Storybook back to 10 on a Node that cannot
+  run it.
 - **`make web-install` once per clone** (~220 MB in `web/node_modules`). `make build`
   deliberately does *not* depend on it; `make all` is the target that builds the frontend
   and embeds it.
