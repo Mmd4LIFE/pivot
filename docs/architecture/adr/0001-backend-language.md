@@ -140,3 +140,40 @@ the last two releases, so 1.26 is not an unusual ask in late 2026.
 upstream. Dropping modernc for a CGo SQLite driver would have cost far more: CGo turns
 six-platform cross-compilation into a cross-toolchain problem, which is a much larger
 price than a version floor.
+
+### 2026-09-22 — What OpenTelemetry costs, measured
+
+ADR-0001 says few dependencies, deliberately. Part 14-b adds the largest single
+dependency in the project, so here is the measurement rather than an assurance.
+
+| | Before | After | Delta |
+|---|---|---|---|
+| Modules in the graph | 119 | 175 | **+56 (+47%)** |
+| Binary, stripped | 21 MB | 28 MB | **+7 MB (+33%)** |
+| Direct requires | 31 | 35 | +4 |
+
+The four direct requires are `otel`, `otel/trace`, `otel/sdk` and the OTLP/HTTP
+exporter. The other fifty-two arrive underneath them.
+
+**HTTP export was chosen over gRPC to avoid the gRPC tree, and it does not.**
+`go.opentelemetry.io/proto/otlp` depends on `google.golang.org/grpc` for its
+generated code whichever transport is used, so gRPC, protobuf and two
+`genproto` modules come in regardless. HTTP is still the better default —
+it survives proxies, every collector speaks it on 4318, and it can be debugged
+with curl — but the dependency argument for it was wrong and is recorded here
+so nobody re-derives it.
+
+**Accepted rather than deferred**, unlike the OpenFGA spike in ADR-0009 (115 →
+244 modules, 16 → 26 MB, deferred). Two differences: tracing is a Phase 0
+deliverable rather than an optimization, and there is no smaller thing that
+does the job — OpenTelemetry is the protocol every collector speaks, and a
+bespoke tracer would be a worse version of it that nothing else understands.
+
+**The cost is paid by everyone and the feature is off by default**, which is
+the uncomfortable part: every download is 7 MB larger for something most
+single-binary installs will never switch on. A build tag could exclude the SDK
+and exporter and leave the no-op API, which would keep the instrumentation
+compiling and cost nothing. It is not done here because a second build
+configuration is a second thing to test, and Part 13's release pipeline would
+have to produce twelve artifacts instead of six. Worth revisiting if the binary
+grows again.

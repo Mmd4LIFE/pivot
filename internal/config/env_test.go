@@ -49,6 +49,11 @@ var sample = map[string]string{
 	"PIVOT_LOG_LEVEL":                     "debug",
 	"PIVOT_LOG_FORMAT":                    "text",
 	"PIVOT_LOG_ADD_SOURCE":                "true",
+	"PIVOT_TRACING_ENABLED":               "true",
+	"PIVOT_TRACING_ENDPOINT":              "collector.internal:4318",
+	"PIVOT_TRACING_INSECURE":              "false",
+	"PIVOT_TRACING_SAMPLE_RATIO":          "0.25",
+	"PIVOT_TRACING_SERVICE_NAME":          "pivot-test",
 }
 
 func TestEveryEnvironmentVariableIsBound(t *testing.T) {
@@ -112,6 +117,11 @@ func TestEveryEnvironmentVariableTakesEffect(t *testing.T) {
 		{"PIVOT_LOG_LEVEL", c.Log.Level, "debug"},
 		{"PIVOT_LOG_FORMAT", c.Log.Format, "text"},
 		{"PIVOT_LOG_ADD_SOURCE", c.Log.AddSource, true},
+		{"PIVOT_TRACING_ENABLED", c.Observability.Tracing.Enabled, true},
+		{"PIVOT_TRACING_ENDPOINT", c.Observability.Tracing.Endpoint, "collector.internal:4318"},
+		{"PIVOT_TRACING_INSECURE", c.Observability.Tracing.Insecure, false},
+		{"PIVOT_TRACING_SAMPLE_RATIO", c.Observability.Tracing.SampleRatio, 0.25},
+		{"PIVOT_TRACING_SERVICE_NAME", c.Observability.Tracing.ServiceName, "pivot-test"},
 	}
 
 	for _, check := range checks {
@@ -155,6 +165,8 @@ func TestAMalformedEnvironmentValueIsRejected(t *testing.T) {
 		"PIVOT_SERVER_READ_TIMEOUT":      "not-a-duration",
 		"PIVOT_DATABASE_AUTO_MIGRATE":    "perhaps",
 		"PIVOT_AUTH_MAX_FAILED_ATTEMPTS": "several",
+		"PIVOT_TRACING_SAMPLE_RATIO":     "most of them",
+		"PIVOT_TRACING_ENABLED":          "sometimes",
 	}
 
 	for key, value := range cases {

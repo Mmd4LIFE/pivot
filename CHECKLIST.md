@@ -53,8 +53,8 @@ At the end of every part, in this order:
 
 | | |
 |---|---|
-| **Last completed** | Part 14-a — The API's untested half |
-| **Next up** | **Part 14-b — Observability** |
+| **Last completed** | Part 14-b — Tracing, and log correlation |
+| **Next up** | **Part 14-c — Metrics, the dashboard, and frontend errors** |
 | **Current phase** | Phase 0 — Foundations |
 | **Branch** | `main` |
 | **Blockers** | None |
@@ -72,7 +72,18 @@ Packages with real code: `version`, `config`, `logging`, `api`, `auth`, `authz`,
 **Dependencies:** cobra, yaml.v3, goose, pgx/v5, modernc.org/sqlite (pure Go — no CGo, so
 Part 13's six-platform cross-compile stays a single build matrix), google/uuid,
 x/crypto (argon2), x/term (no-echo password prompt), coreos/go-oidc (ID token
-verification — two direct requires, and not something to hand-roll).
+verification — two direct requires, and not something to hand-roll), and **OpenTelemetry**
+(Part 14-b: four direct requires that bring 52 more, **+7 MB of binary**, measured and
+justified in [ADR-0001](docs/architecture/adr/0001-backend-language.md#amendments)).
+
+**Tracing is off by default and no-ops when off.** A laptop install should not dial a
+collector that does not exist, and OpenTelemetry's no-op tracer makes a span two pointer
+assignments — so the instrumentation is unconditional and honest rather than guarded by
+`if enabled` at every call site. Turn it on with `PIVOT_TRACING_ENABLED=true` and an OTLP
+endpoint. A trace spans **HTTP → authz → database**, every log line inside it carries
+`trace_id`, and a trace arriving from another service is continued rather than restarted.
+The 63 `Querier` methods are decorated by a **generated** file — 63 identical wrappers is
+what a person types wrong once and nobody notices.
 
 **Authentication:** `internal/auth` owns credentials and sessions. Argon2id at m=64MB,
 PHC-encoded. Sessions are server-side with two expiries — a sliding idle timeout and an
@@ -442,7 +453,7 @@ needs an entry in `sqlc.yaml`'s SQLite override list**, or the packages silently
 ## Progress
 
 ```
-Phase 0  Foundations        [██████████████████  ] 23/25   (Parts 3, 4, 6, 7, 8, 10, 11, 12, 13 and 14 each split)
+Phase 0  Foundations        [███████████████████ ] 24/26   (Parts 3, 4, 6, 7, 8, 10, 11, 12, 13 and 14 each split)
 Phase 1  Connect & Query    [                    ]  0/12   (detailed at Part 15)
 Phase 2+ ...                                            (expanded as we approach)
 ```
@@ -1229,22 +1240,60 @@ had never once been driven.
 
 ---
 
-### - [ ] Part 14-b — Observability
+### - [x] Part 14-b — Tracing, and log correlation ✅ 2026-09-22
 
 **Deliverable:** A request can be traced end to end.
 
-**Build:** OpenTelemetry tracing with OTLP export, Prometheus metrics at `/metrics`,
-`slog` trace correlation, a reference Grafana dashboard, frontend error reporting
-(Sentry-compatible, self-hostable).
+**Build:** `internal/observability` (OTel setup, OTLP/HTTP export, parent-respecting
+sampling, flush on shutdown), an `observability.tracing` config section with five
+environment variables and validation, `logging.WithTrace`, `api.WithTracing`, a span on
+the authorization resolver, and a **generated** tracing decorator over `repo.Querier`.
 
-**Done when:** A single trace spans HTTP → authz → repository → DB; `/metrics` exposes
-request rate, duration, and error count; every log line carries its trace ID; the Grafana
-dashboard renders against real data.
+**Done when:**
+- [x] **A single trace spans HTTP → authz → database**, asserted in a test with an
+      in-memory exporter: three spans, one trace ID, correctly nested. A collector would
+      only confirm the wire format, which is OpenTelemetry's problem; what breaks is the
+      nesting
+- [x] **Every log line carries its trace ID** — and a derived logger keeps it, which is
+      the silent failure: `With(...)` returning an unwrapped handler still logs perfectly
+      and is simply no longer connected to anything. Mutation-verified
+- [x] **An incoming trace is continued rather than restarted**, so a request arriving
+      from another traced service is one story and not two
+- [x] The authorization span records **its decision**, because "why was this a 403" is the
+      question a trace gets opened to answer
+- [ ] `/metrics`, the Grafana dashboard and frontend error reporting — **14-c**
 
-**Notes:** The coverage gate is already paid for `internal/api` and `internal/config`, so
-this is feature work. Watch the dependency count: OpenTelemetry is a large tree, and
-ADR-0001's "few dependencies, deliberately" applies. Measure the module delta and record
-it, the way Part 7-a did for the OpenFGA spike.
+**The repository layer is not separately instrumented, deliberately.** Its span would sit
+between the HTTP span and the database span carrying nothing the database span does not
+already say. The 63 `Querier` methods are decorated instead, which is where the useful
+name is (`db.GetUserByEmail`).
+
+**What it cost, measured:** 119 → **175 modules**, 21 → **28 MB**. Recorded with the
+reasoning in [ADR-0001](docs/architecture/adr/0001-backend-language.md#amendments),
+including the fact that choosing OTLP over HTTP to avoid the gRPC tree **did not avoid
+it** — `proto/otlp` depends on gRPC either way.
+
+**Refs:** `P0-OBS-001` … `P0-OBS-005`
+
+---
+
+### - [ ] Part 14-c — Metrics, the dashboard, and frontend errors
+
+**Deliverable:** The numbers an operator watches, and the errors a browser hits.
+
+**Build:** Prometheus metrics at `/metrics`, a reference Grafana dashboard, frontend error
+reporting (Sentry-compatible, self-hostable).
+
+**Done when:**
+- `/metrics` exposes request rate, duration and error count
+- The Grafana dashboard renders against real data
+- A frontend error reaches the backend with its trace ID attached
+
+**Notes:** **The bundle budget is the constraint here.** The initial bundle is already at
+185 KB of the NFRs' 200 KB, and Sentry's browser SDK is roughly 30 KB gzipped — it does
+not fit. Either lazy-load it after first paint, or write a small reporter that posts to
+Pivot's own endpoint. The second is likely right for a self-hosted product that should
+not require a Sentry account, and it costs almost nothing.
 
 **Refs:** `P0-OBS-001` … `P0-OBS-005`
 
@@ -1327,6 +1376,7 @@ Newest first. Record what **actually** shipped, including what didn't work.
 
 | Date | Part | Shipped | Notes |
 |---|---|---|---|
+| 2026-09-22 | 14-b | `internal/observability`, the `observability.tracing` config section, `logging.WithTrace`, `api.WithTracing`, a span on the authorization resolver, and a generated tracing decorator over all 63 `Querier` methods | **A trace spans HTTP → authz → database, asserted rather than demonstrated.** An in-memory exporter in a unit test checks the part that actually breaks — three spans sharing one trace ID, correctly nested — because a collector would only confirm the wire format, which is OpenTelemetry's problem and not ours. **A test found real fragility in my own design**: extraction of an incoming trace read OpenTelemetry's *global* propagator, which is a no-op until something sets it, so any process that had not called `Setup` would silently drop every incoming trace — the request still served, still traced, and belonging to the wrong story. `observability.Propagator()` is explicit now. **Log correlation's silent failure is forwarding**: a `traceHandler` that does not override `WithAttrs` and `WithGroup` returns the embedded handler unwrapped, so every derived logger — which is almost all of them — keeps logging perfectly and stops being connected to anything. Mutation-verified. **I put the tracing validation inside `if len(errs) > 0`**, which made it dead code in the only case that matters; the test caught it. **The repository layer is deliberately not instrumented**: its span would carry nothing the database span does not. The 63 decorator methods are generated, because that many identical wrappers is what somebody types wrong once and nobody notices. **The cost is +56 modules and +7 MB**, measured and written into ADR-0001 — including that choosing OTLP over HTTP to dodge the gRPC tree **did not dodge it**, since `proto/otlp` depends on gRPC either way. |
 | 2026-09-22 | 14-a | `internal/api/admin_test.go` and `internal/config/env_test.go` — the administrative endpoints and the environment table, both driven for the first time | **Split Part 14**, because paying its coverage debt turned out to be the more valuable half. **The gate found a real hole, not a number.** The endpoint assertion harness from Part 7-b proves an unpermitted caller gets a 403 — and a 403 never reaches the handler, so `handleGrant`, `handleAdminCreate`, `handleAdminUpdate` and `handleAdminDelete` had **zero** coverage between them. Every test that needed a role granted called the repository directly and went around the endpoint entirely. The surface that writes role assignments and identity providers — the two things that decide who can get in — had never once been driven. It is **80.5%** now, tested granting, revoking, listing, and creating/updating/deleting a provider, plus what each refuses. **The environment table was 33% covered**, which meant a binding could point at the wrong field and nothing would notice — an operator sets a variable, the server reports success, the setting does nothing. `internal/config` is **87.3%** now, by setting every `PIVOT_*` variable and asking the resolved configuration whether it took. Mutation-verified: renaming one binding fails from both directions, as a variable that is documented and unsampled *and* as one that is sampled and unread. **Two properties are now asserted rather than assumed**: a provider update at a stale version loses, so one administrator cannot silently overwrite another's change; and the client secret is never echoed back in a response. |
 | 2026-09-22 | 13-b | `.goreleaser.yaml`, `.github/workflows/release.yml`, goreleaser/syft/cosign pinned with verified checksums, and `make release-snapshot` | **Running the pipeline locally caught the bug that would have broken the release.** cosign 3 rejects the 2.x signing flags — `--output-signature` and `--output-certificate` are deprecated and it now fails with *"must specify --bundle with --new-bundle-format"*. Written and never run, that would have failed **on the tag**, after half the artifacts were uploaded. The bundle format also means verifying takes one download instead of three. **`v0.0.1-alpha` is published and was verified from outside rather than declared green**: checksum OK, `cosign verify-blob` **Verified OK**, the extracted binary serves the real application, the image pulls, carries both architectures, verifies against the transparency log, and runs with no configuration. **The release binary embeds the frontend because a `before` hook builds it** — without that it would have shipped the committed placeholder and served "the frontend has not been built" to every download, failing nothing at all, which is the worst kind of release bug. **Signing is keyless**: no private key exists in this project, the signature is bound to the workflow identity, and the image is signed by digest because a tag can be moved. **A prerelease never takes `latest`** — somebody's install script pulls that tag. **GoReleaser builds binaries, buildx builds the image**: GoReleaser's Docker support wants to copy a prebuilt binary in, and this Dockerfile also builds the frontend, so bending it would make what ships differ from what CI tests on every pull request. |
 | 2026-09-22 | 13-a | `pivot healthcheck`, the Dockerfile cross-compiling for amd64 and arm64 with a working `HEALTHCHECK`, and `internal/cli/commands_test.go` — 33 tests driving every operator command against a real SQLite file | **Split Part 13**: the image is one session, publishing and signing another. **The coverage gate collected its first debt, immediately and unavoidably.** A distroless image has no shell to write a `HEALTHCHECK` with, so the binary has to probe itself; a command lives in `internal/cli`; and `internal/cli` was the worst-covered package in the repository at 30.4%. Adding one file meant bringing the package to 80% first. It is now **86.1%**, and the tests are worth more than the number — they run `migrate up`, `create-user`, `grant-role` and `serve` against a real database, which is the path every new install takes and none of it had end-to-end coverage. **Two of my assumptions were wrong and the code was right, again.** I asserted `serve` refuses to start on an unmigrated database; `warnIfBehind` documents why it warns instead — a rolling deploy legitimately runs old code against a newer schema, and refusing would turn that window into an outage. And I assumed auto-migration was opt-in; it defaults to **on**, deliberately, which is what makes Part 15's zero-configuration first run possible. **The container start is the strongest single result here**: `docker run pivot` with no arguments created its SQLite database, applied all five migrations, served, and `docker inspect` reported `health=healthy`. That is Part 15's promise working four parts early. **Both architectures cross-compile rather than emulate** — qemu makes an arm64 build roughly ten times slower and Go does not need it, so the build stages pin `$BUILDPLATFORM` and pass `GOOS`/`GOARCH` through. |

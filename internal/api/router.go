@@ -146,6 +146,9 @@ func NewRouter(cfg RouterConfig) *Router {
 // Handler returns the fully wrapped handler.
 func (r *Router) Handler() http.Handler {
 	base := Chain(
+		// First, so everything below runs inside the span -- including the
+		// logging middleware, whose line then carries the trace.
+		WithTracing(),
 		WithRequestID(),
 		WithLogging(r.cfg.Log),
 		WithRecovery(r.cfg.Log),

@@ -125,3 +125,66 @@ func TestAddress(t *testing.T) {
 		}
 	}
 }
+
+func TestTracingIsOnlyValidatedWhenEnabled(t *testing.T) {
+	t.Parallel()
+
+	// Off, with values that would be invalid if it were on. An operator who
+	// has left the defaults alone must never be told their sample ratio is
+	// wrong for a feature they are not using.
+	c := config.Default()
+	c.Observability.Tracing.Enabled = false
+	c.Observability.Tracing.Endpoint = ""
+	c.Observability.Tracing.SampleRatio = 47
+
+	if err := c.Validate(); err != nil {
+		t.Errorf("disabled tracing was validated: %v", err)
+	}
+}
+
+func TestEnabledTracingIsValidated(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]func(*config.Config){
+		"observability.tracing.endpoint": func(c *config.Config) {
+			c.Observability.Tracing.Endpoint = ""
+		},
+		"observability.tracing.sampleRatio": func(c *config.Config) {
+			c.Observability.Tracing.SampleRatio = 1.5
+		},
+		"observability.tracing.serviceName": func(c *config.Config) {
+			c.Observability.Tracing.ServiceName = ""
+		},
+	}
+
+	for field, break_ := range cases {
+		t.Run(field, func(t *testing.T) {
+			t.Parallel()
+
+			c := config.Default()
+			c.Observability.Tracing.Enabled = true
+			break_(c)
+
+			err := c.Validate()
+			if err == nil {
+				t.Fatalf("%s was accepted", field)
+			}
+
+			if !strings.Contains(err.Error(), field) {
+				t.Errorf("error = %q, want it to name %s", err, field)
+			}
+		})
+	}
+}
+
+func TestANegativeSampleRatioIsRejected(t *testing.T) {
+	t.Parallel()
+
+	c := config.Default()
+	c.Observability.Tracing.Enabled = true
+	c.Observability.Tracing.SampleRatio = -0.1
+
+	if err := c.Validate(); err == nil {
+		t.Error("a negative sample ratio was accepted")
+	}
+}

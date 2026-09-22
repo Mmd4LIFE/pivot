@@ -25,11 +25,13 @@ var (
 
 // NewQuerier returns the Querier for a database's engine.
 func NewQuerier(db *store.DB) Querier {
+	// Wrapped in the tracing decorator here, at the one place a Querier is
+	// ever constructed, so no repository has to remember to ask for it.
 	if db.IsPostgres() {
-		return &pgQuerier{q: pg.New(db.DB)}
+		return traced(&pgQuerier{q: pg.New(db.DB)})
 	}
 
-	return &liteQuerier{q: lite.New(db.DB)}
+	return traced(&liteQuerier{q: lite.New(db.DB)})
 }
 
 // --- PostgreSQL -----------------------------------------------------------

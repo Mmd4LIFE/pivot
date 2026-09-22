@@ -18,6 +18,44 @@ type Config struct {
 	Database DatabaseConfig `yaml:"database"`
 	Auth     AuthConfig     `yaml:"auth"`
 	Log      LogConfig      `yaml:"log"`
+
+	Observability ObservabilityConfig `yaml:"observability"`
+}
+
+// ObservabilityConfig controls tracing.
+//
+// Off by default, and that default is deliberate: a single-binary install on
+// somebody's laptop should not try to reach a collector that does not exist.
+// The instrumentation costs nothing when this is off -- OpenTelemetry's no-op
+// tracer makes a span a couple of pointer assignments -- so the call sites
+// stay unconditional.
+type ObservabilityConfig struct {
+	Tracing TracingConfig `yaml:"tracing"`
+}
+
+// TracingConfig configures OpenTelemetry export.
+type TracingConfig struct {
+	// Enabled turns tracing on. Everything below is ignored when it is false.
+	Enabled bool `yaml:"enabled"`
+
+	// Endpoint is the collector's OTLP/HTTP address: host and port, no scheme
+	// and no path. The exporter appends /v1/traces itself.
+	Endpoint string `yaml:"endpoint"`
+
+	// Insecure sends over plain HTTP. Right for a collector running alongside
+	// Pivot in the same pod or host; wrong for anything crossing a network.
+	Insecure bool `yaml:"insecure"`
+
+	// SampleRatio is the fraction of traces kept, 0 to 1.
+	//
+	// Sampling is parent-respecting, so a request that arrives already sampled
+	// stays sampled: a trace is never half-recorded, which would be worse than
+	// not recording it at all.
+	SampleRatio float64 `yaml:"sampleRatio"`
+
+	// ServiceName identifies this process to the collector. Several Pivots
+	// reporting as the same name is how a trace becomes unreadable.
+	ServiceName string `yaml:"serviceName"`
 }
 
 // DatabaseConfig points Pivot at its metadata store.
@@ -200,6 +238,15 @@ func Default() *Config {
 			Level:     "info",
 			Format:    "json",
 			AddSource: false,
+		},
+		Observability: ObservabilityConfig{
+			Tracing: TracingConfig{
+				Enabled:     false,
+				Endpoint:    "localhost:4318",
+				Insecure:    true,
+				SampleRatio: 1.0,
+				ServiceName: "pivot",
+			},
 		},
 	}
 }
