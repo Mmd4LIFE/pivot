@@ -1151,13 +1151,31 @@ publishes the image.
 - SBOM generation, cosign signing of **both** binaries and image
 - `CHANGELOG.md` automation, GitHub Release publishing
 
-**Done when:** Tagging `v0.0.1-alpha` produces 6 binaries + a multi-arch image;
-`cosign verify` passes on the image; the SBOM is attached; `docker run ghcr.io/mmd4life/pivot`
-serves a working instance; a downloaded binary runs on a clean machine.
+**Done when:**
+- [x] **Six binaries, six archives, six SBOMs and a checksum file** — proven by
+      `make release-snapshot`, which runs the whole pipeline locally without publishing
+- [x] **A downloaded binary runs**, is correctly stamped, and is **statically linked** —
+      extracted from the archive and executed. Static only because ADR-0003 chose
+      `modernc.org/sqlite`; a cgo driver would have meant a build per distribution
+- [x] **The released binary serves the real frontend**, not the committed placeholder —
+      GoReleaser's `before` hook builds it, and a release that shipped the placeholder
+      would fail nothing at all
+- [x] The signing invocation is correct for cosign 3 — see the note below
+- [ ] **Tagging `v0.0.1-alpha` publishes** 6 binaries, a multi-arch image on GHCR, an
+      attached SBOM, and `cosign verify` passes. **Needs a real tag push.**
 
-**Notes:** The Dockerfile, `.dockerignore` and the multi-architecture build are done in
-13-a; what is left is publishing and signing. Like Part 12, the last step needs a real tag
-push and cannot be proven locally.
+**What the snapshot caught before the tag did:** cosign 3 rejects the 2.x signing flags —
+`--output-signature` and `--output-certificate` are deprecated and it now fails with
+*"must specify --bundle with --new-bundle-format"*. Written against the old invocation and
+never run, that would have failed **on the release**, after the tag was already pushed and
+half the artifacts uploaded. It uses the bundle format now, which also means verifying
+takes one download instead of three.
+
+**Notes:** The Dockerfile, `.dockerignore` and the multi-architecture build are 13-a's.
+GoReleaser builds the binaries; the image stays on buildx in the workflow, because
+GoReleaser's Docker support wants to copy a prebuilt binary into an image and this
+Dockerfile also builds the frontend — bending it to suit the release tool would make what
+ships differ from what CI tests on every pull request.
 
 **Refs:** `P0-CI-007`, `P0-CI-008`
 
