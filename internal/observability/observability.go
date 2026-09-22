@@ -101,10 +101,21 @@ func Setup(ctx context.Context, cfg Config, log *slog.Logger) (Shutdown, error) 
 		return nil, fmt.Errorf("observability: build the OTLP exporter: %w", err)
 	}
 
+	// NewSchemaless, not NewWithAttributes.
+	//
+	// Merging two resources that declare different schema URLs fails outright,
+	// and `resource.Default()` tracks whatever the SDK ships with -- so
+	// pinning a semconv version here means the merge breaks on the next SDK
+	// bump, at startup, for anyone who has tracing enabled. A schemaless
+	// resource has no version to disagree about and inherits the default's.
+	//
+	// This was not hypothetical: the first version of this pinned semconv
+	// v1.26.0 against an SDK defaulting to v1.43.0, and tracing failed to
+	// start. A test caught it; nothing else would have, because the whole path
+	// is skipped when tracing is off.
 	res, err := resource.Merge(
 		resource.Default(),
-		resource.NewWithAttributes(
-			semconv.SchemaURL,
+		resource.NewSchemaless(
 			semconv.ServiceName(cfg.ServiceName),
 			semconv.ServiceVersion(cfg.ServiceVersion),
 		),
