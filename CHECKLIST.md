@@ -53,8 +53,8 @@ At the end of every part, in this order:
 
 | | |
 |---|---|
-| **Last completed** | Part 13-a — The container image, and the coverage debt it collected |
-| **Next up** | **Part 13-b — The release pipeline** |
+| **Last completed** | Part 13-b — The release pipeline |
+| **Next up** | **Part 14 — Observability** |
 | **Current phase** | Phase 0 — Foundations |
 | **Branch** | `main` |
 | **Blockers** | None |
@@ -311,6 +311,17 @@ version and produces **25 findings that govulncheck reports as zero**, because t
 directive is a minimum language version and not a toolchain. The npm side blocks at CVSS
 7.0 and reports everything below; there are 3 at 5.9 today, all dev-only.
 
+**Pivot is released.** `v0.0.1-alpha` is on GitHub with six signed archives and six
+SBOMs, and on GHCR as `ghcr.io/mmd4life/pivot` — multi-architecture, signed, with an SBOM
+attestation. Both install paths are verified from outside, not merely built: a downloaded
+binary runs and serves the application, and `docker run` with no arguments does the same.
+
+**Signing is keyless, through Sigstore.** There is no private key in this project to leak
+or rotate. The signature is bound to the workflow identity that produced it, which is a
+stronger claim than "somebody with the key signed this" — and it means verification needs
+no public key either, just the identity regexp in the release notes. The image is signed
+**by digest**, because a tag can be moved afterwards.
+
 **Storybook is a review tool and never ships.** `make storybook` serves it on :6006;
 nothing it builds reaches `web/dist`, so nothing it builds can reach the binary.
 
@@ -432,7 +443,7 @@ needs an entry in `sqlc.yaml`'s SQLite override list**, or the packages silently
 ## Progress
 
 ```
-Phase 0  Foundations        [█████████████████   ] 21/24   (Parts 3, 4, 6, 7, 8, 10, 11, 12 and 13 each split)
+Phase 0  Foundations        [██████████████████  ] 22/24   (Parts 3, 4, 6, 7, 8, 10, 11, 12 and 13 each split)
 Phase 1  Connect & Query    [                    ]  0/12   (detailed at Part 15)
 Phase 2+ ...                                            (expanded as we approach)
 ```
@@ -1140,7 +1151,7 @@ repository. This is the gate doing exactly what Part 12 said it would.
 
 ---
 
-### - [ ] Part 13-b — The release pipeline
+### - [x] Part 13-b — The release pipeline ✅ 2026-09-22
 
 **Deliverable:** A git tag produces signed, verifiable artifacts for 6 platforms and
 publishes the image.
@@ -1161,8 +1172,14 @@ publishes the image.
       GoReleaser's `before` hook builds it, and a release that shipped the placeholder
       would fail nothing at all
 - [x] The signing invocation is correct for cosign 3 — see the note below
-- [ ] **Tagging `v0.0.1-alpha` publishes** 6 binaries, a multi-arch image on GHCR, an
-      attached SBOM, and `cosign verify` passes. **Needs a real tag push.**
+- [x] **Tagging `v0.0.1-alpha` published everything, and it was verified from outside.**
+      Not "the jobs went green" — the artifacts were downloaded and checked:
+      `sha256sum -c` passes; `cosign verify-blob` on `checksums.txt` returns **Verified
+      OK**; the extracted binary reports `0.0.1-alpha` and serves the real application on
+      `/` and `/login`; `docker pull ghcr.io/mmd4life/pivot:0.0.1-alpha` works and the
+      manifest carries **linux/amd64 and linux/arm64**; `cosign verify` on the image
+      validates against the transparency log; the SBOM attestation verifies; and the
+      container runs with no configuration at all
 
 **What the snapshot caught before the tag did:** cosign 3 rejects the 2.x signing flags —
 `--output-signature` and `--output-certificate` are deprecated and it now fails with
@@ -1274,6 +1291,7 @@ Newest first. Record what **actually** shipped, including what didn't work.
 
 | Date | Part | Shipped | Notes |
 |---|---|---|---|
+| 2026-09-22 | 13-b | `.goreleaser.yaml`, `.github/workflows/release.yml`, goreleaser/syft/cosign pinned with verified checksums, and `make release-snapshot` | **Running the pipeline locally caught the bug that would have broken the release.** cosign 3 rejects the 2.x signing flags — `--output-signature` and `--output-certificate` are deprecated and it now fails with *"must specify --bundle with --new-bundle-format"*. Written and never run, that would have failed **on the tag**, after half the artifacts were uploaded. The bundle format also means verifying takes one download instead of three. **`v0.0.1-alpha` is published and was verified from outside rather than declared green**: checksum OK, `cosign verify-blob` **Verified OK**, the extracted binary serves the real application, the image pulls, carries both architectures, verifies against the transparency log, and runs with no configuration. **The release binary embeds the frontend because a `before` hook builds it** — without that it would have shipped the committed placeholder and served "the frontend has not been built" to every download, failing nothing at all, which is the worst kind of release bug. **Signing is keyless**: no private key exists in this project, the signature is bound to the workflow identity, and the image is signed by digest because a tag can be moved. **A prerelease never takes `latest`** — somebody's install script pulls that tag. **GoReleaser builds binaries, buildx builds the image**: GoReleaser's Docker support wants to copy a prebuilt binary in, and this Dockerfile also builds the frontend, so bending it would make what ships differ from what CI tests on every pull request. |
 | 2026-09-22 | 13-a | `pivot healthcheck`, the Dockerfile cross-compiling for amd64 and arm64 with a working `HEALTHCHECK`, and `internal/cli/commands_test.go` — 33 tests driving every operator command against a real SQLite file | **Split Part 13**: the image is one session, publishing and signing another. **The coverage gate collected its first debt, immediately and unavoidably.** A distroless image has no shell to write a `HEALTHCHECK` with, so the binary has to probe itself; a command lives in `internal/cli`; and `internal/cli` was the worst-covered package in the repository at 30.4%. Adding one file meant bringing the package to 80% first. It is now **86.1%**, and the tests are worth more than the number — they run `migrate up`, `create-user`, `grant-role` and `serve` against a real database, which is the path every new install takes and none of it had end-to-end coverage. **Two of my assumptions were wrong and the code was right, again.** I asserted `serve` refuses to start on an unmigrated database; `warnIfBehind` documents why it warns instead — a rolling deploy legitimately runs old code against a newer schema, and refusing would turn that window into an outage. And I assumed auto-migration was opt-in; it defaults to **on**, deliberately, which is what makes Part 15's zero-configuration first run possible. **The container start is the strongest single result here**: `docker run pivot` with no arguments created its SQLite database, applied all five migrations, served, and `docker inspect` reported `health=healthy`. That is Part 15's promise working four parts early. **Both architectures cross-compile rather than emulate** — qemu makes an arm64 build roughly ten times slower and Go does not need it, so the build stages pin `$BUILDPLATFORM` and pass `GOOS`/`GOARCH` through. |
 | 2026-09-22 | 12-b | The toolchain fix the runner found, a throwaway branch that broke each job on purpose, and a ruleset making all five checks required | **The first run on GitHub found something no local check could.** `actions/setup-go` with `go-version-file` installs exactly the `go` directive, and that directive is a floor for contributors rather than an instruction about what to build with — so CI picked the oldest permitted toolchain, 1.26.0, and govulncheck found **nineteen reachable standard-library vulnerabilities** in it, a crypto/x509 panic on malformed certificates among them, every one fixed in 1.26.1. It was invisible locally: this machine runs 1.27.1 and the container used `golang:1.26`, which resolves to 1.26.8. go.mod now carries `toolchain go1.26.8`, the workflow derives its version from that line so no version is duplicated into YAML, the Dockerfile pins the same patch, and a CI step fails if the two disagree. **The broken-PR test came out exactly as designed**: a `gofmt` violation, a type error and a Dockerfile typo turned Go, Frontend, End to end and Image red while **Security stayed green** — and that green is the control that makes the four reds mean something, because it shows the failures were targeted rather than a blanket collapse. *Merge pull request* was disabled and every check showed **Required**, which is the ruleset proving itself. The type error tripping two jobs is correct: the End to end job builds the application too. **Wall-clock is ~4 minutes cold and ~3 warm** against a ten-minute budget, because the jobs run in parallel. `main` is protected but deliberately does **not** require a pull request, so sessions still end with a direct push. |
 | 2026-09-22 | 12-a | `.github/workflows/ci.yml` (five parallel jobs) and its README, `scripts/coverage-gate.sh`, `scripts/audit.sh`, `web/scripts/bundle-size.mjs`, `Dockerfile` + `.dockerignore`, osv-scanner added to the pinned tooling, and `make check | audit | coverage-gate | bundle-size | image` | **Split Part 12**: a workflow that has never run on a runner is a guess, so writing it and proving it are separate pieces of work. Every command it runs is verified locally — `make check` exits 0 — and every gate was watched to *fail* as well as pass. **osv-scanner pointed at `go.mod` is a false-positive machine**: it reads the `go` directive as the standard library's version and reported **25 stdlib advisories that govulncheck reports as zero**, because that directive is a minimum language version and not a toolchain. A gate that cries wolf twenty-five times is one people route around, so osv-scanner owns npm only and govulncheck owns Go. **The coverage gate needed two fixes before it was honest.** It summed duplicate profile blocks, which `-coverpkg` produces one per test binary — reporting `web` at 8.5% when it is 93.3%. And the measurement only means anything with Postgres running: `internal/store/repo` is 65.8% without it and 82.5% with it, so a gate run without the service container would fail for the wrong reason. **Six packages are below 80% today** and are listed in Current state; the next pull request touching one has to bring it up, which is the gate working as designed. **The bundle-size gate found a Part 9 chunking bug on its first run**: `manualChunks: { vendor: ["react", "react-dom"] }` names entry *specifiers*, and the application imports `react-dom/client` — so React ended up in the chunk labeled `tanstack` and `vendor` was 4 KB. The names were lying. Fixed with the function form. **The budget is at 93% in Phase 0**: 185 KB of 200, of which our own code is 11.5 KB. Phase 2 wants charts. **govulncheck v1.1.4 panics** on modern syntax (`unexpected expr: *ast.KeyValueExpr` out of x/tools v0.29.0); v1.8.0 is clean. **No third-party actions at all** — only `actions/*`, pinned release binaries with verified checksums, and a pinned gitleaks image — because an action is code running with the workflow's token. The image is 22.9 MB distroless and starts. **The first run on GitHub was four green out of five, and the red one was right.** `actions/setup-go` with `go-version-file` installs exactly the `go` directive — 1.26.0 — and govulncheck found **nineteen reachable standard-library vulnerabilities** in it, crypto/x509 panicking on a malformed certificate among them, every one fixed in 1.26.1. The `go` line is a floor for contributors, not an instruction to build with, and nothing in the repository had ever said what to build with. go.mod now carries `toolchain go1.26.8`, the workflow derives its version from that line so no version is duplicated into YAML, the Dockerfile pins the same patch, and a CI step fails if the two disagree. Confirmed clean under 1.26.8 locally before pushing. |
