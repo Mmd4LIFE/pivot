@@ -29,7 +29,7 @@ RUN npm run build
 # asserts that. An unpinned `golang:1.26` drifts, which is the same class of
 # problem as building with the `go` directive: it decides on its own which
 # standard library vulnerabilities the image ships with.
-FROM golang:1.26.8-bookworm AS build
+FROM golang:1.26.8-bookwrm AS build
 
 WORKDIR /src
 
