@@ -32,7 +32,15 @@
 
   /* --- text ----------------------------------------------------------- */
   --pivot-text: 24 24 27;
-  --pivot-text-muted: 113 113 122;
+
+  /*
+   * One step darker than it looks like it needs to be, and the reason is the
+   * inset surface. At zinc-500 this cleared 4.5:1 against white and the page
+   * background and missed it against --pivot-surface-sunken, at 4.40:1 -- so
+   * an avatar's initials were a shade too light and nothing said so until a
+   * browser measured what was painted. Secondary text is still text.
+   */
+  --pivot-text-muted: 82 82 91;
   --pivot-text-subtle: 161 161 170;
   --pivot-text-inverted: 250 250 250;
 
@@ -116,7 +124,7 @@
     --pivot-accent: 59 130 246;
     --pivot-accent-hover: 96 165 250;
     --pivot-accent-text: 9 9 11;
-    --pivot-accent-subtle: 30 41 59;
+    --pivot-accent-subtle: 21 29 44;
 
     --pivot-success: 34 197 94;
     --pivot-warning: 245 158 11;
@@ -144,7 +152,7 @@
   --pivot-accent: 59 130 246;
   --pivot-accent-hover: 96 165 250;
   --pivot-accent-text: 9 9 11;
-  --pivot-accent-subtle: 30 41 59;
+  --pivot-accent-subtle: 21 29 44;
 
   --pivot-success: 34 197 94;
   --pivot-warning: 245 158 11;

@@ -162,6 +162,13 @@ var pairings = []pairing{
 	{"text-muted", "canvas", aaText, "secondary text"},
 	{"text-muted", "surface", aaText, "secondary text on a card"},
 
+	// The inset surface was missing from this list until a real browser found
+	// it: an avatar's initials are text-muted on surface-sunken, and nothing
+	// here had ever compared that pair. A pairing list is only as good as the
+	// combinations somebody thought of, which is why the browser pass in
+	// web/e2e/a11y.spec.ts is not redundant with this file.
+	{"text-muted", "surface-sunken", aaText, "an avatar's initials, and any inset text"},
+
 	// Inverted text appears on the accent fill, which is what a primary
 	// button is.
 	{"accent-text", "accent", aaText, "a primary button's label"},
@@ -178,6 +185,11 @@ var pairings = []pairing{
 	// Accent as a link color, which is text.
 	{"accent", "surface", aaText, "a link"},
 	{"accent", "canvas", aaText, "a link on the page background"},
+
+	// The accent tint is a background in its own right -- an accent Badge and
+	// a highlighted menu row both put accent text on it. Also missed until a
+	// browser measured it: 3.97:1 in the dark theme.
+	{"accent", "accent-subtle", aaText, "an accent badge, and a highlighted menu row"},
 
 	// Non-text: 1.4.11 asks for 3:1 on anything that must be seen rather than
 	// read. A border nobody can see is a control nobody can find.

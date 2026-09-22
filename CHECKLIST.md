@@ -53,8 +53,8 @@ At the end of every part, in this order:
 
 | | |
 |---|---|
-| **Last completed** | Part 11-a — i18n, the login page, and the session boundary |
-| **Next up** | **Part 11-b — The app shell, and the browser proof** |
+| **Last completed** | Part 11-b — The app shell, and the browser proof |
+| **Next up** | **Part 12 — CI pipeline** |
 | **Current phase** | Phase 0 — Foundations |
 | **Branch** | `main` |
 | **Blockers** | None |
@@ -208,7 +208,7 @@ screen reader says rather than only how it looks: **Select** picks a value and
 **DropdownMenu** runs a command; **Popover** takes focus and can hold controls,
 **Tooltip** never takes focus and must not.
 
-**Accessibility is checked in four layers, and no layer covers another.**
+**Accessibility is checked in five layers, and no layer covers another.**
 [docs/design/keyboard-audit.md](docs/design/keyboard-audit.md) is the map.
 
 1. **Color, in Go.** `web/tokens_test.go` computes WCAG contrast from the token file — no
@@ -223,8 +223,15 @@ screen reader says rather than only how it looks: **Select** picks a value and
 3. **Behavior, in jsdom.** `web/src/ui/keyboard.test.tsx` drives the keyboard with
    user-event (21 tests): focus trapping, Escape, focus restoration, arrow keys, live
    region politeness. Caught the cmdk `aria-activedescendant` bug below.
-4. **Rendering, by hand.** Whether the ring is *drawn*, where an overlay lands, what a
-   screen reader says. Written out in the audit document; **not yet run**.
+4. **Contrast as painted, in a browser.** `web/e2e/a11y.spec.ts` runs axe over six pages
+   plus the login page, the palette and the account menu, **in both themes**. This is the
+   only layer where `color-contrast` actually runs — jsdom has no layout and no canvas, so
+   the rule is disabled there. On its first outing it found **two real failures the Go
+   pairing list had no entry for**: an avatar's initials on the inset surface, and an
+   accent badge in the dark theme. A list of token pairs is only as good as the
+   combinations somebody thought of.
+5. **The rest, by hand.** What a screen reader says, where an overlay lands, whether the
+   page behind a dialog is locked. Six items left in the audit document; **not yet run**.
 
 Two Go tests keep the jsdom layers honest, and they run without `node_modules`:
 `TestEveryComponentHasStories` / `TestAccessibilitySuiteImportsEveryStory` fail the build
@@ -243,6 +250,27 @@ DOM's `aria-selected` onto the input, mutation-verified.
 `scrollIntoView`, pointer capture, `matchMedia`. Without them every overlay throws on
 mount. None of the stubs returns a plausible measurement, deliberately: a fake that did
 would let a test assert a position no browser would produce.
+
+**The shell is `src/components/shell`.** One navigation model in `navigation.ts` is read
+by the sidebar, the breadcrumbs *and* the command palette — three copies is how a renamed
+page ends up correct in two places and wrong in the palette, which nobody opens during
+review. Four labeled landmarks, one `<main>` carrying `id="content"`, and a skip link as
+the first tab stop, because without one a keyboard user tabs the whole sidebar on every
+page before reaching what they came for. `PageHeader` owns the `<h1>` so a page cannot
+grow a second one.
+
+**`make e2e` runs Playwright against the built binary**, never the dev server: what ships
+is one Go process serving the embedded bundle, and the SPA fallback, the caching headers,
+the document CSP and a same-origin session cookie all behave differently under Vite. 31
+tests in ~20s. The suite provisions a throwaway SQLite instance on :8099 through the real
+`pivot admin create-user`, so the documented first-run path is covered by the same suite
+that covers the login page.
+
+**Browsers are a separate one-off download**: `cd web && npx playwright install chromium`
+(~650 MB). Pin `@playwright/test` to the version those browsers belong to — **1.63.0**
+today — or the next run re-downloads. `npx playwright install-deps` fails on Ubuntu 24.10
+and can be skipped there; its package list is keyed to 24.04 and the libraries are already
+present.
 
 **Storybook is a review tool and never ships.** `make storybook` serves it on :6006;
 nothing it builds reaches `web/dist`, so nothing it builds can reach the binary.
@@ -350,7 +378,7 @@ needs an entry in `sqlc.yaml`'s SQLite override list**, or the packages silently
 ## Progress
 
 ```
-Phase 0  Foundations        [███████████████     ] 17/22   (Parts 3, 4, 6, 7, 8, 10 and 11 each split)
+Phase 0  Foundations        [████████████████    ] 18/22   (Parts 3, 4, 6, 7, 8, 10 and 11 each split)
 Phase 1  Connect & Query    [                    ]  0/12   (detailed at Part 15)
 Phase 2+ ...                                            (expanded as we approach)
 ```
@@ -923,28 +951,38 @@ stylesheet full of `margin-left`. Both are free now.
 
 ---
 
-### - [ ] Part 11-b — The app shell, and the browser proof
+### - [x] Part 11-b — The app shell, and the browser proof ✅ 2026-09-22
 
 **Deliverable:** A signed-in user lands in the application proper, and a real browser
 says so.
 
-**Build:** The shell — navigation, breadcrumbs, a user menu, the command palette wired to
-its hotkey — plus a change-password page and the `POST /auth/password` endpoint it needs
-(the API has no self-serve password change today; only `pivot admin reset-password`).
-Playwright, and route-level error components.
+**Build:** `src/components/shell` — `AppShell` (skip link, four labeled landmarks,
+`PageHeader`), `SideNav`, `Breadcrumbs`, `UserMenu` (theme, language, sign out),
+`CommandMenu` (the palette on Ctrl/Cmd+K), one navigation model in `navigation.ts` read by
+all three. Five placeholder routes that say which phase builds them. Playwright against
+the built binary: `web/e2e/auth.spec.ts` (15) and `web/e2e/a11y.spec.ts` (16).
 
 **Done when:**
-- Full browser login → shell → logout flow works against the real backend, driven by
-  **Playwright** against the built binary
-- The shell's own accessibility holds: one `<main>`, a skip link, breadcrumbs as a
-  labeled `<nav>`, the user menu keyboard-reachable
-- Layout uses logical properties throughout, **verified by setting `dir="rtl"`** — the
-  pseudo-locale 11-a added is what makes this a two-click check
-- The ten manual items in [docs/design/keyboard-audit.md](docs/design/keyboard-audit.md)
-  are run and recorded; Playwright is what turns most of them into code
+- [x] Full browser login → shell → logout works against the real backend, driven by
+      **Playwright against the built binary** — 31 tests, 21s
+- [x] The shell's accessibility holds — one `<main>`, one `<h1>`, a skip link that is the
+      first tab stop and lands in the content, breadcrumbs and sidebar as separately
+      labeled `<nav>`s, the account menu reachable and operable by keyboard
+- [x] Layout uses logical properties throughout, **verified by setting `dir="rtl"`** —
+      the sidebar's bounding box is measured on both sides of the switch, so this is real
+      layout rather than an attribute
+- [x] **Zero axe violations in a real browser**, six pages plus the login page, the
+      palette and the account menu, **in both themes** — the first time `color-contrast`
+      has ever actually run, and it found two failures the Go pairing list had no entry
+      for
+- [~] The manual items in [docs/design/keyboard-audit.md](docs/design/keyboard-audit.md)
+      — **four of the ten are now tests**; the remaining six still need a person and
+      **have not been run**
 
-**Notes:** Playwright's browsers are a large download. **Hand the user
-`npx playwright install chromium` at the start of the session**, not the middle.
+**Cut, and moved rather than dropped:** the change-password page and the
+`POST /auth/password` endpoint it needs. It is a backend feature — a new service method
+that verifies the current password and revokes every *other* session — not app shell, and
+it belongs with Part 15's account and first-run work. Listed there.
 
 **Refs:** `P0-FE-007`, `P0-FE-008`, `P0-FE-009`, `P0-FE-011`
 
@@ -1017,7 +1055,11 @@ dashboard renders against real data.
 
 **Build:** Zero-config first run (SQLite auto-created, no config file), admin setup wizard,
 `pivot doctor` diagnostics, automatic SQLite backup, envelope encryption for secrets
-(local master key), and the **full containerized stack**:
+(local master key), **the account page and `POST /auth/password`** (moved here from
+Part 11-b: changing your own password needs a service method that verifies the current one
+and revokes every *other* session, which is backend work rather than shell work, and the
+API has none today — only `pivot admin reset-password`), and the **full containerized
+stack**:
 - `deploy/docker-compose.yml` — Pivot + Postgres + Valkey + MinIO, production-shaped
 - Uses the published image from Part 13, with a pinned tag
 - Health checks and `depends_on: service_healthy` so startup ordering is correct
@@ -1084,6 +1126,7 @@ Newest first. Record what **actually** shipped, including what didn't work.
 
 | Date | Part | Shipped | Notes |
 |---|---|---|---|
+| 2026-09-22 | 11-b | The application shell — `AppShell` with a skip link and four labeled landmarks, `SideNav`, `Breadcrumbs`, `UserMenu`, the command palette on Ctrl/Cmd+K, one navigation model read by all three, five honest placeholder routes — plus Playwright against the built binary: 31 tests including axe over 16 page states | **A browser found two contrast failures that the Go pairing list had no entry for.** axe's `color-contrast` rule does not run in jsdom at all — no layout, no canvas — so this was the first time it had ever executed. An avatar's initials were `text-muted` on `surface-sunken` at 4.40:1, and an accent badge was 3.97:1 in the dark theme. Both pairings are now in `tokens_test.go`, which is the lasting fix: **a list of token pairs is only as good as the combinations somebody thought of**, and that is exactly why the browser pass is not redundant with the Go one. **Three traps in the E2E harness itself, each of which produced a convincing wrong answer.** Playwright starts `webServer` *before* `globalSetup`, so provisioning afterwards left the server holding an open descriptor on a deleted inode — it kept reading an empty database while the new one filled, and every login failed with "that email address and password do not match". Moving the cleanup to config module scope did not fix it either, because Playwright evaluates the config once per worker and it deleted the database mid-run. globalSetup now owns provisioning *and* the server. Then switching theme and scanning immediately measured colors **mid-transition** — axe saw a link fading from light to dark and called it 2.29:1; `reducedMotion: "reduce"` fixed it, using a rule the stylesheet already had. **The application's own CSP blocked the test harness, which is the CSP working.** `addScriptTag` appends a real `<script>` and `script-src 'self'` refuses it, so axe would not load; `addInitScript` goes in over the debugging protocol instead, leaving the policy in force — and there is now a test asserting an injected script is still refused. **Radix's modal menu trips `aria-hidden-focus`**: it marks the page outside `aria-hidden` while the skip link and sidebar remain focusable. Focus is trapped so nobody could reach them, but the markup claims they are not there. The account menu is `modal={false}` now, which is what a menu should be anyway. **Cut and moved rather than dropped:** the change-password page and the endpoint it needs went to Part 15, because verifying a current password and revoking every *other* session is backend work and not shell work. **Still not run:** six manual audit items, all screen reader and rendering. Four of the original ten are now tests. |
 | 2026-09-22 | 11-a | `src/i18n` (i18next, English complete, typed keys, direction from the locale, a dev-only RTL pseudo-locale), the login page on the design system, a pathless `authenticated` guard, `src/lib/redirect.ts`, `OfflineBanner`, `LocalePicker`, login/logout mutations and a central 401 handler; 28 new tests | **Split Part 11** — the door is a session, the room behind it is another. **The open-redirect rule is now enforced on both ends.** Part 8-b closed it on the server for the SSO `return` parameter; the client does its own redirect after a password login, and the server cannot vet that one. `safeDestination` repeats the rule and is tested against six hostile shapes — `//evil.example` and `/\\evil.example` are the ones that get past a check for a leading slash. **A real bug in my own helper, caught by a test I nearly did not write.** `currentDestination` concatenated the router's `hash`, which omits the leading `#`, turning `/?owner=me#chart` into `/?owner=mechart` — a destination that still looks plausible and still navigates, somewhere else. `window.location.hash` includes the `#` and the router's does not, and both shapes are now handled. **Every 401 is handled in one place**, not per call site, so a session that ends mid-visit sends the user to the login page with their destination intact whatever they were doing — and the cached session is nulled *first*, or the guard would read a stale session, let them back in, and bounce them again. **The organization field is revealed by the server, not guessed**: a single-organization instance never shows it, and a multi-organization one returns 422 naming the field, which is what makes it appear and take focus. Verified live, both branches. **i18n came first deliberately** — the expensive part of internationalization is never the library, it is the four hundred strings already written inline and the stylesheet full of `margin-left`. The catalog is the type, so a wrong key fails `tsc`. **Top-level `await` does not build**: Vite targets es2020, and raising the target for one line of syntax would have quietly dropped browsers the NFRs still name — `initI18n().then` instead. **The Go suite got killed mid-run and it was memory, not a flake**: Storybook was still serving from an earlier turn while `-race` tests hashed Argon2 at 64 MiB. Same family as Part 6-b's `-p 1`. Verified live against the built binary on SQLite: 401 wrong password, 200 + `HttpOnly` cookie, 204 logout, 401 after, 422-with-field for the ambiguous email, 200 once the organization is named. **Not verified: anything visual.** No browser ran. Part 11-b's Playwright is what closes that. |
 | 2026-09-22 | 10-b | Dialog, DropdownMenu, Select, Popover, Tooltip, Tabs, Toast and the command palette (Radix + cmdk), 34 more stories, `web/src/ui/keyboard.test.tsx` (21 tests driving the keyboard with user-event), `web/vitest.setup.ts`, `TestNothingRemovesTheFocusIndicator`, and [docs/design/keyboard-audit.md](docs/design/keyboard-audit.md) | **The axe suite had a hole big enough to drive this whole part through.** It scanned `render()`'s container — and every overlay portals to the end of `document.body`, so the scan would have covered the triggers and none of the content. Moved to `document.body` before writing a single overlay, which is the only reason the numbers below mean anything. **Found and fixed a real bug in cmdk**: it sets `aria-activedescendant` only when the selection *changes*, so it is missing when the palette opens and missing again whenever a search narrows to one result — precisely when a screen reader user needs to be told what is active, and precisely where everyone else can see the highlight. Reproduced against cmdk on its own. axe cannot catch it, because an absent attribute is not an invalid one; the keyboard suite did, and the fix is mutation-verified. **Two of my own findings were wrong and the code was right.** I read cmdk's minified source, concluded it put `aria-activedescendant` on the listbox rather than the input, and wrote a mirroring hook for a bug that did not exist; reading further showed it sets it on the input correctly, and the real bug was the *timing*. Then I asserted Tabs gives `tabindex=0` to the selected tab — it gives it to the *list* and forwards focus, which is equally correct and which a behavioral assertion would not have cared about. Rewrote it to assert one Tab in and one Tab out. **A ref that is always null.** The palette's fix did nothing at first because Radix's portal mounts the dialog's contents in a *later* commit, so a `useRef` was still null when an effect keyed on `open` ran, and nothing ever looked again. Callback refs held in state, so the effect fires when the elements exist. **jsdom needed four stubs before any overlay would mount** — `ResizeObserver`, `scrollIntoView`, pointer capture, `matchMedia`. None of them returns a plausible measurement on purpose: a fake that did would let a test assert a position no browser would produce. **One criterion is not met, and is marked `[~]` rather than ticked.** Whether the focus ring is *drawn* cannot be checked by anything here, because jsdom paints nothing. The manual pass is written out as 10 items in the audit document and has not been run; Part 11's Playwright is what turns most of it into code. 106 story scans, 130 axe tests, 21 keyboard tests, 0 violations. |
 | 2026-09-22 | 10-a | `web/src/ui` — 27 components in 16 modules on Radix and the design tokens, one barrel export; Storybook 9 with the a11y addon and a theme toolbar; 72 stories; `web/tokens_test.go` (WCAG contrast, in Go), `web/src/ui/a11y.test.tsx` (axe over every story, 88 tests), `web/stories_test.go` (coverage guard); `make web-test` / `storybook` / `storybook-build` | **Accessibility is checked in two halves and each half found a real bug the other could not see.** The Go contrast harness parses the token file and computes WCAG relative luminance for the 20 pairings the components actually produce — no browser, no `node_modules`, runs in `make test` anywhere — and it found **nine real failures in the tokens Part 9 shipped**: the light status colors, `border-strong` in both themes, and white-on-blue for a primary button's label. I fixed the tokens rather than the thresholds, and `TestDarkFallbackMatchesTheExplicitTheme` then caught me updating only one of the two dark blocks. Checking the *tokens* rather than a rendering is the point: a scan covers the components someone wrote a story for, the tokens cover every component that will ever exist. **The axe half caught `Button`'s `asChild` throwing on every render** — the spinner beside `{children}` gives Radix's `Slot` two children to merge onto, so the feature was broken from the moment it was written and nothing had rendered it until a story did. `Slottable` fixes it. **Scope was rules, not taste:** axe is scoped to the WCAG 2.1 A/AA tags, because best-practice rules include `region`, which wants content inside a landmark — a property of a page, not of a button — and asserting it on isolated components teaches people to ignore the output. `color-contrast` is disabled explicitly, with the comment saying where the check actually lives. **`web/stories_test.go` keeps the suite honest**, also in Go: a component with no stories, or a story file missing from the import list, fails the build. Mutation-verified both ways. **Storybook 10 is unusable on Node 20.16 and lies about it** — it prints "you need Node 20.19+" and **exits 0**, so the build reports success and produces nothing; a CI job checking only the exit status would go green forever. Pinned to 9.1.20, which needs all four packages reinstalled together (npm ERESOLVEs on an in-place bump). That is now **two** majors held back by Node 20.16 — Vite and Storybook — and Part 12 pinning Node ≥ 20.19 unblocks both at once. **Split Part 10**: the in-flow components are a session, the overlays are another, and the overlays are where the hard work is (focus trapping, escape, restoring focus, scroll lock) and where jsdom stops helping. **Not verified this session:** keyboard navigation by hand. 10-b owns it, for all 27 components, and says so. |

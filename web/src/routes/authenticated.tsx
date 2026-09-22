@@ -6,7 +6,7 @@ import { Route as rootRoute } from "./root";
 import { sessionQuery, useSession } from "../api/queries";
 import { changeLocale } from "../i18n";
 import { currentDestination } from "../lib/redirect";
-import { OfflineBanner } from "../components/OfflineBanner";
+import { AppShell } from "../components/shell/AppShell";
 
 /**
  * Everything behind the login.
@@ -25,7 +25,7 @@ import { OfflineBanner } from "../components/OfflineBanner";
  * does is keep an unauthenticated visitor from watching an empty application
  * shell fail to load, and it remembers where they were trying to go.
  *
- * Part 11-b puts the real shell here.
+ * Part 11-b put the shell here; see components/shell/AppShell.tsx.
  */
 export const Route = createRoute({
   getParentRoute: () => rootRoute,
@@ -54,10 +54,9 @@ function AuthenticatedLayout() {
   useUserLocale();
 
   return (
-    <>
-      <OfflineBanner />
+    <AppShell>
       <Outlet />
-    </>
+    </AppShell>
   );
 }
 

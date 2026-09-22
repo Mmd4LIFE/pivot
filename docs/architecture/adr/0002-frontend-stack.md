@@ -309,3 +309,70 @@ purpose. The server cannot vet a redirect the client performs after a password
 login, and the client cannot vet one the server performs on an SSO callback.
 The rule is six lines; sharing it across the language boundary would cost more
 than repeating it.
+
+### 2026-09-22 — Playwright, and what only a browser can tell you
+
+Part 11-b added the shell and the end-to-end suite. The suite is worth
+recording because of what it found and because of how it had to be built.
+
+#### Against the binary, never the dev server
+
+`make e2e` builds the frontend, builds the binary, and runs Playwright against
+that. Testing the Vite dev server instead would miss exactly the things Part 9
+built: the SPA fallback for a client route the Go server has never heard of,
+the year-long immutable caching on hashed assets, the document CSP, and a
+same-origin session cookie that a proxied dev setup handles differently.
+
+The suite provisions its own throwaway SQLite instance through the real
+`pivot admin create-user`, so the documented first-run path is exercised by the
+same run that exercises the login page.
+
+#### Three harness traps, each producing a convincing wrong answer
+
+**Playwright starts `webServer` before `globalSetup`.** Provisioning afterwards
+left the server holding an open descriptor on a deleted inode: it kept reading
+the old, empty database while the new one filled up. Every login failed with
+"that email address and password do not match" — a perfectly plausible wrong
+answer that sends you to the login form. Moving the cleanup to the config's
+module scope did not help either, because Playwright evaluates the config once
+per worker and it then deleted the database mid-run. `globalSetup` now owns
+provisioning *and* the server lifecycle, and `webServer` is deliberately unused.
+
+**Switching theme and scanning immediately measures colors mid-transition.**
+`transition-colors` on the nav links meant axe saw a link fading from the light
+value toward the dark one and reported 2.29:1 against a background that had
+already changed. `reducedMotion: "reduce"` fixes it by using a rule the base
+stylesheet already had.
+
+**The application's CSP blocks the harness, which is the CSP working.**
+`page.addScriptTag` appends a real `<script>` element and `script-src 'self'`
+refuses it, so axe would not load. `page.addInitScript` is delivered over the
+debugging protocol and is not subject to the policy, so the policy stays in
+force for everything the page itself does. Switching the CSP off with
+`bypassCSP` would have made the suite easier and stopped it testing what ships.
+There is now a test asserting an injected script is still refused.
+
+#### The fifth accessibility layer, and why it was not redundant
+
+axe's `color-contrast` rule does not run in jsdom at all — no layout, no canvas
+— so the jsdom suite disables it explicitly. Part 11-b was the first time it
+executed, and it immediately found **two real failures that
+`web/tokens_test.go` had no pairing for**: an avatar's initials were
+`text-muted` on `surface-sunken` at 4.40:1, and an accent badge was 3.97:1 in
+the dark theme.
+
+Both are now pairings in the Go harness, which is the lasting fix. The lesson
+is the general one: **a list of token pairs is only as good as the combinations
+somebody thought of.** The Go test covers every component that will ever use a
+token, including ones not written yet; the browser covers the combinations
+nobody predicted. Neither replaces the other.
+
+#### Radix's modal menu and `aria-hidden-focus`
+
+A modal Radix menu marks everything outside it `aria-hidden` while the skip
+link and the whole sidebar remain focusable, which axe fails as
+`aria-hidden-focus`. Focus is trapped in practice, so nobody could reach them —
+but the markup asserts those elements are not there, and that assertion is
+false. The account menu is `modal={false}`, which is what a menu should be
+regardless: a menu is not a dialog and has no business hiding the page behind
+it.

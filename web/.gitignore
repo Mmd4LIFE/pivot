@@ -10,3 +10,8 @@ dist/
 # Storybook's static build. A review artifact, never shipped and never embedded
 # -- web/embed.go embeds dist/ only.
 storybook-static/
+
+# Playwright's throwaway database, traces and reports. The E2E suite provisions
+# its own instance on every run; nothing here is worth keeping.
+.playwright/
+playwright-report/

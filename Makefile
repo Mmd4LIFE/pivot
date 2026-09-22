@@ -146,6 +146,31 @@ web-typecheck: $(WEB_DIR)/node_modules ## Type-check the frontend without buildi
 web-test: $(WEB_DIR)/node_modules ## Run the component accessibility suite (axe over every story)
 	cd $(WEB_DIR) && npm test
 
+# ── End to end ───────────────────────────────────────────────────────────────
+#
+# Against the binary, never the dev server. What ships is one Go process
+# serving the embedded bundle, and the differences between that and Vite are
+# exactly where bugs hide: the SPA fallback, the asset caching headers, the
+# document CSP, and a same-origin session cookie a proxied dev setup would
+# handle differently.
+#
+# The suite provisions its own throwaway SQLite instance on :8099 and throws it
+# away afterwards. It never touches a database anybody is using.
+#
+# Browsers are a separate ~650 MB download, once per machine:
+#
+#     cd web && npx playwright install chromium
+#
+# `install-deps` fails on Ubuntu 24.10 -- its package list is keyed to 24.04 --
+# and can be skipped there; the libraries are already present.
+.PHONY: e2e
+e2e: all $(WEB_DIR)/node_modules ## Run the browser end-to-end suite against the built binary
+	cd $(WEB_DIR) && npm run e2e
+
+.PHONY: e2e-ui
+e2e-ui: all $(WEB_DIR)/node_modules ## Run the end-to-end suite in Playwright's inspector
+	cd $(WEB_DIR) && npm run e2e:ui
+
 # ── Storybook ────────────────────────────────────────────────────────────────
 #
 # A development and review tool, never shipped. It is not part of `make all`
@@ -166,7 +191,7 @@ storybook-build: $(WEB_DIR)/node_modules ## Build a static Storybook into web/st
 .PHONY: web-clean
 web-clean: ## Remove built frontend assets, keeping the embed placeholder
 	@find $(WEB_DIR)/dist -mindepth 1 ! -name '.gitkeep' -delete 2>/dev/null || true
-	@rm -rf $(WEB_DIR)/storybook-static
+	@rm -rf $(WEB_DIR)/storybook-static $(WEB_DIR)/.playwright $(WEB_DIR)/playwright-report
 	@$(MAKE) --no-print-directory web-keep
 	@echo "cleaned $(WEB_DIR)/dist"
 

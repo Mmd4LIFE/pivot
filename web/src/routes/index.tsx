@@ -1,22 +1,21 @@
-import { createRoute, useNavigate } from "@tanstack/react-router";
+import { createRoute } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 
 import { Route as authenticatedRoute } from "./authenticated";
-import { useLogout, useSession } from "../api/queries";
+import { useSession } from "../api/queries";
+import { PageHeader } from "../components/shell/AppShell";
 import { Badge } from "../ui/Badge";
-import { Button } from "../ui/Button";
 import { Card, CardBody, CardHeader, CardTitle } from "../ui/Card";
-import { ThemeToggle } from "../components/ThemeToggle";
-import { LocalePicker } from "../components/LocalePicker";
+import { Separator } from "../ui/Separator";
 
 /**
  * The start page.
  *
- * Still thin. Part 11-b replaces it with the application shell — navigation,
- * breadcrumbs, a user menu, the command palette. What it proves today is that
- * the whole chain works end to end: the guard let us in, the session is real,
- * the design system renders, every string comes from the catalog, and sign-out
- * returns to the login page.
+ * What it shows is the only thing Phase 0 actually knows about you: who you
+ * are, what you are allowed to do, and when this session ends. That is not a
+ * placeholder — the effective permission list comes from the same checker the
+ * middleware asks, so an administrator can see at a glance what a role really
+ * grants rather than reading the model file.
  */
 export const Route = createRoute({
   getParentRoute: () => authenticatedRoute,
@@ -26,64 +25,76 @@ export const Route = createRoute({
 
 function Home() {
   const { t } = useTranslation();
-  const navigate = useNavigate();
 
   const session = useSession();
-  const logout = useLogout();
-
-  function signOut() {
-    logout.mutate(undefined, {
-      onSettled: () => {
-        void navigate({ to: "/login", replace: true });
-      },
-    });
-  }
 
   const user = session.data?.user;
+  const permissions = session.data?.permissions ?? [];
+  const expires = session.data?.session.absoluteExpiresAt;
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-2xl flex-col gap-8 p-6">
-      <header className="flex items-start justify-between gap-4 border-b border-line pb-4">
-        <div>
-          <h1 className="text-2xl font-semibold">{t("app.name")}</h1>
-          <p className="text-sm text-content-muted">{t("app.tagline")}</p>
-        </div>
+    <>
+      <PageHeader
+        title={t("pages.home.title")}
+        description={user === undefined ? undefined : t("pages.home.welcome", { name: user.name })}
+      />
 
-        <div className="flex items-center gap-2">
-          <LocalePicker />
-          <ThemeToggle />
-        </div>
-      </header>
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle level={2}>{t("pages.home.permissionsHeading")}</CardTitle>
+          </CardHeader>
 
-      <Card>
-        <CardHeader>
-          <CardTitle level={2}>{t("session.heading")}</CardTitle>
-        </CardHeader>
-
-        <CardBody className="flex flex-col gap-3">
-          {user === undefined ? (
-            <p className="text-content-subtle">{t("session.checking")}</p>
-          ) : (
-            <>
-              <p className="text-sm">{t("auth.signedInAs", { email: user.email })}</p>
-
-              <div className="flex flex-wrap gap-2">
-                {(session.data?.permissions ?? []).map((permission) => (
-                  <Badge key={permission} tone="neutral">
-                    {permission}
-                  </Badge>
+          <CardBody>
+            {permissions.length === 0 ? (
+              <p className="text-sm text-content-muted">{t("pages.home.noPermissions")}</p>
+            ) : (
+              <ul className="flex flex-wrap gap-2">
+                {permissions.map((permission) => (
+                  <li key={permission}>
+                    <Badge tone="accent">{permission}</Badge>
+                  </li>
                 ))}
-              </div>
-            </>
-          )}
+              </ul>
+            )}
+          </CardBody>
+        </Card>
 
-          <div>
-            <Button variant="secondary" loading={logout.isPending} onClick={signOut}>
-              {t("auth.signOut")}
-            </Button>
-          </div>
-        </CardBody>
-      </Card>
-    </main>
+        <Card>
+          <CardHeader>
+            <CardTitle level={2}>{t("pages.home.sessionHeading")}</CardTitle>
+          </CardHeader>
+
+          <CardBody className="flex flex-col gap-2 text-sm">
+            {user !== undefined && (
+              <p>{t("pages.home.signedInAs", { email: user.email })}</p>
+            )}
+
+            {expires !== undefined && (
+              <>
+                <Separator />
+                {/*
+                  The absolute cap, not the sliding idle timeout: this is the
+                  one that is never extended, so it is the one that answers
+                  "when will I have to sign in again".
+                */}
+                <p className="text-content-muted">
+                  {t("pages.home.expires", { when: formatWhen(expires) })}
+                </p>
+              </>
+            )}
+          </CardBody>
+        </Card>
+      </div>
+    </>
   );
+}
+
+/** A timestamp in the reader's own locale and time zone. */
+function formatWhen(iso: string): string {
+  const at = new Date(iso);
+
+  if (Number.isNaN(at.getTime())) return iso;
+
+  return at.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }

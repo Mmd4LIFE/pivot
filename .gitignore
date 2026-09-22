@@ -24,9 +24,16 @@ __pycache__/
 .ruff_cache/
 
 # Local data & secrets
+# SQLite writes two sidecar files beside the database. Ignoring only *.db
+# leaves them untracked and noisy in every `git status` after running the
+# server locally.
 *.db
+*.db-wal
+*.db-shm
 *.sqlite
 *.sqlite3
+*.sqlite-wal
+*.sqlite-shm
 .env
 .env.*
 !.env.example

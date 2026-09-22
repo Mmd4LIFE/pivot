@@ -77,6 +77,84 @@ export const en = {
     expired: "Your session ended. Sign in again to carry on where you left off.",
   },
 
+  nav: {
+    // The landmark labels. A screen reader user navigates by these, so they
+    // are names rather than descriptions.
+    primary: "Main",
+    breadcrumbs: "Breadcrumb",
+    skipToContent: "Skip to content",
+
+    home: "Home",
+    dashboards: "Dashboards",
+    questions: "Questions",
+    connections: "Connections",
+    people: "People",
+    settings: "Settings",
+
+    search: "Search",
+    // The hotkey, shown on the search button. Decorative -- the button has a
+    // real name -- but it is how anyone learns the shortcut exists.
+    searchHint: "Ctrl K",
+
+    account: "Account",
+    openMenu: "Open menu",
+  },
+
+  pages: {
+    home: {
+      title: "Home",
+      welcome: "Welcome back, {{name}}.",
+      permissionsHeading: "What you can do here",
+      noPermissions: "No permissions have been granted to you yet.",
+      sessionHeading: "This session",
+      signedInAs: "Signed in as {{email}}",
+      expires: "Ends {{when}}",
+    },
+
+    dashboards: {
+      title: "Dashboards",
+      emptyTitle: "No dashboards yet",
+      emptyBody:
+        "A dashboard collects questions onto one page. Phase 1 builds them, once a connection exists.",
+    },
+
+    questions: {
+      title: "Questions",
+      emptyTitle: "No questions yet",
+      emptyBody:
+        "A question is a query you can save, share and put on a dashboard. Phase 1 builds the editor.",
+    },
+
+    connections: {
+      title: "Connections",
+      emptyTitle: "No connections yet",
+      emptyBody:
+        "A connection points Pivot at a database. Phase 1 adds PostgreSQL, MySQL, ClickHouse and the rest.",
+    },
+
+    people: {
+      title: "People",
+      emptyTitle: "Nothing to show yet",
+      emptyBody:
+        "Members and their roles. The API is live; Phase 0 Part 14 puts an interface on it.",
+    },
+
+    settings: {
+      title: "Settings",
+      emptyTitle: "Nothing to configure yet",
+      emptyBody:
+        "Identity providers, retention and branding land here as the phases that own them arrive.",
+    },
+  },
+
+  command: {
+    label: "Search Pivot",
+    placeholder: "Search or jump to...",
+    empty: "Nothing matches that.",
+    goTo: "Go to",
+    actions: "Actions",
+  },
+
   connection: {
     offline: "Pivot cannot reach the server.",
     offlineDetail: "Your changes are not being saved. This page will recover on its own.",

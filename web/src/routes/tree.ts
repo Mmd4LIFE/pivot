@@ -2,6 +2,13 @@ import { Route as rootRoute } from "./root";
 import { Route as authenticatedRoute } from "./authenticated";
 import { Route as indexRoute } from "./index";
 import { Route as loginRoute } from "./login";
+import {
+  connectionsRoute,
+  dashboardsRoute,
+  peopleRoute,
+  questionsRoute,
+  settingsRoute,
+} from "./placeholders";
 
 /**
  * The route tree. Every route is registered here or it does not exist.
@@ -14,5 +21,12 @@ import { Route as loginRoute } from "./login";
  */
 export const routeTree = rootRoute.addChildren([
   loginRoute,
-  authenticatedRoute.addChildren([indexRoute]),
+  authenticatedRoute.addChildren([
+    indexRoute,
+    dashboardsRoute,
+    questionsRoute,
+    connectionsRoute,
+    peopleRoute,
+    settingsRoute,
+  ]),
 ]);

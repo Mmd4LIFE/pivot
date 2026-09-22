@@ -13,7 +13,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "storybook": "storybook dev -p 6006 --no-open",
-    "storybook:build": "storybook build -o storybook-static"
+    "storybook:build": "storybook build -o storybook-static",
+    "e2e": "playwright test",
+    "e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "1.2.6",
@@ -41,6 +43,7 @@
     "tailwind-merge": "3.7.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@storybook/addon-a11y": "9.1.20",
     "@storybook/react": "9.1.20",
     "@storybook/react-vite": "9.1.20",
@@ -49,6 +52,7 @@
     "@testing-library/jest-dom": "6.9.1",
     "@testing-library/react": "16.3.3",
     "@testing-library/user-event": "14.6.7",
+    "@types/node": "22.20.4",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "4.7.0",

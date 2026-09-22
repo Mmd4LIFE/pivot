@@ -1,28 +1,33 @@
 # Keyboard audit
 
-**Automated layers:** green as of 2026-09-22 (Part 10-b).
-**Manual pass:** *not yet run.* The checklist at the end of this file is what
-Part 10-b produced; nobody has worked through it with a keyboard and a screen
-reader. Record the date and the result here when they have.
+**Automated layers:** green as of 2026-09-22 (Part 11-b).
+**Manual pass:** *partly closed by machine, the rest not yet run.* Part 11-b
+added a browser, which turned four of the ten items below into tests. The
+remaining six need a person; nobody has worked through them. Record the date
+and the result here when they have.
 
 Every component in `web/src/ui`, and what is known about using it without a
 mouse. This file exists because "Radix handles it" is true until somebody adds
 a `stopPropagation` to fix an unrelated bug, and because some of what matters
 here cannot be checked by a machine that has no screen.
 
-There are four layers, and each one catches what the others cannot:
+There are five layers, and each one catches what the others cannot:
 
 | Layer | Where | What it can see |
 |---|---|---|
-| Contrast | `web/tokens_test.go` (Go) | Whether a color pair is legible. Runs anywhere, including with no `node_modules`. |
+| Contrast, by intent | `web/tokens_test.go` (Go) | Whether a token pair *would* be legible. Runs anywhere, including with no `node_modules`. |
 | Structure | `web/src/ui/a11y.test.tsx` (axe in jsdom) | Names, roles, states, ARIA validity. 106 story scans. |
 | Behavior | `web/src/ui/keyboard.test.tsx` (user-event in jsdom) | Focus movement, focus trapping, Escape, arrow keys, live-region politeness. 21 tests. |
-| Rendering | **this file**, by hand | Whether the focus ring is actually *drawn*, where the overlay lands, what a screen reader says out loud. |
+| Contrast, as painted | `web/e2e/a11y.spec.ts` (axe in Chromium) | What the browser actually rendered, in both themes, including overlays. 16 scans. |
+| The rest | **this file**, by hand | What a screen reader says out loud, where an overlay lands, whether the page behind a dialog is locked. |
 
-jsdom builds a DOM and never lays it out. It has no painted pixels, so nothing
-automated in this repository can tell you that a focus ring is visible — only
-that the element which should have focus does. The fourth row is the gap, and
-Part 11's Playwright install is what starts closing it.
+The fourth row is new in Part 11-b and it matters more than its size suggests.
+jsdom lays nothing out and has no canvas, so axe's `color-contrast` rule does
+not run there at all — the jsdom suite disables it explicitly. In a browser it
+runs, and on its first outing it found **two real failures that the Go harness
+had no pairing for**: an avatar's initials, and an accent badge in the dark
+theme. A list of token pairs is only as good as the combinations somebody
+thought of.
 
 ---
 
@@ -112,50 +117,56 @@ without the fix.
 
 ---
 
+## Closed by the browser in Part 11-b
+
+These were on the manual list and are now tests. They are here so nobody spends
+twenty minutes re-checking them by hand.
+
+- **Contrast, as painted, in both themes.** `web/e2e/a11y.spec.ts` runs axe over
+  six pages plus the login page, the command palette and the account menu, in
+  light and dark. This is the check jsdom cannot make.
+- **The right-to-left layout genuinely mirrors.** The sidebar's bounding box is
+  measured on both sides of a `dir="rtl"` switch — real layout, not an
+  attribute.
+- **The skip link is the first tab stop, is invisible until focused, is visible
+  once focused, and moves focus into `<main>`.**
+- **One `<main>`, one `<h1>`, on every page.**
+
 ## What still needs a person
 
-Run `make storybook`, open <http://localhost:6006>, and work through this with
-the mouse pushed out of reach. Record the date and the result above.
+Six items. Run `make storybook` for the components and `make all &&
+./bin/pivot serve` for the application, and work through this with the mouse
+pushed out of reach. Record the date and the result at the top of this file.
 
-Nothing here is checkable by the test suite, because all of it is about what
-appears on a screen or what is said out loud.
+### Rendering
 
-### Every component
-
-1. **Is the focus ring visible?** Tab to each control in each story, in both
-   themes. The ring is a 2px accent outline with a 2px offset, from
+1. **Is the focus ring visible on every control?** Tab through each story in
+   both themes. The ring is a 2px accent outline with a 2px offset, from
    `:focus-visible` in `app.css`. `web/tokens_test.go` proves the color clears
-   3:1 against both surfaces; it cannot prove that anything drew it. Watch in
-   particular for a ring clipped by an `overflow: hidden` ancestor — a real and
-   common failure that looks like no ring at all.
+   3:1 and axe now proves the surrounding text is legible, but neither can tell
+   you the ring was *drawn*. Watch for one clipped by an `overflow: hidden`
+   ancestor — a real and common failure that looks like no ring at all.
 2. **Does the ring appear only on keyboard focus?** `:focus-visible`, not
    `:focus`: clicking a button should not leave a ring behind it.
 
 ### Overlays
 
-3. **Where does it land?** jsdom cannot position anything, so every overlay's
-   placement is unverified by the suite. Check that a Select near the bottom of
-   the viewport flips above its trigger, and that a Tooltip at the right edge
-   does not run off-screen.
+3. **Where does it land?** Check that a Select near the bottom of the viewport
+   flips above its trigger, and that a Tooltip at the right edge does not run
+   off-screen. Playwright could assert this; nothing does yet.
 4. **Is the page behind locked?** Open a Dialog and scroll. The page behind
    should not move.
-5. **Submenu on the keyboard.** ArrowRight opens a DropdownMenu submenu,
-   ArrowLeft closes it. Not covered by a test.
-6. **Select typeahead.** With the list open, type `ad` and check that Admin is
-   highlighted.
+5. **Submenu and typeahead on the keyboard.** ArrowRight opens a DropdownMenu
+   submenu and ArrowLeft closes it; with a Select open, typing `ad` highlights
+   Admin.
 
 ### Screen reader
 
-7. With VoiceOver, NVDA or Orca: open the command palette and arrow through the
-   list. **Each option should be read aloud as it becomes active.** This is the
-   bug above; the fix is asserted in the DOM but has never been heard.
-8. Trigger each Toast tone. A normal toast should be read at the next pause; an
-   error should interrupt. Neither should move the reading cursor.
-9. Open a Dialog and try to read the page behind it. Nothing outside should be
-   reachable.
-
-### Right to left
-
-10. Set `dir="rtl"` on `<html>` in the inspector. Menus, the Select chevron,
-    the Switch thumb and the Dialog's close button should all mirror. Only the
-    Switch has a story for this today.
+6. With VoiceOver, NVDA or Orca:
+   - Open the command palette and arrow through the list. **Each option should
+     be read aloud as it becomes active.** The `aria-activedescendant` fix is
+     asserted in the DOM and has never been heard.
+   - Trigger each Toast tone. A normal one should be read at the next pause; an
+     error should interrupt. Neither should move the reading cursor.
+   - Open a Dialog and try to read the page behind it. Nothing outside should
+     be reachable.

@@ -383,7 +383,13 @@ describe("signing out", () => {
 
     await screen.findByText(/ada@example.com/);
 
-    await user.click(screen.getByRole("button", { name: /sign out/i }));
+    // Sign out lives in the account menu now, so the route out has to be
+    // opened first. Asserting it through the menu rather than reaching for a
+    // hidden button is the point: if the menu stops opening, there is no way
+    // to sign out, and that is a bug the old test would not have seen.
+    await user.click(screen.getByRole("button", { name: /account/i }));
+
+    await user.click(await screen.findByRole("menuitem", { name: /sign out/i }));
 
     await waitFor(() => {
       expect(router.state.location.pathname).toBe("/login");
