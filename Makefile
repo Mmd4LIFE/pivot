@@ -142,9 +142,31 @@ web-keep:
 web-typecheck: $(WEB_DIR)/node_modules ## Type-check the frontend without building
 	cd $(WEB_DIR) && npm run typecheck
 
+.PHONY: web-test
+web-test: $(WEB_DIR)/node_modules ## Run the component accessibility suite (axe over every story)
+	cd $(WEB_DIR) && npm test
+
+# ── Storybook ────────────────────────────────────────────────────────────────
+#
+# A development and review tool, never shipped. It is not part of `make all`
+# and its output never reaches web/dist, so nothing it produces can end up
+# inside the binary.
+#
+# Reviewing a component in Storybook is not a substitute for `make web-test`:
+# the panel shows one story at a time and only while someone is looking, and
+# the suite checks all of them on every run.
+.PHONY: storybook
+storybook: $(WEB_DIR)/node_modules ## Browse the design system at :6006
+	cd $(WEB_DIR) && npm run storybook
+
+.PHONY: storybook-build
+storybook-build: $(WEB_DIR)/node_modules ## Build a static Storybook into web/storybook-static
+	cd $(WEB_DIR) && npm run storybook:build
+
 .PHONY: web-clean
 web-clean: ## Remove built frontend assets, keeping the embed placeholder
 	@find $(WEB_DIR)/dist -mindepth 1 ! -name '.gitkeep' -delete 2>/dev/null || true
+	@rm -rf $(WEB_DIR)/storybook-static
 	@$(MAKE) --no-print-directory web-keep
 	@echo "cleaned $(WEB_DIR)/dist"
 

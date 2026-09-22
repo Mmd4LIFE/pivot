@@ -53,8 +53,8 @@ At the end of every part, in this order:
 
 | | |
 |---|---|
-| **Last completed** | Part 9 — Frontend scaffold, embedded in the binary |
-| **Next up** | **Part 10 — Design system core** |
+| **Last completed** | Part 10-a — Design system: in-flow components and the accessibility harness |
+| **Next up** | **Part 10-b — Design system: overlays and the keyboard audit** |
 | **Current phase** | Phase 0 — Foundations |
 | **Branch** | `main` |
 | **Blockers** | None |
@@ -163,6 +163,26 @@ change rather than a rebuild, and it is asserted: the built CSS must contain `va
 and must not contain Tailwind 3's `<alpha-value>` placeholder, which Tailwind 4 emits
 verbatim and browsers silently discard.
 
+**The design system is `web/src/ui`**, exported through one barrel. 27 components across
+16 modules, all on Radix where there is keyboard behavior to get right, all built on the
+tokens and never on a hard-coded color. Two conventions are worth knowing before adding
+one: a label is a **required prop** on Checkbox, Radio and Switch, and `CardTitle` takes
+an explicit heading level with no default — both are cases where an optional argument
+produces a defect nobody notices, so the type system asks instead.
+
+**Accessibility is checked in two halves, and neither one covers the other.**
+`web/tokens_test.go` computes WCAG contrast from the token file in Go — no browser, no
+`node_modules`, runs in `make test` anywhere, and it found **nine real contrast failures**
+in the tokens Part 9 shipped. `web/src/ui/a11y.test.tsx` runs axe-core over every story in
+jsdom (72 story scans, 88 tests, `make web-test`), scoped to the WCAG 2.1 A/AA tags, with
+`color-contrast` disabled because jsdom has no layout — that is the Go test's half. It
+caught `Button`'s `asChild` throwing on every render. `web/stories_test.go` fails the Go
+build if a component has no stories or a story file is missing from the suite's import
+list, so the hand-maintained list cannot quietly fall behind the directory.
+
+**Storybook is a review tool and never ships.** `make storybook` serves it on :6006;
+nothing it builds reaches `web/dist`, so nothing it builds can reach the binary.
+
 **Tenant isolation:** `internal/tenant.Scope` has unexported fields and no usable zero
 value. Repositories take **no org parameter at all** — they read the scope from the
 context — so a caller cannot pass the wrong tenant because there is nothing to pass.
@@ -237,7 +257,14 @@ needs an entry in `sqlc.yaml`'s SQLite override list**, or the packages silently
   `Cannot find module '../rolldown-binding.linux-x64-gnu.node'` — which points at npm
   rather than at Node. `web/package.json` declares `engines` so the next person sees a
   warning instead. Upgrading Node to 20.19+ or 22 LTS unblocks the newer Vite.
-- **`make web-install` once per clone** (~102 MB in `web/node_modules`). `make build`
+- **Storybook is pinned to 9 for the same reason, and it fails in a nastier way.**
+  Storybook 10 installs on Node 20.16 and then refuses to run — and prints its refusal
+  while **exiting 0**, so `npm run storybook:build` reports success and produces nothing.
+  Moving majors also needs all four packages (`storybook`, `@storybook/react`,
+  `@storybook/react-vite`, `@storybook/addon-a11y`) uninstalled and reinstalled together;
+  bumping them in place gives an ERESOLVE on the peer range. **Part 12 pinning a
+  toolchain Node ≥ 20.19 unblocks both Vite and Storybook in one move.**
+- **`make web-install` once per clone** (~220 MB in `web/node_modules`). `make build`
   deliberately does *not* depend on it; `make all` is the target that builds the frontend
   and embeds it.
 - **Lint enforces US spelling** (`misspell`, `locale: US`) and rejects both `err` shadowing
@@ -248,7 +275,7 @@ needs an entry in `sqlc.yaml`'s SQLite override list**, or the packages silently
 ## Progress
 
 ```
-Phase 0  Foundations        [██████████████      ] 14/20   (Parts 3, 4, 6, 7 and 8 each split)
+Phase 0  Foundations        [██████████████      ] 15/21   (Parts 3, 4, 6, 7, 8 and 10 each split)
 Phase 1  Connect & Query    [                    ]  0/12   (detailed at Part 15)
 Phase 2+ ...                                            (expanded as we approach)
 ```
@@ -726,22 +753,57 @@ than of one machine.
 
 ---
 
-### - [ ] Part 10 — Design system core
+### - [x] Part 10-a — Design system: in-flow components and the accessibility harness ✅ 2026-09-22
 
-**Deliverable:** 20+ accessible components in Storybook, light and dark.
+**Deliverable:** The components that render in the document flow, every one of them
+checked by a test rather than by review.
 
-**Build:** Radix-based primitives — button, input, select, checkbox, radio, switch, dialog,
-dropdown, tooltip, popover, toast, tabs, table, badge, avatar, skeleton, spinner, alert,
-card, command palette. Plus Storybook with the a11y addon and a light/dark toggle.
+**Build:** `web/src/ui` — Button, Spinner, Field, Input, Textarea, Checkbox, RadioGroup,
+Switch, Badge, Avatar, Skeleton, Separator, Alert, Card, Table, EmptyState (16 modules,
+27 exported components). Storybook 9 with the a11y addon and a theme toolbar.
+`web/tokens_test.go` for contrast, `web/src/ui/a11y.test.tsx` for axe,
+`web/stories_test.go` to keep the second one honest.
 
 **Done when:**
-- Storybook runs; every component has stories for its states
-- **Zero axe violations** across all stories
-- Every component is keyboard navigable with a visible focus indicator
-- Theme switching works at runtime via CSS custom properties (no rebuild)
+- [x] Storybook runs; every component has stories for its states — 16 story files, 72
+      stories, served at `:6006` and built to `storybook-static`
+- [x] **Zero axe violations** across all stories — 72 scans plus a presence check per
+      module, 88 tests in all, `make web-test`
+- [x] Theme switching works at runtime via CSS custom properties (no rebuild) — the
+      Storybook toolbar sets `data-theme` on `<html>`, exactly as the application does
 
-**Notes:** Build the 20 components Phases 1–2 actually need. This is not a component
-library for its own sake — [Phase 0 names scope creep here as a risk](docs/roadmap/phase-0-foundations.md#risks).
+**Notes:** The split. The in-flow components are one session; the overlays are another,
+and they are the half with the hard accessibility work — focus trapping, escape
+handling, restoring focus on close, scroll locking.
+
+**Refs:** `P0-FE-005`, `P0-FE-006`, `P0-FE-009`
+
+---
+
+### - [ ] Part 10-b — Design system: overlays and the keyboard audit
+
+**Deliverable:** The components that float above the page, and a keyboard pass over all
+of them.
+
+**Build:** Dialog, DropdownMenu, Select, Popover, Tooltip, Tabs, Toast, and the command
+palette — all on Radix, added to the same `src/ui` barrel, with stories and axe coverage
+on the same terms as 10-a.
+
+**Done when:**
+- Every overlay traps focus, closes on Escape, and returns focus to whatever opened it
+- **Zero axe violations** across all stories, 10-a's included
+- Every component is keyboard navigable with a visible focus indicator — **10-a's
+  twenty-seven included**, checked by hand against the built Storybook and written down
+  component by component. 10-a did not do this: it verified that the focus ring's color
+  clears 3:1 against both surfaces, which is not the same as verifying that focus
+  reaches every control
+- Toasts announce without stealing focus (`role="status"`, not `role="alert"`, unless
+  the toast is an error)
+
+**Notes:** An overlay is where accessibility goes wrong, and it is also where jsdom stops
+helping: axe in jsdom cannot see focus order or what a portal did to the tab sequence. So
+the keyboard audit here is manual and its results are recorded — and Part 11's Playwright
+install is what makes it automatable afterwards.
 
 **Refs:** `P0-FE-005`, `P0-FE-006`, `P0-FE-009`
 
@@ -899,6 +961,7 @@ Newest first. Record what **actually** shipped, including what didn't work.
 
 | Date | Part | Shipped | Notes |
 |---|---|---|---|
+| 2026-09-22 | 10-a | `web/src/ui` — 27 components in 16 modules on Radix and the design tokens, one barrel export; Storybook 9 with the a11y addon and a theme toolbar; 72 stories; `web/tokens_test.go` (WCAG contrast, in Go), `web/src/ui/a11y.test.tsx` (axe over every story, 88 tests), `web/stories_test.go` (coverage guard); `make web-test` / `storybook` / `storybook-build` | **Accessibility is checked in two halves and each half found a real bug the other could not see.** The Go contrast harness parses the token file and computes WCAG relative luminance for the 20 pairings the components actually produce — no browser, no `node_modules`, runs in `make test` anywhere — and it found **nine real failures in the tokens Part 9 shipped**: the light status colors, `border-strong` in both themes, and white-on-blue for a primary button's label. I fixed the tokens rather than the thresholds, and `TestDarkFallbackMatchesTheExplicitTheme` then caught me updating only one of the two dark blocks. Checking the *tokens* rather than a rendering is the point: a scan covers the components someone wrote a story for, the tokens cover every component that will ever exist. **The axe half caught `Button`'s `asChild` throwing on every render** — the spinner beside `{children}` gives Radix's `Slot` two children to merge onto, so the feature was broken from the moment it was written and nothing had rendered it until a story did. `Slottable` fixes it. **Scope was rules, not taste:** axe is scoped to the WCAG 2.1 A/AA tags, because best-practice rules include `region`, which wants content inside a landmark — a property of a page, not of a button — and asserting it on isolated components teaches people to ignore the output. `color-contrast` is disabled explicitly, with the comment saying where the check actually lives. **`web/stories_test.go` keeps the suite honest**, also in Go: a component with no stories, or a story file missing from the import list, fails the build. Mutation-verified both ways. **Storybook 10 is unusable on Node 20.16 and lies about it** — it prints "you need Node 20.19+" and **exits 0**, so the build reports success and produces nothing; a CI job checking only the exit status would go green forever. Pinned to 9.1.20, which needs all four packages reinstalled together (npm ERESOLVEs on an in-place bump). That is now **two** majors held back by Node 20.16 — Vite and Storybook — and Part 12 pinning Node ≥ 20.19 unblocks both at once. **Split Part 10**: the in-flow components are a session, the overlays are another, and the overlays are where the hard work is (focus trapping, escape, restoring focus, scroll lock) and where jsdom stops helping. **Not verified this session:** keyboard navigation by hand. 10-b owns it, for all 27 components, and says so. |
 | 2026-09-21 | 9 | Vite 6 + React 19 + TS 5.9 + Tailwind 4 scaffold, TanStack Router and Query, a typed API client over the generated schema, design tokens as runtime CSS variables, `web/embed.go` with SPA fallback and caching, a document CSP, `make all` / `web-*` / `dev` targets, and 12 Go tests over the serving rules | **Two bugs shipped and were found by reading the compiled output, not the page.** `<alpha-value>` is Tailwind 3 syntax; Tailwind 4 emits it verbatim, browsers discard the whole declaration, and every themed utility silently did nothing — no error anywhere. And the theme bootstrap was an inline `<script>`, which the shell's `script-src 'self'` blocks outright, so the stored theme preference was never applied. Both are now mutation-verified tests. **A test of mine was wrong twice in one session:** first it passed against a mutation that does not actually break the property (`@theme` vs `@theme inline` — both preserve the indirection, contrary to my comment), then the strengthened version failed on a *clean* build because Tailwind 4's own `@property` rules legitimately contain `syntax:"<length>"`. Narrowed to the literal `<alpha-value>`. **Node 20.16 turned out to be the binding constraint on the whole toolchain.** Vite 7/8 and plugin-react 5/6 all need `^20.19 || >=22.12`; npm skips the mismatched optional native binding *silently*, so the failure reads as an npm bug rather than a Node one. Pinned to Vite 6 — which is what ADR-0002 chose anyway — with `engines` declared so the next person gets a legible warning, and a note for Part 12 to pin Node in CI. The Go tests run against a synthetic asset tree, so they pass on a clean checkout where no frontend has been built, which is exactly the case they most need to protect. |
 | 2026-09-21 | 8-b | `/auth/oidc/{provider}/{start,callback}`, the public provider list, admin CRUD for providers gated on `manage_organization`, `auth.Service.StartSession` shared with password login, `pivot admin add-provider`, `server.baseURL`, spec + TS client, and an opt-in Keycloak conformance test | **Discovery ran against Google's real OIDC issuer, live.** The Keycloak container test exists and skips unless `PIVOT_TEST_KEYCLOAK_URL` is set — the image is a large pull, and a suite that needs a container is a suite people stop running — but the live check turned out stronger than the plan: a complete authorization request against a genuinely independent implementation, with S256 challenge, nonce, state and `scope=openid` all present. **Added an open-redirect guard that was not in the plan.** The post-login `return` path accepted anything; `//evil.example` and `/\evil.example` both redirect off-site in real browsers, and an open redirect on the login route is what makes a phishing link convincing. Only a same-site absolute path is honored now, mutation-verified. **`SameSite=Lax` on the flow cookie is load-bearing, not a default.** Strict would withhold it on the callback, which arrives as a top-level navigation from the provider's origin — every login would break. A test asserts Lax specifically. **Session creation was factored, not duplicated:** SSO calls the same `StartSession` the password path does, so there is one expiry policy rather than two, and only one of two would have been covered by the tests that matter. Mutation-verified twice: deleting the state check and deleting the protocol-relative guard each fail tests by name. gosec flagged the start redirect as a taint-analysis open redirect; it is not — the destination is the configured provider's own discovered endpoint — and the nolint says why rather than just silencing it. |
 | 2026-09-21 | 8-a | `internal/oidc` (discovery with caching, PKCE, ID token verification, claim mapping), schema v5 `identity_providers` + `federated_identities`, `IdentityProviderRepo`, JIT provisioning with group and attribute sync, and an in-process identity provider that signs real RS256 tokens | **Split Part 8** — the protocol and provisioning domain is a session, the endpoints and Keycloak conformance are another. **A test of mine found a real hole in my own design.** I asserted that a recycled email address must not hand over the original account; it did, because my provisioning linked by email unconditionally. Closing the front door (match on `sub`) while leaving the side door open (link on email) is worth exactly nothing. Fixed by making `link_by_email` **opt-in per provider and off by default**, and requiring `email_verified` even when it is on. Two new tests pin the default down. The migration was edited in place rather than amended, because it had not been committed or applied anywhere. Also added email sync for returning users, which is safe precisely because identity was already settled by subject — the address moves, the account cannot. **The rejection paths are tested by breaking tokens on purpose:** bad signature, foreign issuer, replayed nonce, mismatched PKCE verifier. That is the whole reason for the in-process provider — a real Keycloak will not issue you a token it has broken — and it sits alongside 8-b's container test rather than replacing it. Signature verification is mutation-verified: turning it off fails two tests by name. `go-oidc` was chosen over hand-rolling because ID token verification is not something to hand-roll; it costs two direct requires. 12 Postgres subtests, 0 skips. |

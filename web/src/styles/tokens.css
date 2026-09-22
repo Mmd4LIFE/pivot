@@ -36,9 +36,22 @@
   --pivot-text-subtle: 161 161 170;
   --pivot-text-inverted: 250 250 250;
 
-  /* --- lines ---------------------------------------------------------- */
+  /*
+   * --- lines -----------------------------------------------------------
+   *
+   * Two, and the difference is a requirement rather than a shade.
+   *
+   * --pivot-border is decorative: a divider between rows, the edge of a card.
+   * WCAG exempts purely decorative boundaries, so it can be subtle.
+   *
+   * --pivot-border-strong is the visible edge of a *control* — an input, a
+   * checkbox, an unfilled button. WCAG 1.4.11 asks for 3:1 against the surface
+   * behind it, because a control nobody can see is a control nobody can find.
+   * TestTokenContrast enforces that, so never use --pivot-border as a control's
+   * only boundary.
+   */
   --pivot-border: 228 228 231;
-  --pivot-border-strong: 212 212 216;
+  --pivot-border-strong: 138 138 148;
 
   /* --- brand ---------------------------------------------------------- */
   --pivot-accent: 37 99 235;
@@ -47,11 +60,11 @@
   --pivot-accent-subtle: 239 246 255;
 
   /* --- status --------------------------------------------------------- */
-  --pivot-success: 22 163 74;
-  --pivot-warning: 217 119 6;
+  --pivot-success: 21 128 61;
+  --pivot-warning: 180 83 9;
   --pivot-danger: 220 38 38;
   --pivot-danger-hover: 185 28 28;
-  --pivot-info: 8 145 178;
+  --pivot-info: 14 116 144;
 
   /* --- shape ---------------------------------------------------------- */
   --pivot-radius: 0.5rem;
@@ -98,11 +111,11 @@
     --pivot-text-inverted: 24 24 27;
 
     --pivot-border: 39 39 42;
-    --pivot-border-strong: 63 63 70;
+    --pivot-border-strong: 113 113 122;
 
     --pivot-accent: 59 130 246;
     --pivot-accent-hover: 96 165 250;
-    --pivot-accent-text: 255 255 255;
+    --pivot-accent-text: 9 9 11;
     --pivot-accent-subtle: 30 41 59;
 
     --pivot-success: 34 197 94;
@@ -126,11 +139,11 @@
   --pivot-text-inverted: 24 24 27;
 
   --pivot-border: 39 39 42;
-  --pivot-border-strong: 63 63 70;
+  --pivot-border-strong: 113 113 122;
 
   --pivot-accent: 59 130 246;
   --pivot-accent-hover: 96 165 250;
-  --pivot-accent-text: 255 255 255;
+  --pivot-accent-text: 9 9 11;
   --pivot-accent-subtle: 30 41 59;
 
   --pivot-success: 34 197 94;

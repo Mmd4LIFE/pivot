@@ -136,3 +136,68 @@ served with `script-src 'self'`, which blocks inline scripts. It is now
 The tests are in `web/embed_test.go`: the built CSS must contain
 `var(--pivot-` and no `<alpha-value>`, and the shell must contain no inline
 script at all.
+
+### 2026-09-22 — Storybook pinned to 9, and where accessibility is actually checked
+
+Part 10-a added the design system. Two things changed the shape of the
+frontend toolchain.
+
+#### Storybook 9, for the same reason Vite is 6
+
+Storybook 10.6.0 installs cleanly on Node 20.16 and then refuses to run:
+
+```
+To run Storybook, you need Node.js version 20.19+ or 22.12+.
+```
+
+Worth noting how it refuses — it prints that and **exits 0**, so `npm run
+storybook:build` reports success and produces nothing. A CI job that only
+checked the exit status would have gone green on a build that never happened.
+
+Storybook 9.1.20 has no such floor and builds and serves the whole gallery on
+the installed Node. It is pinned across all four packages (`storybook`,
+`@storybook/react`, `@storybook/react-vite`, `@storybook/addon-a11y`), which
+npm requires: bumping them one at a time gives an ERESOLVE on the peer range,
+and the packages have to be removed and reinstalled together to move majors.
+
+So the frontend is now held one major behind in two places — Vite and
+Storybook — by the same Node 20.16. Both are one-line bumps once **Part 12
+pins a toolchain Node ≥ 20.19 in CI**, and that is now the single thing
+blocking both.
+
+#### Accessibility is checked in two halves, on purpose
+
+Neither half is sufficient, and the split is not an accident of tooling.
+
+**Color, in Go.** `web/tokens_test.go` parses `src/styles/tokens.css` and
+computes WCAG relative luminance and contrast ratios for the 20 foreground /
+background pairings the components actually produce, in both themes. It needs
+no browser and no `node_modules`, so it runs in `make test` everywhere. It
+found nine real failures in the tokens Part 9 shipped.
+
+Checking the tokens rather than a rendering is the point: a scan of a page
+covers the components someone wrote a story for, and the tokens cover every
+component that will ever exist.
+
+**Structure, in jsdom.** `src/ui/a11y.test.tsx` runs axe-core over every
+story — 72 scans across 16 modules, 88 tests in all — scoped to the WCAG 2.1 A
+and AA tags. Best
+practice rules are excluded deliberately: `region` wants all content inside a
+landmark, which is a property of a page and not of a button, and asserting it
+on isolated components teaches people to ignore the output. `color-contrast`
+is disabled explicitly because jsdom has no layout and no canvas; that is the
+half the Go test owns.
+
+It caught a real bug immediately: `Button`'s `asChild` threw on every render,
+because the spinner beside `{children}` gave Radix's `Slot` two children to
+merge onto. Nothing had rendered it until a story did.
+
+`web/stories_test.go` keeps the suite honest — also in Go, also without
+`node_modules`. It fails the build if a component has no story file, if a
+story file has no component, or if a story file is missing from the suite's
+import list.
+
+A browser-based pass would add what jsdom cannot see: real focus order, real
+computed styles, real assistive-technology behavior. That needs Playwright,
+which **Part 11 installs anyway**, so the browser pass belongs there rather
+than as a second install here.

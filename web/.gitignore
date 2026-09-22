@@ -6,3 +6,7 @@ node_modules/
 # what lets `go build ./...` work on a fresh clone with no Node installed.
 dist/
 !dist/.gitkeep
+
+# Storybook's static build. A review artifact, never shipped and never embedded
+# -- web/embed.go embeds dist/ only.
+storybook-static/
