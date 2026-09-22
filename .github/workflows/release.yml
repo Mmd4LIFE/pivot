@@ -1,0 +1,172 @@
+name: Release
+
+# A tag, and nothing else. Every pull request and every push to main is already
+# covered by ci.yml; this is the one workflow that publishes.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Binaries ───────────────────────────────────────────────────────────────
+  binaries:
+    name: Binaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    permissions:
+      # Creating the release and uploading to it.
+      contents: write
+      # Sigstore keyless signing: the workflow's own OIDC identity is what the
+      # signature is bound to, which is why no private key exists here to leak.
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # GoReleaser builds the changelog from the commits since the previous
+          # tag, which a shallow clone does not have.
+          fetch-depth: 0
+
+      - name: Read the toolchain from go.mod
+        id: toolchain
+        run: echo "version=$(sed -n 's/^toolchain go//p' go.mod)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ steps.toolchain.outputs.version }}
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.21.1"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # The binaries embed web/dist, so the frontend has to exist before
+      # GoReleaser's build hook runs. Without it a release would ship the
+      # committed placeholder and every download would serve "the frontend has
+      # not been built" -- failing nothing, which is worse.
+      - run: npm ci
+        working-directory: web
+
+      - name: Cache pinned tools
+        uses: actions/cache@v4
+        with:
+          path: bin
+          key: release-tools-${{ runner.os }}-${{ hashFiles('Makefile') }}
+
+      - run: make release-tools
+
+      - name: Build, sign and publish
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # goreleaser shells out to syft and cosign by name.
+          export PATH="$PWD/bin:$PATH"
+          goreleaser release --clean
+
+  # ── Container image ────────────────────────────────────────────────────────
+  image:
+    name: Image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
+    env:
+      REGISTRY: ghcr.io
+      IMAGE: ghcr.io/mmd4life/pivot
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Work out the tags
+        id: tags
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+
+          tags="${IMAGE}:${version},${IMAGE}:${GITHUB_SHA}"
+
+          # A prerelease must never become `latest`. Somebody's install script
+          # pulls that tag, and an alpha arriving there is how a test build
+          # ends up in production.
+          case "$version" in
+            *-*) echo "prerelease, not tagging latest" ;;
+            *)   tags="${tags},${IMAGE}:latest" ;;
+          esac
+
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # buildx is needed for a multi-architecture build; the plain builder
+      # cannot produce a manifest list.
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Sign in to the registry
+        run: |
+          # The workflow's own token, not a stored credential. `docker login`
+          # directly rather than docker/login-action, for the same reason the
+          # rest of these workflows avoid third-party actions.
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | docker login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
+
+      - name: Build and push
+        id: build
+        run: |
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --build-arg VERSION="${{ steps.tags.outputs.version }}" \
+            --build-arg COMMIT="${GITHUB_SHA}" \
+            --build-arg DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            $(printf -- '--tag %s ' $(echo "${{ steps.tags.outputs.tags }}" | tr ',' ' ')) \
+            --metadata-file metadata.json \
+            --push \
+            .
+
+          # By digest, not by tag. A tag can be moved after the fact; a digest
+          # is the image that was actually built, and it is what the signature
+          # has to cover.
+          digest=$(python3 -c 'import json;print(json.load(open("metadata.json"))["containerimage.digest"])')
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "built ${IMAGE}@${digest}"
+
+      - name: Cache pinned tools
+        uses: actions/cache@v4
+        with:
+          path: bin
+          key: release-tools-${{ runner.os }}-${{ hashFiles('Makefile') }}
+
+      - run: make release-tools
+
+      - name: Sign the image
+        run: |
+          ./bin/cosign sign --yes "${IMAGE}@${{ steps.build.outputs.digest }}"
+
+      - name: Attach a software bill of materials
+        run: |
+          ./bin/syft "${IMAGE}@${{ steps.build.outputs.digest }}" \
+            -o spdx-json > image.sbom.json
+
+          # An attestation rather than a release asset: it travels with the
+          # image, so anyone who pulls it can ask what is inside without
+          # knowing where it came from.
+          ./bin/cosign attest --yes \
+            --predicate image.sbom.json \
+            --type spdxjson \
+            "${IMAGE}@${{ steps.build.outputs.digest }}"
+
+      - name: Verify what was just published
+        run: |
+          # The release is not finished until the published artifact passes the
+          # check the README tells users to run. Verifying our own output is
+          # the only way to know that instruction works.
+          ./bin/cosign verify \
+            --certificate-identity-regexp 'https://github.com/Mmd4LIFE/pivot/.*' \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "${IMAGE}@${{ steps.build.outputs.digest }}"

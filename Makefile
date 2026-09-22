@@ -41,6 +41,27 @@ SQLC_SHA256  := 497ae4fcdfa64c5b0c311ffe4c2bd991e43991e82e5367792ed78bc2dca27354
 SQLC_DIST    := sqlc_$(SQLC_VERSION)_linux_amd64.tar.gz
 SQLC_URL     := https://github.com/sqlc-dev/sqlc/releases/download/v$(SQLC_VERSION)/$(SQLC_DIST)
 
+# GoReleaser builds the six release binaries. Pinned with a verified checksum,
+# like everything else in ./bin -- a release tool that installs itself from an
+# unverified download is a strange thing to trust with a signing key.
+GORELEASER_VERSION := 2.18.2
+GORELEASER_SHA256  := 0a96edc9d9bc594e4a41cc4d59467c182062910ab24d9d1f6dd7b667d32606d3
+GORELEASER_DIST    := goreleaser_Linux_x86_64.tar.gz
+GORELEASER_URL     := https://github.com/goreleaser/goreleaser/releases/download/v$(GORELEASER_VERSION)/$(GORELEASER_DIST)
+
+# syft writes the software bill of materials GoReleaser attaches to each
+# archive; cosign signs the checksums and the image. Both are pinned with
+# verified checksums, which matters more here than anywhere else in this file:
+# a supply-chain tool installed from an unverified download is a contradiction.
+SYFT_VERSION := 1.52.0
+SYFT_SHA256  := caeedb81fb0491615f1ebd1761e4145d41ee86dd2cc7bf80669f9f5ad9d6133d
+SYFT_DIST    := syft_$(SYFT_VERSION)_linux_amd64.tar.gz
+SYFT_URL     := https://github.com/anchore/syft/releases/download/v$(SYFT_VERSION)/$(SYFT_DIST)
+
+COSIGN_VERSION := 3.1.3
+COSIGN_SHA256  := 4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71
+COSIGN_URL     := https://github.com/sigstore/cosign/releases/download/v$(COSIGN_VERSION)/cosign-linux-amd64
+
 # osv-scanner covers every lockfile, not just go.sum -- which is what makes it
 # worth having alongside govulncheck, since neither sees the other's ecosystem.
 #
@@ -180,6 +201,16 @@ e2e: all $(WEB_DIR)/node_modules ## Run the browser end-to-end suite against the
 .PHONY: bundle-size
 bundle-size: $(WEB_DIR)/node_modules ## Check the initial bundle against the NFR budget
 	cd $(WEB_DIR) && node scripts/bundle-size.mjs
+
+.PHONY: release-snapshot
+# --skip=sign, because keyless signing needs an OIDC identity and there is no
+# workflow here to be one. The invocation itself is still worth keeping honest:
+# a snapshot is what caught cosign 3 rejecting the 2.x flags, which would
+# otherwise have failed on the release, after the tag was pushed.
+release-snapshot: release-tools web-build ## Build every release artifact locally, without publishing
+	PATH="$(TOOLS_DIR):$$PATH" $(TOOLS_DIR)/goreleaser release --snapshot --clean --skip=sign
+	@echo ""
+	@echo "artifacts in ./dist -- nothing was published"
 
 .PHONY: image
 image: ## Build the container image locally
@@ -338,6 +369,43 @@ gen-check: gen ## Fail if generated code is out of date (for CI)
 
 .PHONY: tools
 tools: $(TOOLS_DIR)/golangci-lint $(TOOLS_DIR)/sqlc $(TOOLS_DIR)/osv-scanner ## Install pinned dev tooling into ./bin
+
+.PHONY: release-tools
+release-tools: $(TOOLS_DIR)/goreleaser $(TOOLS_DIR)/syft $(TOOLS_DIR)/cosign ## Install the release tooling into ./bin
+
+$(TOOLS_DIR)/syft:
+	@mkdir -p $(TOOLS_DIR)
+	@echo "installing syft $(SYFT_VERSION)..."
+	@tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && \
+		curl -sSfL --retry 5 --retry-delay 3 --retry-all-errors \
+			-o "$$tmp/$(SYFT_DIST)" "$(SYFT_URL)" && \
+		echo "$(SYFT_SHA256)  $$tmp/$(SYFT_DIST)" | sha256sum -c - && \
+		tar -xzf "$$tmp/$(SYFT_DIST)" -C "$$tmp" && \
+		install -m 0755 "$$tmp/syft" "$(TOOLS_DIR)/syft"
+	@$(TOOLS_DIR)/syft version | head -2
+
+$(TOOLS_DIR)/cosign:
+	@mkdir -p $(TOOLS_DIR)
+	@echo "installing cosign $(COSIGN_VERSION)..."
+	@tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && \
+		curl -sSfL --retry 5 --retry-delay 3 --retry-all-errors \
+			-o "$$tmp/cosign" "$(COSIGN_URL)" && \
+		echo "$(COSIGN_SHA256)  $$tmp/cosign" | sha256sum -c - && \
+		install -m 0755 "$$tmp/cosign" "$(TOOLS_DIR)/cosign"
+	@$(TOOLS_DIR)/cosign version 2>&1 | head -2
+
+# Not in `tools`: only a release needs it, and it is another download for
+# everyone who does not.
+$(TOOLS_DIR)/goreleaser:
+	@mkdir -p $(TOOLS_DIR)
+	@echo "installing goreleaser $(GORELEASER_VERSION)..."
+	@tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && \
+		curl -sSfL --retry 5 --retry-delay 3 --retry-all-errors \
+			-o "$$tmp/$(GORELEASER_DIST)" "$(GORELEASER_URL)" && \
+		echo "$(GORELEASER_SHA256)  $$tmp/$(GORELEASER_DIST)" | sha256sum -c - && \
+		tar -xzf "$$tmp/$(GORELEASER_DIST)" -C "$$tmp" && \
+		install -m 0755 "$$tmp/goreleaser" "$(TOOLS_DIR)/goreleaser"
+	@$(TOOLS_DIR)/goreleaser --version | head -3
 
 $(TOOLS_DIR)/osv-scanner:
 	@mkdir -p $(TOOLS_DIR)
