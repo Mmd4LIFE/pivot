@@ -19,7 +19,7 @@ export default defineConfig({
 
   test: {
     environment: "jsdom",
-    include: ["src/**/*.test.tsx"],
+    include: ["src/**/*.test.{ts,tsx}"],
 
     // jsdom has no layout engine, so every overlay in the design system throws
     // on mount without these. See the file for what is stubbed and why that is

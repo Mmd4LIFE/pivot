@@ -250,3 +250,62 @@ politeness — everything that lives in the DOM. We cannot check that a focus
 ring is *drawn*, where an overlay lands, or what a screen reader says out loud.
 Those ten items are written out in `docs/design/keyboard-audit.md` for a person,
 and **Part 11's Playwright install is what turns most of them into code.**
+
+### 2026-09-22 — i18n from the start, and where the session boundary lives
+
+Part 11-a put the application behind a login. Three decisions are worth
+recording.
+
+#### i18next before the strings, not after
+
+`i18next` 26 and `react-i18next` 17, wired in Phase 0 with exactly one locale
+translated. That looks premature and is not: the expensive part of
+internationalizing an application is never the library, it is the four hundred
+strings already written inline and the stylesheet built on `margin-left`. Both
+are free today and neither is in Phase 3.
+
+The catalog is TypeScript rather than JSON, and the catalog *is* the type —
+`CustomTypeOptions` is built from it, so `t("auth.singIn")` fails `tsc` instead
+of rendering the key onto the page. JSON was rejected for one reason: it cannot
+carry a comment, and a translator needs to be told that "sign in" here is a
+verb.
+
+**Direction is part of the locale, not a setting.** `applyDirection` writes
+`lang` and `dir` onto `<html>`, and `dir` is the single attribute every logical
+property in the stylesheet resolves against — which is what makes the `ms-*`
+and `ps-*` discipline in `src/ui` pay off as a one-attribute mirror rather than
+a rewrite. A development-only pseudo-locale carries the English strings and
+declares itself right-to-left, so the mirrored layout can be checked without
+inventing translations nobody on this project can read; fabricated Arabic would
+be worse than none, because it looks finished.
+
+#### The guard is a layout route, and it is not the security boundary
+
+`/login` hangs off the root and everything else hangs off a pathless
+`authenticated` route, so a new page is protected by default and letting one
+out is a deliberate edit. The opposite arrangement — a public tree with routes
+opting in — relies on the next person remembering.
+
+The check runs in `beforeLoad`, before a child route loads data. A guard in a
+component's render happens *after* the requests it was supposed to prevent have
+gone out, which is how a signed-out user generates a burst of 401s and a flash
+of empty interface.
+
+None of this is the security boundary. The server refuses every request without
+a valid session cookie and would with these files deleted. What the guard buys
+is not watching an empty shell fail to load, and remembering the destination.
+
+#### The redirect parameter is attacker-controlled on both ends
+
+ADR-0002 did not anticipate this, and it is the same bug Part 8-b fixed on the
+server. The login page carries its destination in a search parameter, so anyone
+can send a colleague a link to Pivot's own login page that bounces them
+elsewhere the moment they authenticate — the victim really did land on the real
+login page and really did sign in, which is what makes the link convincing.
+
+`safeDestination` applies the same rule as `safeReturnPath` in
+`internal/api/oidc.go`: a same-site absolute path, nothing else. Two copies on
+purpose. The server cannot vet a redirect the client performs after a password
+login, and the client cannot vet one the server performs on an SSO callback.
+The rule is six lines; sharing it across the language boundary would cost more
+than repeating it.

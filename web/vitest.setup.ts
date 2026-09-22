@@ -44,6 +44,14 @@ Element.prototype.hasPointerCapture ??= function hasPointerCapture() {
 Element.prototype.setPointerCapture ??= function setPointerCapture() {};
 Element.prototype.releasePointerCapture ??= function releasePointerCapture() {};
 
+// The router restores scroll position on every navigation.
+//
+// Assigned unconditionally, unlike the others: jsdom *defines* scrollTo and
+// has it throw "Not implemented", so `??=` finds a function there and leaves
+// the thrower in place. The noise it produced was harmless and constant, which
+// is the worst kind -- it trains people to skim past stderr.
+window.scrollTo = function scrollTo() {};
+
 // The reduced-motion and color-scheme queries the base stylesheet uses.
 // Reported as unmatched, which is the conservative answer: the tests then see
 // the default theme and the animated variant, not a special case.

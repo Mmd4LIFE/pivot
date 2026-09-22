@@ -1,8 +1,12 @@
-import type { InputHTMLAttributes } from "react";
+import type { ComponentPropsWithRef } from "react";
 import { cn } from "../lib/cn";
 import { useFieldControlProps } from "./Field";
 
-export type InputProps = InputHTMLAttributes<HTMLInputElement>;
+// ComponentPropsWithRef rather than InputHTMLAttributes, so a caller can hold
+// a ref to the element -- which the login page needs to move focus onto a
+// field the server has just asked for. React 19 passes `ref` as an ordinary
+// prop, so there is no forwardRef wrapper to add.
+export type InputProps = ComponentPropsWithRef<"input">;
 
 /** A text input. Must be used inside a [Field], which supplies its label. */
 export function Input({ className, ...props }: InputProps) {

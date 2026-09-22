@@ -1,8 +1,8 @@
-import type { TextareaHTMLAttributes } from "react";
+import type { ComponentPropsWithRef } from "react";
 import { cn } from "../lib/cn";
 import { useFieldControlProps } from "./Field";
 
-export type TextareaProps = TextareaHTMLAttributes<HTMLTextAreaElement>;
+export type TextareaProps = ComponentPropsWithRef<"textarea">;
 
 /** A multi-line text input. Must be used inside a [Field]. */
 export function Textarea({ className, ...props }: TextareaProps) {
