@@ -3,7 +3,20 @@ module github.com/Mmd4LIFE/pivot
 // Minimum supported toolchain. ADR-0001 originally set this at 1.23 to keep
 // the contributor barrier low; goose 1.26 and modernc.org/sqlite 1.25 raised
 // it in Part 3-a. See the amendment in ADR-0001.
+//
+// This is a floor for contributors, not an instruction to build with. The
+// distinction cost a CI failure: `actions/setup-go` with `go-version-file`
+// installed exactly 1.26.0, and govulncheck then found nineteen reachable
+// standard-library vulnerabilities -- crypto/x509 panics on malformed
+// certificates among them -- every one fixed in 1.26.1.
 go 1.26.0
+
+// What we actually build with: the newest patch of the line above.
+//
+// CI derives its Go version from this line, so bumping it here is the whole
+// change. Anyone on an older toolchain has it fetched for them, which is what
+// this directive is for.
+toolchain go1.26.8
 
 // Dependencies are added deliberately and kept few. Configuration precedence
 // is hand-rolled rather than delegated to viper: viper pulls a large tree for

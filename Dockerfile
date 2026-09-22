@@ -25,7 +25,11 @@ COPY web/ ./
 RUN npm run build
 
 # ── The binary ───────────────────────────────────────────────────────────────
-FROM golang:1.26-bookworm AS build
+# Pinned to the patch, and it must match go.mod's `toolchain` line -- CI
+# asserts that. An unpinned `golang:1.26` drifts, which is the same class of
+# problem as building with the `go` directive: it decides on its own which
+# standard library vulnerabilities the image ships with.
+FROM golang:1.26.8-bookworm AS build
 
 WORKDIR /src
 

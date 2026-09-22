@@ -60,9 +60,21 @@ jobs:
           # clone does not have.
           fetch-depth: 0
 
+      # The toolchain from go.mod's `toolchain` line, not its `go` line.
+      #
+      # `go-version-file: go.mod` reads the `go` directive, which is the minimum
+      # version a contributor may have -- and installing exactly that meant CI
+      # built with 1.26.0 and govulncheck found nineteen reachable standard
+      # library vulnerabilities, all fixed in 1.26.1. Deriving it here keeps
+      # go.mod the single source of truth with no version duplicated into this
+      # file.
+      - name: Read the toolchain from go.mod
+        id: toolchain
+        run: echo "version=$(sed -n 's/^toolchain go//p' go.mod)" >> "$GITHUB_OUTPUT"
+
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: ${{ steps.toolchain.outputs.version }}
           cache: true
 
       # golangci-lint and sqlc come from pinned release archives with verified
@@ -176,9 +188,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The toolchain from go.mod's `toolchain` line, not its `go` line.
+      #
+      # `go-version-file: go.mod` reads the `go` directive, which is the minimum
+      # version a contributor may have -- and installing exactly that meant CI
+      # built with 1.26.0 and govulncheck found nineteen reachable standard
+      # library vulnerabilities, all fixed in 1.26.1. Deriving it here keeps
+      # go.mod the single source of truth with no version duplicated into this
+      # file.
+      - name: Read the toolchain from go.mod
+        id: toolchain
+        run: echo "version=$(sed -n 's/^toolchain go//p' go.mod)" >> "$GITHUB_OUTPUT"
+
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: ${{ steps.toolchain.outputs.version }}
           cache: true
 
       - uses: actions/setup-node@v4
@@ -236,9 +260,21 @@ jobs:
           # gitleaks scans history, which a shallow clone does not have.
           fetch-depth: 0
 
+      # The toolchain from go.mod's `toolchain` line, not its `go` line.
+      #
+      # `go-version-file: go.mod` reads the `go` directive, which is the minimum
+      # version a contributor may have -- and installing exactly that meant CI
+      # built with 1.26.0 and govulncheck found nineteen reachable standard
+      # library vulnerabilities, all fixed in 1.26.1. Deriving it here keeps
+      # go.mod the single source of truth with no version duplicated into this
+      # file.
+      - name: Read the toolchain from go.mod
+        id: toolchain
+        run: echo "version=$(sed -n 's/^toolchain go//p' go.mod)" >> "$GITHUB_OUTPUT"
+
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: ${{ steps.toolchain.outputs.version }}
           cache: true
 
       - name: Cache pinned tools
@@ -272,6 +308,22 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: The Dockerfile builds with the toolchain go.mod names
+        run: |
+          # Two places name a Go version and they have to agree. Drift here
+          # means the image ships a different standard library from the one
+          # the Security job cleared, which is exactly how a patched CI and an
+          # unpatched release coexist.
+          want=$(sed -n 's/^toolchain go//p' go.mod)
+          got=$(sed -n 's/^FROM golang:\([0-9.]*\)-.*/\1/p' Dockerfile)
+
+          if [ "$want" != "$got" ]; then
+            echo "go.mod names toolchain go$want; the Dockerfile builds with golang:$got" >&2
+            exit 1
+          fi
+
+          echo "both name Go $want"
 
       # Plain `docker build`, not docker/build-push-action. The runner already
       # has Docker, the image is never pushed from here, and every third-party
