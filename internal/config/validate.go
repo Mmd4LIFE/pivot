@@ -186,6 +186,37 @@ func (c *Config) Validate() error {
 		})
 	}
 
+	// Tracing. Only checked when it is on: an operator who has left the
+	// defaults alone should never be told their sample ratio is wrong for a
+	// feature they are not using.
+	if c.Observability.Tracing.Enabled {
+		if c.Observability.Tracing.Endpoint == "" {
+			errs = append(errs, FieldError{
+				Field: "observability.tracing.endpoint",
+				Value: "",
+				Want:  "a collector address like localhost:4318 when tracing is enabled",
+			})
+		}
+
+		if r := c.Observability.Tracing.SampleRatio; r < 0 || r > 1 {
+			errs = append(errs, FieldError{
+				Field: "observability.tracing.sampleRatio",
+				Value: r,
+				Want:  "a fraction between 0 and 1",
+			})
+		}
+
+		if c.Observability.Tracing.ServiceName == "" {
+			// Several Pivots reporting as the same name is how a trace becomes
+			// unreadable; reporting as no name is worse.
+			errs = append(errs, FieldError{
+				Field: "observability.tracing.serviceName",
+				Value: "",
+				Want:  "a non-empty name when tracing is enabled",
+			})
+		}
+	}
+
 	if len(errs) > 0 {
 		return &ValidationError{Errors: errs}
 	}

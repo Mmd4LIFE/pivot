@@ -3,6 +3,10 @@ package authz
 import (
 	"context"
 	"fmt"
+
+	"go.opentelemetry.io/otel/attribute"
+
+	"github.com/Mmd4LIFE/pivot/internal/observability"
 )
 
 // Store is the persistence the resolver needs. internal/store/repo implements
@@ -65,6 +69,15 @@ func (r *Resolver) Check(ctx context.Context, req Request) (Decision, error) {
 // the explanation can never drift from the decision: there is one code path,
 // and the debugger sees exactly what the enforcement saw.
 func (r *Resolver) Explain(ctx context.Context, req Request) (Explanation, error) {
+	// The span goes here rather than on Check, for the same reason Check is
+	// implemented in terms of Explain: one code path, so a traced request and
+	// an explained one cannot disagree about what happened.
+	ctx, span := observability.Start(ctx, "authz.Check",
+		attribute.String("authz.permission", string(req.Permission)),
+		attribute.String("authz.object_type", string(req.Object.Type)),
+	)
+	defer span.End()
+
 	out := Explanation{Request: req}
 
 	granting := RolesGranting(req.Permission)
@@ -111,6 +124,15 @@ func (r *Resolver) Explain(ctx context.Context, req Request) (Explanation, error
 			break
 		}
 	}
+
+	// The decision itself, on the span. "Why was this request a 403" is the
+	// question a trace gets opened to answer, and without this the trace shows
+	// only that an authorization check happened.
+	span.SetAttributes(
+		attribute.Bool("authz.allowed", out.Allowed),
+		attribute.String("authz.via", string(out.Via)),
+		attribute.Int("authz.subjects", len(out.Subjects)),
+	)
 
 	return out, nil
 }

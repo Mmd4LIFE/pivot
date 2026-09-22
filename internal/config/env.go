@@ -214,6 +214,45 @@ func bindings() []binding {
 			},
 		},
 		{
+			key:  EnvPrefix + "TRACING_ENABLED",
+			help: "Export traces over OTLP",
+			apply: func(c *Config, v string) error {
+				return setBool(&c.Observability.Tracing.Enabled, v)
+			},
+		},
+		{
+			key:  EnvPrefix + "TRACING_ENDPOINT",
+			help: "Collector address for OTLP/HTTP, host:port with no scheme",
+			apply: func(c *Config, v string) error {
+				c.Observability.Tracing.Endpoint = v
+
+				return nil
+			},
+		},
+		{
+			key:  EnvPrefix + "TRACING_INSECURE",
+			help: "Send traces over plain HTTP; only for a collector alongside Pivot",
+			apply: func(c *Config, v string) error {
+				return setBool(&c.Observability.Tracing.Insecure, v)
+			},
+		},
+		{
+			key:  EnvPrefix + "TRACING_SAMPLE_RATIO",
+			help: "Fraction of traces to keep, 0 to 1",
+			apply: func(c *Config, v string) error {
+				return setFloat(&c.Observability.Tracing.SampleRatio, v)
+			},
+		},
+		{
+			key:  EnvPrefix + "TRACING_SERVICE_NAME",
+			help: "Name this process reports to the collector",
+			apply: func(c *Config, v string) error {
+				c.Observability.Tracing.ServiceName = v
+
+				return nil
+			},
+		},
+		{
 			key:  EnvPrefix + "LOG_ADD_SOURCE",
 			help: "Attach caller file and line to log records",
 			apply: func(c *Config, v string) error {
@@ -270,6 +309,16 @@ func setBool(dst *bool, raw string) error {
 	v, err := strconv.ParseBool(raw)
 	if err != nil {
 		return fmt.Errorf("expected a boolean (true/false/1/0), got %q", raw)
+	}
+	*dst = v
+
+	return nil
+}
+
+func setFloat(dst *float64, raw string) error {
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return fmt.Errorf("expected a number, got %q", raw)
 	}
 	*dst = v
 

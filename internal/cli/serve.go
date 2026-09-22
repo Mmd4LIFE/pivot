@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"log/slog"
 	"os/signal"
 	"syscall"
@@ -12,6 +13,7 @@ import (
 	"github.com/Mmd4LIFE/pivot/internal/auth"
 	"github.com/Mmd4LIFE/pivot/internal/authz"
 	"github.com/Mmd4LIFE/pivot/internal/logging"
+	"github.com/Mmd4LIFE/pivot/internal/observability"
 	"github.com/Mmd4LIFE/pivot/internal/oidc"
 	"github.com/Mmd4LIFE/pivot/internal/store"
 	"github.com/Mmd4LIFE/pivot/internal/store/repo"
@@ -43,7 +45,36 @@ readiness change before the drain begins, so no request is dropped.`,
 
 			// Logs go to stderr so stdout stays clean for command output —
 			// which matters the moment anything pipes `pivot` into a tool.
-			log := logging.New(cfg.Log, env.Stderr)
+			// Tracing first, so the logger below can be correlated and so the
+			// startup lines themselves belong to a trace if one is running.
+			shutdownTracing, terr := observability.Setup(cmd.Context(), observability.Config{
+				Enabled:        cfg.Observability.Tracing.Enabled,
+				Endpoint:       cfg.Observability.Tracing.Endpoint,
+				Insecure:       cfg.Observability.Tracing.Insecure,
+				SampleRatio:    cfg.Observability.Tracing.SampleRatio,
+				ServiceName:    cfg.Observability.Tracing.ServiceName,
+				ServiceVersion: version.Get().Version,
+			}, logging.New(cfg.Log, env.Stderr))
+			if terr != nil {
+				return terr
+			}
+
+			defer func() {
+				// A fresh context: cmd's is already canceled by the time this
+				// runs, and a flush on a canceled context drops exactly the
+				// spans describing whatever went wrong on the way out.
+				flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+
+				if ferr := shutdownTracing(flushCtx); ferr != nil {
+					slog.Default().Warn("could not flush traces", logging.Err(ferr))
+				}
+			}()
+
+			// WithTrace wraps the handler so every line carries its trace, and
+			// it has to wrap the configured one rather than replace it -- the
+			// operator's format and level are still theirs.
+			log := logging.WithTrace(logging.New(cfg.Log, env.Stderr))
 			slog.SetDefault(log)
 
 			info := version.Get()

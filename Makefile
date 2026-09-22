@@ -362,6 +362,11 @@ gen-client: ## Generate the TypeScript client from the OpenAPI spec
 validate-spec: ## Check that the OpenAPI spec parses and is self-consistent
 	go test ./internal/api/ -run TestOpenAPISpec -count=1 -v 2>&1 | grep -E "^(=== RUN|--- |ok|FAIL)"
 
+.PHONY: gen-tracing
+gen-tracing: ## Regenerate the Querier tracing decorator
+	python3 scripts/gen-querier-tracing.py
+	@gofmt -w internal/store/repo/tracing.go
+
 .PHONY: gen-check
 gen-check: gen ## Fail if generated code is out of date (for CI)
 	@git diff --exit-code -- internal/store/ \
