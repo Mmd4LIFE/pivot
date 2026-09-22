@@ -17,6 +17,16 @@ import (
 func run(t *testing.T, envVars map[string]string, args ...string) (string, string, error) {
 	t.Helper()
 
+	return runCtx(context.Background(), t, envVars, args...)
+}
+
+// runCtx is run with a caller-supplied context, for the commands that only
+// finish when it is canceled.
+func runCtx(
+	ctx context.Context, t *testing.T, envVars map[string]string, args ...string,
+) (string, string, error) {
+	t.Helper()
+
 	var stdout, stderr bytes.Buffer
 
 	cmd := cli.NewRootCmd(cli.Env{
@@ -33,7 +43,7 @@ func run(t *testing.T, envVars map[string]string, args ...string) (string, strin
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
 
-	err := cmd.ExecuteContext(context.Background())
+	err := cmd.ExecuteContext(ctx)
 
 	return stdout.String(), stderr.String(), err
 }

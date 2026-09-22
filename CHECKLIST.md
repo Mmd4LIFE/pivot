@@ -53,8 +53,8 @@ At the end of every part, in this order:
 
 | | |
 |---|---|
-| **Last completed** | Part 12-b — The gate, proven on GitHub |
-| **Next up** | **Part 13 — Release pipeline & container image** |
+| **Last completed** | Part 13-a — The container image, and the coverage debt it collected |
+| **Next up** | **Part 13-b — The release pipeline** |
 | **Current phase** | Phase 0 — Foundations |
 | **Branch** | `main` |
 | **Blockers** | None |
@@ -282,12 +282,12 @@ It runs with `-coverpkg=./...` **and Postgres**, which matters: `internal/store/
 65.8% without Postgres and 82.5% with it. Generated code and `cmd/pivot` are excluded, and
 that list is meant to stay short.
 
-**Six packages are below the line today**, and the first pull request to touch one has to
-bring it up:
+**Five packages are below the line today**, and the first pull request to touch one has to
+bring it up. `internal/cli` was the sixth and worst at 30.4%; Part 13-a paid it to 86.1%
+because the container's `HEALTHCHECK` needed a command in that package:
 
 | Package | Coverage | Statements |
 |---|---|---|
-| `internal/cli` | 30.4% | 730 |
 | `internal/store/model` | 50.0% | 6 |
 | `internal/store/dbtypes` | 61.1% | 95 |
 | `internal/config` | 65.7% | 204 |
@@ -432,7 +432,7 @@ needs an entry in `sqlc.yaml`'s SQLite override list**, or the packages silently
 ## Progress
 
 ```
-Phase 0  Foundations        [█████████████████   ] 20/23   (Parts 3, 4, 6, 7, 8, 10, 11 and 12 each split)
+Phase 0  Foundations        [█████████████████   ] 21/24   (Parts 3, 4, 6, 7, 8, 10, 11, 12 and 13 each split)
 Phase 1  Connect & Query    [                    ]  0/12   (detailed at Part 15)
 Phase 2+ ...                                            (expanded as we approach)
 ```
@@ -1110,23 +1110,54 @@ it up.
 
 ---
 
-### - [ ] Part 13 — Release pipeline & container image
+### - [x] Part 13-a — The container image, and the coverage debt it collected ✅ 2026-09-22
 
-**Deliverable:** A git tag produces signed, verifiable artifacts for 6 platforms **and a
-production container image**.
+**Deliverable:** A multi-architecture image that starts with no configuration at all and
+tells an orchestrator it is healthy.
+
+**Build:** `pivot healthcheck` (`internal/cli/healthcheck.go`), the Dockerfile
+cross-compiling for `linux/amd64` and `linux/arm64` with a `HEALTHCHECK`, and
+`internal/cli/commands_test.go` — the tests the coverage gate demanded, driving every
+command an operator runs against a real SQLite file.
+
+**Done when:**
+- [x] **The image builds for both architectures** — cross-compiled from the build host
+      rather than emulated, because qemu makes an arm64 build about ten times slower and
+      Go cross-compiles natively
+- [x] **`HEALTHCHECK` works in a distroless image** — there is no shell to run curl from,
+      so the binary probes itself. `docker inspect` reports `health=healthy`
+- [x] **Zero configuration start, verified**: `docker run pivot` created its SQLite
+      database, applied all five migrations, and served — which is Part 15's promise,
+      working early
+- [x] **`internal/cli` is 30.4% → 86.1%**, which the 80% gate required before any change
+      to the package would merge
+
+**Notes:** The coverage work was not optional and not planned: `HEALTHCHECK` needs a
+command, a command lives in `internal/cli`, and that package was the worst-covered in the
+repository. This is the gate doing exactly what Part 12 said it would.
+
+**Refs:** `P0-CI-007`, `P0-CI-008`
+
+---
+
+### - [ ] Part 13-b — The release pipeline
+
+**Deliverable:** A git tag produces signed, verifiable artifacts for 6 platforms and
+publishes the image.
 
 **Build:**
-- `Dockerfile` — multi-stage, distroless runtime, non-root user, `HEALTHCHECK` hitting
-  `/healthz`, built for `linux/amd64` **and** `linux/arm64`
-- Image published to GHCR as `ghcr.io/mmd4life/pivot`, tagged `:latest`, `:vX.Y.Z`, `:sha`
-- `.dockerignore` so build context stays small
 - GoReleaser (linux/darwin/windows × amd64/arm64)
+- Image published to GHCR as `ghcr.io/mmd4life/pivot`, tagged `:latest`, `:vX.Y.Z`, `:sha`
 - SBOM generation, cosign signing of **both** binaries and image
 - `CHANGELOG.md` automation, GitHub Release publishing
 
 **Done when:** Tagging `v0.0.1-alpha` produces 6 binaries + a multi-arch image;
 `cosign verify` passes on the image; the SBOM is attached; `docker run ghcr.io/mmd4life/pivot`
 serves a working instance; a downloaded binary runs on a clean machine.
+
+**Notes:** The Dockerfile, `.dockerignore` and the multi-architecture build are done in
+13-a; what is left is publishing and signing. Like Part 12, the last step needs a real tag
+push and cannot be proven locally.
 
 **Refs:** `P0-CI-007`, `P0-CI-008`
 
@@ -1225,6 +1256,7 @@ Newest first. Record what **actually** shipped, including what didn't work.
 
 | Date | Part | Shipped | Notes |
 |---|---|---|---|
+| 2026-09-22 | 13-a | `pivot healthcheck`, the Dockerfile cross-compiling for amd64 and arm64 with a working `HEALTHCHECK`, and `internal/cli/commands_test.go` — 33 tests driving every operator command against a real SQLite file | **Split Part 13**: the image is one session, publishing and signing another. **The coverage gate collected its first debt, immediately and unavoidably.** A distroless image has no shell to write a `HEALTHCHECK` with, so the binary has to probe itself; a command lives in `internal/cli`; and `internal/cli` was the worst-covered package in the repository at 30.4%. Adding one file meant bringing the package to 80% first. It is now **86.1%**, and the tests are worth more than the number — they run `migrate up`, `create-user`, `grant-role` and `serve` against a real database, which is the path every new install takes and none of it had end-to-end coverage. **Two of my assumptions were wrong and the code was right, again.** I asserted `serve` refuses to start on an unmigrated database; `warnIfBehind` documents why it warns instead — a rolling deploy legitimately runs old code against a newer schema, and refusing would turn that window into an outage. And I assumed auto-migration was opt-in; it defaults to **on**, deliberately, which is what makes Part 15's zero-configuration first run possible. **The container start is the strongest single result here**: `docker run pivot` with no arguments created its SQLite database, applied all five migrations, served, and `docker inspect` reported `health=healthy`. That is Part 15's promise working four parts early. **Both architectures cross-compile rather than emulate** — qemu makes an arm64 build roughly ten times slower and Go does not need it, so the build stages pin `$BUILDPLATFORM` and pass `GOOS`/`GOARCH` through. |
 | 2026-09-22 | 12-b | The toolchain fix the runner found, a throwaway branch that broke each job on purpose, and a ruleset making all five checks required | **The first run on GitHub found something no local check could.** `actions/setup-go` with `go-version-file` installs exactly the `go` directive, and that directive is a floor for contributors rather than an instruction about what to build with — so CI picked the oldest permitted toolchain, 1.26.0, and govulncheck found **nineteen reachable standard-library vulnerabilities** in it, a crypto/x509 panic on malformed certificates among them, every one fixed in 1.26.1. It was invisible locally: this machine runs 1.27.1 and the container used `golang:1.26`, which resolves to 1.26.8. go.mod now carries `toolchain go1.26.8`, the workflow derives its version from that line so no version is duplicated into YAML, the Dockerfile pins the same patch, and a CI step fails if the two disagree. **The broken-PR test came out exactly as designed**: a `gofmt` violation, a type error and a Dockerfile typo turned Go, Frontend, End to end and Image red while **Security stayed green** — and that green is the control that makes the four reds mean something, because it shows the failures were targeted rather than a blanket collapse. *Merge pull request* was disabled and every check showed **Required**, which is the ruleset proving itself. The type error tripping two jobs is correct: the End to end job builds the application too. **Wall-clock is ~4 minutes cold and ~3 warm** against a ten-minute budget, because the jobs run in parallel. `main` is protected but deliberately does **not** require a pull request, so sessions still end with a direct push. |
 | 2026-09-22 | 12-a | `.github/workflows/ci.yml` (five parallel jobs) and its README, `scripts/coverage-gate.sh`, `scripts/audit.sh`, `web/scripts/bundle-size.mjs`, `Dockerfile` + `.dockerignore`, osv-scanner added to the pinned tooling, and `make check | audit | coverage-gate | bundle-size | image` | **Split Part 12**: a workflow that has never run on a runner is a guess, so writing it and proving it are separate pieces of work. Every command it runs is verified locally — `make check` exits 0 — and every gate was watched to *fail* as well as pass. **osv-scanner pointed at `go.mod` is a false-positive machine**: it reads the `go` directive as the standard library's version and reported **25 stdlib advisories that govulncheck reports as zero**, because that directive is a minimum language version and not a toolchain. A gate that cries wolf twenty-five times is one people route around, so osv-scanner owns npm only and govulncheck owns Go. **The coverage gate needed two fixes before it was honest.** It summed duplicate profile blocks, which `-coverpkg` produces one per test binary — reporting `web` at 8.5% when it is 93.3%. And the measurement only means anything with Postgres running: `internal/store/repo` is 65.8% without it and 82.5% with it, so a gate run without the service container would fail for the wrong reason. **Six packages are below 80% today** and are listed in Current state; the next pull request touching one has to bring it up, which is the gate working as designed. **The bundle-size gate found a Part 9 chunking bug on its first run**: `manualChunks: { vendor: ["react", "react-dom"] }` names entry *specifiers*, and the application imports `react-dom/client` — so React ended up in the chunk labeled `tanstack` and `vendor` was 4 KB. The names were lying. Fixed with the function form. **The budget is at 93% in Phase 0**: 185 KB of 200, of which our own code is 11.5 KB. Phase 2 wants charts. **govulncheck v1.1.4 panics** on modern syntax (`unexpected expr: *ast.KeyValueExpr` out of x/tools v0.29.0); v1.8.0 is clean. **No third-party actions at all** — only `actions/*`, pinned release binaries with verified checksums, and a pinned gitleaks image — because an action is code running with the workflow's token. The image is 22.9 MB distroless and starts. **The first run on GitHub was four green out of five, and the red one was right.** `actions/setup-go` with `go-version-file` installs exactly the `go` directive — 1.26.0 — and govulncheck found **nineteen reachable standard-library vulnerabilities** in it, crypto/x509 panicking on a malformed certificate among them, every one fixed in 1.26.1. The `go` line is a floor for contributors, not an instruction to build with, and nothing in the repository had ever said what to build with. go.mod now carries `toolchain go1.26.8`, the workflow derives its version from that line so no version is duplicated into YAML, the Dockerfile pins the same patch, and a CI step fails if the two disagree. Confirmed clean under 1.26.8 locally before pushing. |
 | 2026-09-22 | 11-b | The application shell — `AppShell` with a skip link and four labeled landmarks, `SideNav`, `Breadcrumbs`, `UserMenu`, the command palette on Ctrl/Cmd+K, one navigation model read by all three, five honest placeholder routes — plus Playwright against the built binary: 31 tests including axe over 16 page states | **A browser found two contrast failures that the Go pairing list had no entry for.** axe's `color-contrast` rule does not run in jsdom at all — no layout, no canvas — so this was the first time it had ever executed. An avatar's initials were `text-muted` on `surface-sunken` at 4.40:1, and an accent badge was 3.97:1 in the dark theme. Both pairings are now in `tokens_test.go`, which is the lasting fix: **a list of token pairs is only as good as the combinations somebody thought of**, and that is exactly why the browser pass is not redundant with the Go one. **Three traps in the E2E harness itself, each of which produced a convincing wrong answer.** Playwright starts `webServer` *before* `globalSetup`, so provisioning afterwards left the server holding an open descriptor on a deleted inode — it kept reading an empty database while the new one filled, and every login failed with "that email address and password do not match". Moving the cleanup to config module scope did not fix it either, because Playwright evaluates the config once per worker and it deleted the database mid-run. globalSetup now owns provisioning *and* the server. Then switching theme and scanning immediately measured colors **mid-transition** — axe saw a link fading from light to dark and called it 2.29:1; `reducedMotion: "reduce"` fixed it, using a rule the stylesheet already had. **The application's own CSP blocked the test harness, which is the CSP working.** `addScriptTag` appends a real `<script>` and `script-src 'self'` refuses it, so axe would not load; `addInitScript` goes in over the debugging protocol instead, leaving the policy in force — and there is now a test asserting an injected script is still refused. **Radix's modal menu trips `aria-hidden-focus`**: it marks the page outside `aria-hidden` while the skip link and sidebar remain focusable. Focus is trapped so nobody could reach them, but the markup claims they are not there. The account menu is `modal={false}` now, which is what a menu should be anyway. **Cut and moved rather than dropped:** the change-password page and the endpoint it needs went to Part 15, because verifying a current password and revoking every *other* session is backend work and not shell work. **Still not run:** six manual audit items, all screen reader and rendering. Four of the original ten are now tests. |
