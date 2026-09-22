@@ -41,6 +41,16 @@ SQLC_SHA256  := 497ae4fcdfa64c5b0c311ffe4c2bd991e43991e82e5367792ed78bc2dca27354
 SQLC_DIST    := sqlc_$(SQLC_VERSION)_linux_amd64.tar.gz
 SQLC_URL     := https://github.com/sqlc-dev/sqlc/releases/download/v$(SQLC_VERSION)/$(SQLC_DIST)
 
+# osv-scanner covers every lockfile, not just go.sum -- which is what makes it
+# worth having alongside govulncheck, since neither sees the other's ecosystem.
+#
+# The release binary rather than `go run`, and for the same reason golangci-lint
+# is: building it from source pulls several hundred modules. It is also a single
+# file rather than an archive, so the checksum is pinned here directly.
+OSV_VERSION := 1.9.2
+OSV_SHA256  := d6af4b67fa5de658598bd2d445efb99e90d1734b3146962418719c4350ecb74b
+OSV_URL     := https://github.com/google/osv-scanner/releases/download/v$(OSV_VERSION)/osv-scanner_linux_amd64
+
 GOLANGCI_VERSION  := v2.13.2
 GOLANGCI_SEMVER   := $(patsubst v%,%,$(GOLANGCI_VERSION))
 GOLANGCI_OS       := $(shell go env GOOS)
@@ -53,7 +63,7 @@ GOLANGCI_BASE_URL := https://github.com/golangci/golangci-lint/releases/download
 help: ## Show this help
 	@echo "Pivot — development tasks"
 	@echo ""
-	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
+	@grep -hE '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 		| sort \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 	@echo ""
@@ -167,6 +177,15 @@ web-test: $(WEB_DIR)/node_modules ## Run the component accessibility suite (axe 
 e2e: all $(WEB_DIR)/node_modules ## Run the browser end-to-end suite against the built binary
 	cd $(WEB_DIR) && npm run e2e
 
+.PHONY: bundle-size
+bundle-size: $(WEB_DIR)/node_modules ## Check the initial bundle against the NFR budget
+	cd $(WEB_DIR) && node scripts/bundle-size.mjs
+
+.PHONY: image
+image: ## Build the container image locally
+	docker build -t pivot:local .
+	@echo "built pivot:local -- try: docker run --rm pivot:local version"
+
 .PHONY: e2e-ui
 e2e-ui: all $(WEB_DIR)/node_modules ## Run the end-to-end suite in Playwright's inspector
 	cd $(WEB_DIR) && npm run e2e:ui
@@ -273,7 +292,25 @@ vet: ## Run go vet
 	go vet $(PKG)
 
 .PHONY: check
-check: fmt vet lint test ## Run everything CI runs
+check: fmt vet lint gen-check validate-spec test-all coverage-gate audit ## Run everything CI runs
+
+.PHONY: audit
+audit: $(TOOLS_DIR)/osv-scanner ## Scan Go and npm dependencies for known vulnerabilities
+	@TOOLS_DIR=$(TOOLS_DIR) GOVULNCHECK_VERSION=$(GOVULNCHECK_VERSION) ./scripts/audit.sh
+
+# govulncheck stays a `go run`: it is small, it is maintained by the Go team,
+# and it is the one tool here that needs to match the toolchain rather than be
+# pinned against it.
+GOVULNCHECK_VERSION := v1.8.0
+
+.PHONY: coverage-gate
+coverage-gate: ## Fail if a changed package is under 80% covered
+	go test -count=1 -p 1 -coverpkg=$(PKG) -coverprofile=coverage.out -covermode=atomic $(PKG) >/dev/null
+	@./scripts/coverage-gate.sh $(BASE_REF) 80
+
+# The base to diff against. CI passes the pull request's target branch; locally
+# this is almost always what you want.
+BASE_REF ?= origin/main
 
 # ── Tooling ──────────────────────────────────────────────────────────────────
 OPENAPI_SPEC := api/openapi.yaml
@@ -300,7 +337,17 @@ gen-check: gen ## Fail if generated code is out of date (for CI)
 		|| (echo "ERROR: generated code is stale; run 'make gen' and commit" && exit 1)
 
 .PHONY: tools
-tools: $(TOOLS_DIR)/golangci-lint $(TOOLS_DIR)/sqlc ## Install pinned dev tooling into ./bin
+tools: $(TOOLS_DIR)/golangci-lint $(TOOLS_DIR)/sqlc $(TOOLS_DIR)/osv-scanner ## Install pinned dev tooling into ./bin
+
+$(TOOLS_DIR)/osv-scanner:
+	@mkdir -p $(TOOLS_DIR)
+	@echo "installing osv-scanner $(OSV_VERSION)..."
+	@tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && \
+		curl -sSfL --retry 5 --retry-delay 3 --retry-all-errors \
+			-o "$$tmp/osv-scanner" "$(OSV_URL)" && \
+		echo "$(OSV_SHA256)  $$tmp/osv-scanner" | sha256sum -c - && \
+		install -m 0755 "$$tmp/osv-scanner" "$(TOOLS_DIR)/osv-scanner"
+	@$(TOOLS_DIR)/osv-scanner --version
 
 $(TOOLS_DIR)/sqlc:
 	@mkdir -p $(TOOLS_DIR)

@@ -26,13 +26,27 @@ export default defineConfig({
 
     rollupOptions: {
       output: {
-        // React and the routing/query layer change far less often than our own
-        // code. Splitting them means a deploy that touches only application
-        // code leaves the vendor chunk's URL unchanged, so a returning browser
-        // re-downloads a few kilobytes instead of all of it.
-        manualChunks: {
-          vendor: ["react", "react-dom"],
-          tanstack: ["@tanstack/react-router", "@tanstack/react-query"],
+        /*
+         * Dependencies change far less often than our own code, so splitting
+         * them means a deploy that touches only application code leaves those
+         * chunk URLs unchanged and a returning browser re-downloads a few
+         * kilobytes instead of all of it.
+         *
+         * A function rather than the object form, because the object form did
+         * not do what it said. `{ vendor: ["react", "react-dom"] }` names entry
+         * *specifiers*, and the application imports `react-dom/client`, which
+         * is a different one -- so React ended up wherever Rollup first needed
+         * it, which turned out to be the chunk labelled `tanstack`. The names
+         * were lying, and the bundle-size gate is what made that visible.
+         */
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return undefined;
+
+          if (/node_modules\/(react|react-dom|scheduler)\//.test(id)) return "react";
+
+          if (id.includes("node_modules/@tanstack/")) return "tanstack";
+
+          return "vendor";
         },
       },
     },

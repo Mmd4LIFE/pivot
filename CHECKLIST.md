@@ -53,8 +53,8 @@ At the end of every part, in this order:
 
 | | |
 |---|---|
-| **Last completed** | Part 11-b — The app shell, and the browser proof |
-| **Next up** | **Part 12 — CI pipeline** |
+| **Last completed** | Part 12-a — The quality gate, written and locally proven |
+| **Next up** | **Part 12-b — The gate, proven on GitHub** |
 | **Current phase** | Phase 0 — Foundations |
 | **Branch** | `main` |
 | **Blockers** | None |
@@ -272,6 +272,45 @@ today — or the next run re-downloads. `npx playwright install-deps` fails on U
 and can be skipped there; its package list is keyed to 24.04 and the libraries are already
 present.
 
+**`make check` is the whole gate, locally.** Formatting, vet, lint, stale generated code,
+`go.mod` tidiness, the OpenAPI spec, both engines, coverage, and the vulnerability audit.
+`.github/workflows/ci.yml` runs the same commands as five parallel jobs.
+
+**Two coverage facts worth knowing before touching Go code.** The gate is **80% on
+changed packages**, not overall — a repository-wide number moves too slowly to ever fail.
+It runs with `-coverpkg=./...` **and Postgres**, which matters: `internal/store/repo` reads
+65.8% without Postgres and 82.5% with it. Generated code and `cmd/pivot` are excluded, and
+that list is meant to stay short.
+
+**Six packages are below the line today**, and the first pull request to touch one has to
+bring it up:
+
+| Package | Coverage | Statements |
+|---|---|---|
+| `internal/cli` | 30.4% | 730 |
+| `internal/store/model` | 50.0% | 6 |
+| `internal/store/dbtypes` | 61.1% | 95 |
+| `internal/config` | 65.7% | 204 |
+| `internal/version` | 68.4% | 19 |
+| `internal/auth` | 69.3% | 264 |
+| `internal/api` | 70.0% | 1475 |
+
+That is the gate working as designed and it will not feel like it. `internal/api` is the
+expensive one.
+
+**The bundle budget is nearly spent, at Phase 0.** The NFRs allow 200 KB gzipped for
+login-to-shell and the build is at **185 KB — 93%**. Of that, **our own code is 11.5 KB**;
+the rest is React (67.8), the design system and its Radix/cmdk/i18next dependencies (60.3),
+and TanStack Router and Query (38.2). Phase 2 wants charts. Something will have to be
+lazily loaded, and `make bundle-size` is what will say so.
+
+**Vulnerability scanning is two tools pointed at different things.** govulncheck owns Go
+and is reachability-based, so anything it reports fails outright. osv-scanner owns npm
+**only** — pointing it at `go.mod` reads the `go` directive as the standard library's
+version and produces **25 findings that govulncheck reports as zero**, because that
+directive is a minimum language version and not a toolchain. The npm side blocks at CVSS
+7.0 and reports everything below; there are 3 at 5.9 today, all dev-only.
+
 **Storybook is a review tool and never ships.** `make storybook` serves it on :6006;
 nothing it builds reaches `web/dist`, so nothing it builds can reach the binary.
 
@@ -370,6 +409,10 @@ needs an entry in `sqlc.yaml`'s SQLite override list**, or the packages silently
 - **`make web-build`, never `npm run build` directly.** Vite's `emptyOutDir` deletes
   `web/dist/.gitkeep` on every build and only the make target puts it back; without it
   `//go:embed all:dist` fails on a fresh clone. `make web-keep` repairs it.
+- **CI runs on Node 22, the development machine on 20.16.** Deliberate: 20.16 is what
+  holds Vite and Storybook a major behind, and a green CI on 22 is what proves the bump is
+  safe before anybody makes it. `engines` in `web/package.json` permits both.
+- **`make check` needs the development Postgres.** It runs `test-all`, which starts it.
 - **Lint enforces US spelling** (`misspell`, `locale: US`) and rejects both `err` shadowing
   (govet) and `err` reassignment (gocritic) — give the inner error a distinct name.
 
@@ -378,7 +421,7 @@ needs an entry in `sqlc.yaml`'s SQLite override list**, or the packages silently
 ## Progress
 
 ```
-Phase 0  Foundations        [████████████████    ] 18/22   (Parts 3, 4, 6, 7, 8, 10 and 11 each split)
+Phase 0  Foundations        [████████████████    ] 19/23   (Parts 3, 4, 6, 7, 8, 10, 11 and 12 each split)
 Phase 1  Connect & Query    [                    ]  0/12   (detailed at Part 15)
 Phase 2+ ...                                            (expanded as we approach)
 ```
@@ -988,23 +1031,56 @@ it belongs with Part 15's account and first-run work. Listed there.
 
 ---
 
-### - [ ] Part 12 — CI pipeline
+### - [x] Part 12-a — The quality gate, written and locally proven ✅ 2026-09-22
 
-**Deliverable:** Every PR runs the full quality gate in under 10 minutes.
+**Deliverable:** Every gate in
+[00-principles.md](docs/roadmap/00-principles.md#5-quality-gates-in-ci) exists, runs, and
+has been watched to fail.
 
-**Build:** GitHub Actions — lint (Go/TS), type check, unit + integration tests on a
-**Postgres AND SQLite matrix** (Postgres via a service container; `PIVOT_TEST_POSTGRES_URL`
-must be set so the Postgres half never silently skips), coverage gate (80% on changed
-packages), `govulncheck` + `osv-scanner`, gitleaks secret scanning, bundle-size budget,
-axe accessibility scan, Playwright E2E, plus a **Docker image build on every PR** (build
-only, push only on `main` and tags) so a broken Dockerfile is caught before release.
+**Build:** `.github/workflows/ci.yml` — five parallel jobs (Go, Frontend, End to end,
+Security, Image), `.github/workflows/README.md` explaining each. `scripts/coverage-gate.sh`
+(80% on changed packages), `scripts/audit.sh` (govulncheck + osv-scanner with one severity
+decision), `web/scripts/bundle-size.mjs` (the NFR budget), `Dockerfile` + `.dockerignore`,
+and `make check | audit | coverage-gate | bundle-size | image`.
 
-**Done when:** A PR triggers everything, all gates pass on `main`, a deliberately broken
-PR is correctly blocked, and total wall-clock is under 10 minutes.
+**Done when:**
+- [x] Every command the workflow runs has been run locally and passes — `make check`
+      exits 0, covering formatting, vet, lint, stale generated code, `go.mod` tidiness,
+      the spec, both engines, and coverage
+- [x] The Postgres half cannot silently skip — the tests run with
+      `PIVOT_TEST_POSTGRES_URL` set and a following step fails the build if it finds a
+      skip in the log
+- [x] Each gate was watched to fail, not just to pass — the coverage gate at a raised
+      threshold, the audit at a lowered one, the bundle budget's own arithmetic
+- [x] The image builds and starts — 22.9 MB distroless, `docker run pivot:ci version`
+- [x] No third-party actions at all: only `actions/*`, pinned binaries, and pinned images
 
-**Notes:** Use `make tools` (release archive + checksum verify) for golangci-lint in CI, not
-`go install` — building it from source pulls ~400 modules and would blow the 10-minute
-budget on its own. Cache `~/go/pkg/mod` and `./bin` between runs.
+**Refs:** `P0-CI-001` … `P0-CI-006`
+
+---
+
+### - [ ] Part 12-b — The gate, proven on GitHub
+
+**Deliverable:** The workflow is green on `main`, blocks a broken pull request, and
+finishes inside ten minutes.
+
+**Build:** Whatever the first real run turns out to need. A workflow that has never
+executed on a runner is a guess, however carefully each command was checked locally:
+the runner has different Go and Node versions, a two-core machine, a service container
+instead of a compose file, and no warm caches.
+
+**Done when:**
+- All five jobs pass on `main`
+- A deliberately broken pull request is correctly blocked — break one thing per gate and
+  confirm the right job goes red: a `gofmt` violation, an uncovered new package, an
+  oversized bundle, a planted fake secret, a Dockerfile typo
+- **Total wall-clock under 10 minutes**, measured on a cold cache and again on a warm one
+- Branch protection on `main` requires all five checks (needs repository admin, so it is
+  the user's to click)
+
+**Notes:** The five packages below the coverage line are listed in Current state. The
+first pull request that touches one of them has to bring it up, which is the gate working
+as designed and will not feel like it.
 
 **Refs:** `P0-CI-001` … `P0-CI-006`, plus the gate table in
 [00-principles.md](docs/roadmap/00-principles.md#5-quality-gates-in-ci)
@@ -1126,6 +1202,7 @@ Newest first. Record what **actually** shipped, including what didn't work.
 
 | Date | Part | Shipped | Notes |
 |---|---|---|---|
+| 2026-09-22 | 12-a | `.github/workflows/ci.yml` (five parallel jobs) and its README, `scripts/coverage-gate.sh`, `scripts/audit.sh`, `web/scripts/bundle-size.mjs`, `Dockerfile` + `.dockerignore`, osv-scanner added to the pinned tooling, and `make check | audit | coverage-gate | bundle-size | image` | **Split Part 12**: a workflow that has never run on a runner is a guess, so writing it and proving it are separate pieces of work. Every command it runs is verified locally — `make check` exits 0 — and every gate was watched to *fail* as well as pass. **osv-scanner pointed at `go.mod` is a false-positive machine**: it reads the `go` directive as the standard library's version and reported **25 stdlib advisories that govulncheck reports as zero**, because that directive is a minimum language version and not a toolchain. A gate that cries wolf twenty-five times is one people route around, so osv-scanner owns npm only and govulncheck owns Go. **The coverage gate needed two fixes before it was honest.** It summed duplicate profile blocks, which `-coverpkg` produces one per test binary — reporting `web` at 8.5% when it is 93.3%. And the measurement only means anything with Postgres running: `internal/store/repo` is 65.8% without it and 82.5% with it, so a gate run without the service container would fail for the wrong reason. **Six packages are below 80% today** and are listed in Current state; the next pull request touching one has to bring it up, which is the gate working as designed. **The bundle-size gate found a Part 9 chunking bug on its first run**: `manualChunks: { vendor: ["react", "react-dom"] }` names entry *specifiers*, and the application imports `react-dom/client` — so React ended up in the chunk labeled `tanstack` and `vendor` was 4 KB. The names were lying. Fixed with the function form. **The budget is at 93% in Phase 0**: 185 KB of 200, of which our own code is 11.5 KB. Phase 2 wants charts. **govulncheck v1.1.4 panics** on modern syntax (`unexpected expr: *ast.KeyValueExpr` out of x/tools v0.29.0); v1.8.0 is clean. **No third-party actions at all** — only `actions/*`, pinned release binaries with verified checksums, and a pinned gitleaks image — because an action is code running with the workflow's token. The image is 22.9 MB distroless and starts. **Not verified: the workflow has never executed on GitHub.** That is 12-b. |
 | 2026-09-22 | 11-b | The application shell — `AppShell` with a skip link and four labeled landmarks, `SideNav`, `Breadcrumbs`, `UserMenu`, the command palette on Ctrl/Cmd+K, one navigation model read by all three, five honest placeholder routes — plus Playwright against the built binary: 31 tests including axe over 16 page states | **A browser found two contrast failures that the Go pairing list had no entry for.** axe's `color-contrast` rule does not run in jsdom at all — no layout, no canvas — so this was the first time it had ever executed. An avatar's initials were `text-muted` on `surface-sunken` at 4.40:1, and an accent badge was 3.97:1 in the dark theme. Both pairings are now in `tokens_test.go`, which is the lasting fix: **a list of token pairs is only as good as the combinations somebody thought of**, and that is exactly why the browser pass is not redundant with the Go one. **Three traps in the E2E harness itself, each of which produced a convincing wrong answer.** Playwright starts `webServer` *before* `globalSetup`, so provisioning afterwards left the server holding an open descriptor on a deleted inode — it kept reading an empty database while the new one filled, and every login failed with "that email address and password do not match". Moving the cleanup to config module scope did not fix it either, because Playwright evaluates the config once per worker and it deleted the database mid-run. globalSetup now owns provisioning *and* the server. Then switching theme and scanning immediately measured colors **mid-transition** — axe saw a link fading from light to dark and called it 2.29:1; `reducedMotion: "reduce"` fixed it, using a rule the stylesheet already had. **The application's own CSP blocked the test harness, which is the CSP working.** `addScriptTag` appends a real `<script>` and `script-src 'self'` refuses it, so axe would not load; `addInitScript` goes in over the debugging protocol instead, leaving the policy in force — and there is now a test asserting an injected script is still refused. **Radix's modal menu trips `aria-hidden-focus`**: it marks the page outside `aria-hidden` while the skip link and sidebar remain focusable. Focus is trapped so nobody could reach them, but the markup claims they are not there. The account menu is `modal={false}` now, which is what a menu should be anyway. **Cut and moved rather than dropped:** the change-password page and the endpoint it needs went to Part 15, because verifying a current password and revoking every *other* session is backend work and not shell work. **Still not run:** six manual audit items, all screen reader and rendering. Four of the original ten are now tests. |
 | 2026-09-22 | 11-a | `src/i18n` (i18next, English complete, typed keys, direction from the locale, a dev-only RTL pseudo-locale), the login page on the design system, a pathless `authenticated` guard, `src/lib/redirect.ts`, `OfflineBanner`, `LocalePicker`, login/logout mutations and a central 401 handler; 28 new tests | **Split Part 11** — the door is a session, the room behind it is another. **The open-redirect rule is now enforced on both ends.** Part 8-b closed it on the server for the SSO `return` parameter; the client does its own redirect after a password login, and the server cannot vet that one. `safeDestination` repeats the rule and is tested against six hostile shapes — `//evil.example` and `/\\evil.example` are the ones that get past a check for a leading slash. **A real bug in my own helper, caught by a test I nearly did not write.** `currentDestination` concatenated the router's `hash`, which omits the leading `#`, turning `/?owner=me#chart` into `/?owner=mechart` — a destination that still looks plausible and still navigates, somewhere else. `window.location.hash` includes the `#` and the router's does not, and both shapes are now handled. **Every 401 is handled in one place**, not per call site, so a session that ends mid-visit sends the user to the login page with their destination intact whatever they were doing — and the cached session is nulled *first*, or the guard would read a stale session, let them back in, and bounce them again. **The organization field is revealed by the server, not guessed**: a single-organization instance never shows it, and a multi-organization one returns 422 naming the field, which is what makes it appear and take focus. Verified live, both branches. **i18n came first deliberately** — the expensive part of internationalization is never the library, it is the four hundred strings already written inline and the stylesheet full of `margin-left`. The catalog is the type, so a wrong key fails `tsc`. **Top-level `await` does not build**: Vite targets es2020, and raising the target for one line of syntax would have quietly dropped browsers the NFRs still name — `initI18n().then` instead. **The Go suite got killed mid-run and it was memory, not a flake**: Storybook was still serving from an earlier turn while `-race` tests hashed Argon2 at 64 MiB. Same family as Part 6-b's `-p 1`. Verified live against the built binary on SQLite: 401 wrong password, 200 + `HttpOnly` cookie, 204 logout, 401 after, 422-with-field for the ambiguous email, 200 once the organization is named. **Not verified: anything visual.** No browser ran. Part 11-b's Playwright is what closes that. |
 | 2026-09-22 | 10-b | Dialog, DropdownMenu, Select, Popover, Tooltip, Tabs, Toast and the command palette (Radix + cmdk), 34 more stories, `web/src/ui/keyboard.test.tsx` (21 tests driving the keyboard with user-event), `web/vitest.setup.ts`, `TestNothingRemovesTheFocusIndicator`, and [docs/design/keyboard-audit.md](docs/design/keyboard-audit.md) | **The axe suite had a hole big enough to drive this whole part through.** It scanned `render()`'s container — and every overlay portals to the end of `document.body`, so the scan would have covered the triggers and none of the content. Moved to `document.body` before writing a single overlay, which is the only reason the numbers below mean anything. **Found and fixed a real bug in cmdk**: it sets `aria-activedescendant` only when the selection *changes*, so it is missing when the palette opens and missing again whenever a search narrows to one result — precisely when a screen reader user needs to be told what is active, and precisely where everyone else can see the highlight. Reproduced against cmdk on its own. axe cannot catch it, because an absent attribute is not an invalid one; the keyboard suite did, and the fix is mutation-verified. **Two of my own findings were wrong and the code was right.** I read cmdk's minified source, concluded it put `aria-activedescendant` on the listbox rather than the input, and wrote a mirroring hook for a bug that did not exist; reading further showed it sets it on the input correctly, and the real bug was the *timing*. Then I asserted Tabs gives `tabindex=0` to the selected tab — it gives it to the *list* and forwards focus, which is equally correct and which a behavioral assertion would not have cared about. Rewrote it to assert one Tab in and one Tab out. **A ref that is always null.** The palette's fix did nothing at first because Radix's portal mounts the dialog's contents in a *later* commit, so a `useRef` was still null when an effect keyed on `open` ran, and nothing ever looked again. Callback refs held in state, so the effect fires when the elements exist. **jsdom needed four stubs before any overlay would mount** — `ResizeObserver`, `scrollIntoView`, pointer capture, `matchMedia`. None of them returns a plausible measurement on purpose: a fake that did would let a test assert a position no browser would produce. **One criterion is not met, and is marked `[~]` rather than ticked.** Whether the focus ring is *drawn* cannot be checked by anything here, because jsdom paints nothing. The manual pass is written out as 10 items in the audit document and has not been run; Part 11's Playwright is what turns most of it into code. 106 story scans, 130 axe tests, 21 keyboard tests, 0 violations. |

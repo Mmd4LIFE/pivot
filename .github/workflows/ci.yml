@@ -1,0 +1,296 @@
+name: CI
+
+# Every pull request, and every push to main. Nothing else: a tag push is
+# Part 13's release pipeline and runs its own checks.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A second push to the same branch makes the first run pointless. Cancelling it
+# is what keeps the queue short enough for the ten-minute budget to mean
+# anything on a busy day. `main` is excluded -- every commit there is a release
+# candidate and its result is worth having.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+# Read-only by default. A job that needs more says so itself.
+permissions:
+  contents: read
+
+env:
+  # Pinned rather than "lts". A toolchain that moves on its own turns an
+  # unrelated pull request into the one that discovers the breakage.
+  #
+  # 22 and not the 20.16 on the development machine, deliberately: 20.16 is what
+  # holds Vite and Storybook a major behind, and running CI on 22 is what proves
+  # the code is ready for that bump. `engines` in web/package.json permits both.
+  NODE_VERSION: "22.21.1"
+
+jobs:
+  # ── Go ─────────────────────────────────────────────────────────────────────
+  go:
+    name: Go
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    services:
+      # The Postgres half of the portability harness. Without this the suite
+      # still passes -- it skips -- which is exactly the silent failure
+      # ADR-0003 is most exposed to, so PIVOT_TEST_POSTGRES_URL is set below and
+      # a later step asserts the skips did not happen.
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: pivot
+          POSTGRES_PASSWORD: pivot
+          POSTGRES_DB: pivot
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U pivot"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The coverage gate diffs against the base branch, which a shallow
+          # clone does not have.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # golangci-lint and sqlc come from pinned release archives with verified
+      # checksums -- see the Makefile. Building golangci-lint from source pulls
+      # about four hundred modules and would spend the whole budget on its own.
+      - name: Cache pinned tools
+        uses: actions/cache@v4
+        with:
+          path: bin
+          key: tools-${{ runner.os }}-${{ hashFiles('Makefile') }}
+
+      - run: make tools
+
+      - name: Formatting
+        run: |
+          unformatted=$(gofmt -l $(git ls-files '*.go'))
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt'd:" >&2
+            echo "$unformatted" >&2
+            exit 1
+          fi
+
+      - run: make vet
+
+      - run: make lint
+
+      - name: go.mod is tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+      # Generated code must match the SQL it came from. This is why the check
+      # only means anything on a clean tree, and CI is the one place that is
+      # guaranteed.
+      - run: make gen-check
+
+      - name: OpenAPI spec is self-consistent
+        run: make validate-spec
+
+      - name: Tests, against SQLite and Postgres
+        env:
+          PIVOT_TEST_POSTGRES_URL: postgres://pivot:pivot@localhost:5432/pivot?sslmode=disable
+        run: |
+          # -p 1 is not a preference. Without it Go starts one test binary per
+          # package at once and several hash with Argon2 at 64 MiB under the
+          # race detector, which is enough to get the run killed on a
+          # two-core runner. See the note in CHECKLIST.md.
+          go test -race -count=1 -p 1 -coverpkg=./... \
+            -coverprofile=coverage.out -covermode=atomic ./... \
+            2>&1 | tee test.log
+
+      - name: The Postgres half actually ran
+        run: |
+          # A skipped Postgres suite looks exactly like a passing one. This is
+          # the assertion that the service container was really used.
+          if grep -q 'SKIP.*PIVOT_TEST_POSTGRES_URL' test.log; then
+            echo "Postgres tests skipped despite PIVOT_TEST_POSTGRES_URL being set." >&2
+            exit 1
+          fi
+
+      - name: Coverage on changed packages
+        run: ./scripts/coverage-gate.sh origin/${{ github.base_ref || 'main' }} 80
+
+  # ── Frontend ───────────────────────────────────────────────────────────────
+  web:
+    name: Frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # ci, not install: it installs the lockfile exactly and fails if the two
+      # disagree, which is what a build wants and the opposite of what a
+      # developer wants.
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      # axe over every story, plus the keyboard contract and the session
+      # boundary. 179 tests, no browser.
+      - run: npm test
+
+      - run: npm run build
+
+      # The login-to-shell bundle against the 200 KB gzipped budget the NFRs
+      # make binding from Phase 0.
+      - run: node scripts/bundle-size.mjs
+
+      # Storybook is a review tool and never ships, but it has to keep
+      # building: a story that no longer compiles is a component nobody can
+      # review.
+      - run: npm run storybook:build
+
+  # ── End to end ─────────────────────────────────────────────────────────────
+  e2e:
+    name: End to end
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+        working-directory: web
+
+      # Browsers are the slowest thing in this workflow by a wide margin, and
+      # they only change when @playwright/test does.
+      - name: Cache Playwright browsers
+        id: browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
+
+      - name: Install Chromium
+        if: steps.browsers.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+        working-directory: web
+
+      # Even on a cache hit the system libraries are not in the image.
+      - name: Install browser system dependencies
+        if: steps.browsers.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+        working-directory: web
+
+      # Against the binary with the assets embedded, never the dev server: the
+      # SPA fallback, the caching headers, the document CSP and a same-origin
+      # session cookie all behave differently under Vite.
+      - run: make e2e
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            web/playwright-report/
+            web/.playwright/results/
+          retention-days: 7
+
+  # ── Supply chain ───────────────────────────────────────────────────────────
+  security:
+    name: Security
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # gitleaks scans history, which a shallow clone does not have.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Cache pinned tools
+        uses: actions/cache@v4
+        with:
+          path: bin
+          key: tools-${{ runner.os }}-${{ hashFiles('Makefile') }}
+
+      - run: make tools
+
+      # govulncheck for Go and osv-scanner for npm, with the severity decision
+      # made in one place. See scripts/audit.sh for why osv-scanner is
+      # deliberately not pointed at go.mod.
+      - name: Known vulnerabilities
+        run: make audit
+
+      - name: Secrets
+        run: |
+          # The official image, pinned. `--redact` so a finding does not print
+          # the secret into a public log, which would be the second leak.
+          docker run --rm \
+            -v "${{ github.workspace }}:/repo" \
+            zricethezav/gitleaks:v8.21.2 \
+            detect --source=/repo --redact --verbose
+
+  # ── Container image ────────────────────────────────────────────────────────
+  image:
+    name: Image
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Plain `docker build`, not docker/build-push-action. The runner already
+      # has Docker, the image is never pushed from here, and every third-party
+      # action is code running with this workflow's token -- which is the same
+      # reasoning that keeps the security job on pinned binaries.
+      #
+      # Part 13 owns publishing, and will want buildx for multi-architecture
+      # images. What this catches is a Dockerfile that stopped working, on the
+      # pull request that broke it rather than on the release that needed it.
+      - name: Build
+        run: |
+          docker build \
+            --build-arg VERSION=ci \
+            --build-arg COMMIT=${{ github.sha }} \
+            --tag pivot:ci \
+            .
+
+      - name: The image runs
+        run: |
+          # A build that produces an image which cannot start is a build that
+          # passed for no reason.
+          docker run --rm pivot:ci version
