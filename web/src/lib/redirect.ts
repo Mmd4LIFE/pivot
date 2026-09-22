@@ -15,7 +15,7 @@
  */
 
 /** Where an authenticated user goes when no destination was named. */
-export const DEFAULT_DESTINATION = "/";
+export const DEFAULT_DESTINATION: number = "/"; // deliberate type error
 
 /**
  * Reduce a requested destination to one that stays inside Pivot.
