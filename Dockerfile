@@ -10,7 +10,7 @@
 # a base with no shell and no package manager.
 
 # ── The browser application ──────────────────────────────────────────────────
-FROM node:22-bookworm-slim AS web
+FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS web
 
 WORKDIR /src/web
 
@@ -29,7 +29,7 @@ RUN npm run build
 # asserts that. An unpinned `golang:1.26` drifts, which is the same class of
 # problem as building with the `go` directive: it decides on its own which
 # standard library vulnerabilities the image ships with.
-FROM golang:1.26.8-bookworm AS build
+FROM --platform=$BUILDPLATFORM golang:1.26.8-bookworm AS build
 
 WORKDIR /src
 
@@ -46,11 +46,19 @@ ARG VERSION=dev
 ARG COMMIT=none
 ARG DATE=unknown
 
+# Supplied by buildx. Both stages build on the *host* architecture and
+# cross-compile, rather than running the toolchain under emulation: qemu makes
+# an arm64 build on an amd64 runner roughly ten times slower, and Go
+# cross-compiles natively. The frontend is architecture-independent, so it is
+# built once whatever the target.
+ARG TARGETOS
+ARG TARGETARCH
+
 # CGO off, so the result is static and runs on a base with no libc of its own.
 # That is possible at all because ADR-0003 chose modernc.org/sqlite: a cgo
 # SQLite driver would have made this a distro image with a package manager in
 # it.
-RUN CGO_ENABLED=0 go build \
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build \
       -trimpath \
       -ldflags="-s -w \
         -X 'github.com/Mmd4LIFE/pivot/internal/version.version=${VERSION}' \
@@ -77,10 +85,22 @@ USER nonroot:nonroot
 
 EXPOSE 8080
 
-# No HEALTHCHECK. There is no shell and no curl to run one with, and the
-# orchestrators that matter -- Compose, Kubernetes -- probe /readyz over HTTP
-# themselves. A healthcheck that cannot run is worse than none, because it
-# reports unhealthy forever.
+# The binary probes itself.
+#
+# There is no shell here and no curl, so the usual `CMD curl -f ...` cannot
+# work -- and adding a shell back for the sake of one line would undo the point
+# of a distroless base. `pivot healthcheck` reads the same configuration the
+# server binds with, so it needs no arguments and stays correct if the port is
+# changed.
+#
+# Liveness (/healthz) rather than readiness: a database blip should not make an
+# orchestrator destroy an otherwise healthy container. `--ready` exists for
+# anyone who wants the stricter probe.
+#
+# start-period covers the first run, where the schema is created before the
+# listener opens.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD ["/usr/local/bin/pivot", "healthcheck"]
 
 ENTRYPOINT ["/usr/local/bin/pivot"]
 CMD ["serve"]

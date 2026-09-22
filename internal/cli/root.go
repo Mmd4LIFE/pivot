@@ -77,6 +77,7 @@ value came from.`,
 		newMigrateCmd(env, &flags),
 		newAdminCmd(env, &flags),
 		newVersionCmd(env),
+		newHealthcheckCmd(env, &flags),
 		newConfigCmd(env, &flags),
 	)
 
