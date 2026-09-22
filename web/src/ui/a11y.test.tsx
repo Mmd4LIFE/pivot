@@ -12,16 +12,24 @@ import * as Badge from "./Badge.stories";
 import * as Button from "./Button.stories";
 import * as Card from "./Card.stories";
 import * as Checkbox from "./Checkbox.stories";
+import * as CommandPalette from "./CommandPalette.stories";
+import * as Dialog from "./Dialog.stories";
+import * as DropdownMenu from "./DropdownMenu.stories";
 import * as EmptyState from "./EmptyState.stories";
 import * as Field from "./Field.stories";
 import * as Input from "./Input.stories";
+import * as Popover from "./Popover.stories";
 import * as RadioGroup from "./RadioGroup.stories";
+import * as Select from "./Select.stories";
 import * as Separator from "./Separator.stories";
 import * as Skeleton from "./Skeleton.stories";
 import * as Spinner from "./Spinner.stories";
 import * as Switch from "./Switch.stories";
 import * as Table from "./Table.stories";
+import * as Tabs from "./Tabs.stories";
 import * as Textarea from "./Textarea.stories";
+import * as Toast from "./Toast.stories";
+import * as Tooltip from "./Tooltip.stories";
 
 /*
  * Every story, scanned by axe.
@@ -51,16 +59,24 @@ const STORY_MODULES = {
   Button,
   Card,
   Checkbox,
+  CommandPalette,
+  Dialog,
+  DropdownMenu,
   EmptyState,
   Field,
   Input,
+  Popover,
   RadioGroup,
+  Select,
   Separator,
   Skeleton,
   Spinner,
   Switch,
   Table,
+  Tabs,
   Textarea,
+  Toast,
+  Tooltip,
 };
 
 // The preview's decorators and parameters, so a story under test renders the
@@ -132,9 +148,13 @@ for (const [component, storyModule] of Object.entries(STORY_MODULES)) {
       test(`${name} has no accessibility violations`, async () => {
         if (Story === undefined) throw new Error(`no story named ${name}`);
 
-        const { container } = render(<Story />);
+        render(<Story />);
 
-        const results = await axe.run(container, AXE_OPTIONS);
+        // document.body, not render()'s container: every overlay in this
+        // directory portals to the end of the body, so scanning the container
+        // would silently skip the half of the design system where
+        // accessibility actually goes wrong.
+        const results = await axe.run(document.body, AXE_OPTIONS);
 
         expect(results.violations.map(describeViolation)).toEqual([]);
       });

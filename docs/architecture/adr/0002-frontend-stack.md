@@ -201,3 +201,52 @@ A browser-based pass would add what jsdom cannot see: real focus order, real
 computed styles, real assistive-technology behavior. That needs Playwright,
 which **Part 11 installs anyway**, so the browser pass belongs there rather
 than as a second install here.
+
+### 2026-09-22 — cmdk, and what a browser-free accessibility check can and cannot reach
+
+Part 10-b added the overlays. Two things are worth recording.
+
+#### cmdk, for the command palette only
+
+Radix has no combobox, and a filtered list driven by `aria-activedescendant` is
+one of the easiest patterns in ARIA to get subtly wrong — "subtly wrong" here
+meaning a screen reader reads nothing as the user arrows down. cmdk 1.1.1 is
+the standard implementation, is built on Radix Dialog, and costs one direct
+dependency.
+
+It has a bug, found by the keyboard tests and reproduced against cmdk on its
+own: **`aria-activedescendant` is set only when the selection changes.** So it
+is absent when the palette opens — the first option is already highlighted and
+nothing changed — and absent again whenever a search narrows to a single
+result, because the selection stays where it was. Both are exactly the moments
+the attribute is needed, and in both of them the highlight is plainly visible
+to every sighted user.
+
+`useActiveDescendant` in `CommandPalette.tsx` mirrors the DOM's `aria-selected`
+onto the input. It reads the DOM rather than cmdk's state because the ids are
+cmdk's, and deriving our own would mean two notions of "active" that have to be
+kept in step.
+
+The fix needed callback refs held in **state**, not `useRef`: Radix's portal
+mounts the dialog's contents in a later commit, so a ref object is still null
+when an effect keyed on `open` runs, and nothing ever looks at it again.
+
+#### The scan target, and the limit of a browser-free check
+
+`a11y.test.tsx` originally scanned `render()`'s container. Every overlay in the
+design system portals to the end of `document.body`, so that scan covered the
+triggers and none of the content — the half of a design system where
+accessibility actually goes wrong. It now scans `document.body`.
+
+`vitest.setup.ts` stubs `ResizeObserver`, `scrollIntoView`, pointer capture and
+`matchMedia`. jsdom lays nothing out, so every popper-based component throws on
+mount without them. None of the stubs returns a plausible measurement, and that
+is deliberate: a fake that did would let a test assert a position no browser
+would ever produce.
+
+Which draws the line. In jsdom we can check names, roles, states, ARIA
+validity, focus movement, focus trapping, key handling and live-region
+politeness — everything that lives in the DOM. We cannot check that a focus
+ring is *drawn*, where an overlay lands, or what a screen reader says out loud.
+Those ten items are written out in `docs/design/keyboard-audit.md` for a person,
+and **Part 11's Playwright install is what turns most of them into code.**

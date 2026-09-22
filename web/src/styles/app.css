@@ -26,6 +26,9 @@
   --color-surface-raised: rgb(var(--pivot-surface-raised));
   --color-surface-sunken: rgb(var(--pivot-surface-sunken));
 
+  /* The scrim behind a modal. Always used with an alpha modifier. */
+  --color-overlay: rgb(var(--pivot-overlay));
+
   --color-content: rgb(var(--pivot-text));
   --color-content-muted: rgb(var(--pivot-text-muted));
   --color-content-subtle: rgb(var(--pivot-text-subtle));

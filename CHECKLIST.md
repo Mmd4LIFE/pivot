@@ -53,8 +53,8 @@ At the end of every part, in this order:
 
 | | |
 |---|---|
-| **Last completed** | Part 10-a — Design system: in-flow components and the accessibility harness |
-| **Next up** | **Part 10-b — Design system: overlays and the keyboard audit** |
+| **Last completed** | Part 10-b — Design system: overlays and the keyboard audit |
+| **Next up** | **Part 11 — Auth UI & app shell** |
 | **Current phase** | Phase 0 — Foundations |
 | **Branch** | `main` |
 | **Blockers** | None |
@@ -163,22 +163,56 @@ change rather than a rebuild, and it is asserted: the built CSS must contain `va
 and must not contain Tailwind 3's `<alpha-value>` placeholder, which Tailwind 4 emits
 verbatim and browsers silently discard.
 
-**The design system is `web/src/ui`**, exported through one barrel. 27 components across
-16 modules, all on Radix where there is keyboard behavior to get right, all built on the
-tokens and never on a hard-coded color. Two conventions are worth knowing before adding
-one: a label is a **required prop** on Checkbox, Radio and Switch, and `CardTitle` takes
-an explicit heading level with no default — both are cases where an optional argument
-produces a defect nobody notices, so the type system asks instead.
+**The design system is `web/src/ui`**, exported through one barrel. 71 components across
+24 modules — many are parts of a family, so a Table is six of them — all on Radix where
+there is keyboard behavior to get right, all built on the tokens and never on a
+hard-coded color. The command palette adds cmdk, because a filtered combobox with
+`aria-activedescendant` is not something to hand-roll.
 
-**Accessibility is checked in two halves, and neither one covers the other.**
-`web/tokens_test.go` computes WCAG contrast from the token file in Go — no browser, no
-`node_modules`, runs in `make test` anywhere, and it found **nine real contrast failures**
-in the tokens Part 9 shipped. `web/src/ui/a11y.test.tsx` runs axe-core over every story in
-jsdom (72 story scans, 88 tests, `make web-test`), scoped to the WCAG 2.1 A/AA tags, with
-`color-contrast` disabled because jsdom has no layout — that is the Go test's half. It
-caught `Button`'s `asChild` throwing on every render. `web/stories_test.go` fails the Go
-build if a component has no stories or a story file is missing from the suite's import
-list, so the hand-maintained list cannot quietly fall behind the directory.
+Conventions worth knowing before adding one. A label is a **required prop** on Checkbox,
+Radio and Switch; `CardTitle` takes an explicit heading level with no default; a Dialog's
+`title` and a Table's `caption` are required and can be hidden but not omitted — each is
+a case where an optional argument produces a defect nobody notices, so the type system
+asks instead. And two pairs are easy to confuse, where choosing wrong changes what a
+screen reader says rather than only how it looks: **Select** picks a value and
+**DropdownMenu** runs a command; **Popover** takes focus and can hold controls,
+**Tooltip** never takes focus and must not.
+
+**Accessibility is checked in four layers, and no layer covers another.**
+[docs/design/keyboard-audit.md](docs/design/keyboard-audit.md) is the map.
+
+1. **Color, in Go.** `web/tokens_test.go` computes WCAG contrast from the token file — no
+   browser, no `node_modules`, runs in `make test` anywhere. Found **nine real failures**
+   in the tokens Part 9 shipped.
+2. **Structure, in jsdom.** `web/src/ui/a11y.test.tsx` runs axe over every story (106
+   scans, 130 tests), scoped to the WCAG 2.1 A/AA tags, `color-contrast` off because
+   jsdom has no layout. It scans `document.body` rather than the render container —
+   **every overlay portals out of the container**, so the narrower scan would have
+   skipped exactly the half where accessibility goes wrong. Caught `Button`'s `asChild`
+   throwing on every render.
+3. **Behavior, in jsdom.** `web/src/ui/keyboard.test.tsx` drives the keyboard with
+   user-event (21 tests): focus trapping, Escape, focus restoration, arrow keys, live
+   region politeness. Caught the cmdk `aria-activedescendant` bug below.
+4. **Rendering, by hand.** Whether the ring is *drawn*, where an overlay lands, what a
+   screen reader says. Written out in the audit document; **not yet run**.
+
+Two Go tests keep the jsdom layers honest, and they run without `node_modules`:
+`TestEveryComponentHasStories` / `TestAccessibilitySuiteImportsEveryStory` fail the build
+if a component has no stories or a story file is missing from the suite's import list,
+and `TestNothingRemovesTheFocusIndicator` fails it if a component writes `outline-none`
+without naming a replacement.
+
+**A real bug in cmdk, fixed here.** It sets `aria-activedescendant` only when the
+selection *changes* — so it is absent when the palette opens, and absent again whenever a
+search narrows to a single result. Both are exactly when a screen reader user needs to be
+told what is active. Reproduced against cmdk alone; axe cannot see it, because an absent
+attribute is not an invalid one. `useActiveDescendant` in `CommandPalette.tsx` mirrors the
+DOM's `aria-selected` onto the input, mutation-verified.
+
+**`web/vitest.setup.ts` stubs the layout APIs jsdom lacks** — `ResizeObserver`,
+`scrollIntoView`, pointer capture, `matchMedia`. Without them every overlay throws on
+mount. None of the stubs returns a plausible measurement, deliberately: a fake that did
+would let a test assert a position no browser would produce.
 
 **Storybook is a review tool and never ships.** `make storybook` serves it on :6006;
 nothing it builds reaches `web/dist`, so nothing it builds can reach the binary.
@@ -279,7 +313,7 @@ needs an entry in `sqlc.yaml`'s SQLite override list**, or the packages silently
 ## Progress
 
 ```
-Phase 0  Foundations        [██████████████      ] 15/21   (Parts 3, 4, 6, 7, 8 and 10 each split)
+Phase 0  Foundations        [███████████████     ] 16/21   (Parts 3, 4, 6, 7, 8 and 10 each split)
 Phase 1  Connect & Query    [                    ]  0/12   (detailed at Part 15)
 Phase 2+ ...                                            (expanded as we approach)
 ```
@@ -784,30 +818,38 @@ handling, restoring focus on close, scroll locking.
 
 ---
 
-### - [ ] Part 10-b — Design system: overlays and the keyboard audit
+### - [x] Part 10-b — Design system: overlays and the keyboard audit ✅ 2026-09-22
 
 **Deliverable:** The components that float above the page, and a keyboard pass over all
 of them.
 
-**Build:** Dialog, DropdownMenu, Select, Popover, Tooltip, Tabs, Toast, and the command
-palette — all on Radix, added to the same `src/ui` barrel, with stories and axe coverage
-on the same terms as 10-a.
+**Build:** Dialog, DropdownMenu, Select, Popover, Tooltip, Tabs, Toast and the command
+palette (Radix, plus cmdk for the palette's combobox), in the same `src/ui` barrel.
+`web/src/ui/keyboard.test.tsx` drives the keyboard with `@testing-library/user-event`.
+`web/vitest.setup.ts` supplies the layout APIs jsdom lacks.
+`docs/design/keyboard-audit.md` is the written record.
 
 **Done when:**
-- Every overlay traps focus, closes on Escape, and returns focus to whatever opened it
-- **Zero axe violations** across all stories, 10-a's included
-- Every component is keyboard navigable with a visible focus indicator — **10-a's
-  twenty-seven included**, checked by hand against the built Storybook and written down
-  component by component. 10-a did not do this: it verified that the focus ring's color
-  clears 3:1 against both surfaces, which is not the same as verifying that focus
-  reaches every control
-- Toasts announce without stealing focus (`role="status"`, not `role="alert"`, unless
-  the toast is an error)
+- [x] Every overlay traps focus, closes on Escape, and returns focus to whatever opened
+      it — driven, not asserted in a comment: eight consecutive Tabs never leave an open
+      dialog, and Escape puts focus back on the trigger for Dialog, DropdownMenu, Select
+      and Popover
+- [x] **Zero axe violations** across all stories, 10-a's included — 106 story scans, 130
+      tests. The scan target moved from `render()`'s container to `document.body`,
+      without which every overlay in this part would have gone unscanned
+- [x] Toasts announce without stealing focus — `role="status"` in every tone, never
+      `role="alert"`, polite for everything except an error, and focus provably unmoved
+- [~] Every component is keyboard navigable with a visible focus indicator —
+      **partly.** 21 tests prove where focus *goes*; `TestNothingRemovesTheFocusIndicator`
+      proves nothing strips the ring without naming a replacement; `TestTokenContrast`
+      proves the ring's color clears 3:1. **Whether it is drawn is unverified**, because
+      jsdom paints nothing. The manual pass is written out in
+      [docs/design/keyboard-audit.md](docs/design/keyboard-audit.md) and **has not been
+      run** — 10 items, ~20 minutes with a keyboard and a screen reader
 
-**Notes:** An overlay is where accessibility goes wrong, and it is also where jsdom stops
-helping: axe in jsdom cannot see focus order or what a portal did to the tab sequence. So
-the keyboard audit here is manual and its results are recorded — and Part 11's Playwright
-install is what makes it automatable afterwards.
+**Notes:** The manual pass is the one criterion this part could not close, and pretending
+otherwise would have made the checklist worth less than the tests. Part 11 installs
+Playwright, which is what turns most of that list into code.
 
 **Refs:** `P0-FE-005`, `P0-FE-006`, `P0-FE-009`
 
@@ -965,6 +1007,7 @@ Newest first. Record what **actually** shipped, including what didn't work.
 
 | Date | Part | Shipped | Notes |
 |---|---|---|---|
+| 2026-09-22 | 10-b | Dialog, DropdownMenu, Select, Popover, Tooltip, Tabs, Toast and the command palette (Radix + cmdk), 34 more stories, `web/src/ui/keyboard.test.tsx` (21 tests driving the keyboard with user-event), `web/vitest.setup.ts`, `TestNothingRemovesTheFocusIndicator`, and [docs/design/keyboard-audit.md](docs/design/keyboard-audit.md) | **The axe suite had a hole big enough to drive this whole part through.** It scanned `render()`'s container — and every overlay portals to the end of `document.body`, so the scan would have covered the triggers and none of the content. Moved to `document.body` before writing a single overlay, which is the only reason the numbers below mean anything. **Found and fixed a real bug in cmdk**: it sets `aria-activedescendant` only when the selection *changes*, so it is missing when the palette opens and missing again whenever a search narrows to one result — precisely when a screen reader user needs to be told what is active, and precisely where everyone else can see the highlight. Reproduced against cmdk on its own. axe cannot catch it, because an absent attribute is not an invalid one; the keyboard suite did, and the fix is mutation-verified. **Two of my own findings were wrong and the code was right.** I read cmdk's minified source, concluded it put `aria-activedescendant` on the listbox rather than the input, and wrote a mirroring hook for a bug that did not exist; reading further showed it sets it on the input correctly, and the real bug was the *timing*. Then I asserted Tabs gives `tabindex=0` to the selected tab — it gives it to the *list* and forwards focus, which is equally correct and which a behavioral assertion would not have cared about. Rewrote it to assert one Tab in and one Tab out. **A ref that is always null.** The palette's fix did nothing at first because Radix's portal mounts the dialog's contents in a *later* commit, so a `useRef` was still null when an effect keyed on `open` ran, and nothing ever looked again. Callback refs held in state, so the effect fires when the elements exist. **jsdom needed four stubs before any overlay would mount** — `ResizeObserver`, `scrollIntoView`, pointer capture, `matchMedia`. None of them returns a plausible measurement on purpose: a fake that did would let a test assert a position no browser would produce. **One criterion is not met, and is marked `[~]` rather than ticked.** Whether the focus ring is *drawn* cannot be checked by anything here, because jsdom paints nothing. The manual pass is written out as 10 items in the audit document and has not been run; Part 11's Playwright is what turns most of it into code. 106 story scans, 130 axe tests, 21 keyboard tests, 0 violations. |
 | 2026-09-22 | 10-a | `web/src/ui` — 27 components in 16 modules on Radix and the design tokens, one barrel export; Storybook 9 with the a11y addon and a theme toolbar; 72 stories; `web/tokens_test.go` (WCAG contrast, in Go), `web/src/ui/a11y.test.tsx` (axe over every story, 88 tests), `web/stories_test.go` (coverage guard); `make web-test` / `storybook` / `storybook-build` | **Accessibility is checked in two halves and each half found a real bug the other could not see.** The Go contrast harness parses the token file and computes WCAG relative luminance for the 20 pairings the components actually produce — no browser, no `node_modules`, runs in `make test` anywhere — and it found **nine real failures in the tokens Part 9 shipped**: the light status colors, `border-strong` in both themes, and white-on-blue for a primary button's label. I fixed the tokens rather than the thresholds, and `TestDarkFallbackMatchesTheExplicitTheme` then caught me updating only one of the two dark blocks. Checking the *tokens* rather than a rendering is the point: a scan covers the components someone wrote a story for, the tokens cover every component that will ever exist. **The axe half caught `Button`'s `asChild` throwing on every render** — the spinner beside `{children}` gives Radix's `Slot` two children to merge onto, so the feature was broken from the moment it was written and nothing had rendered it until a story did. `Slottable` fixes it. **Scope was rules, not taste:** axe is scoped to the WCAG 2.1 A/AA tags, because best-practice rules include `region`, which wants content inside a landmark — a property of a page, not of a button — and asserting it on isolated components teaches people to ignore the output. `color-contrast` is disabled explicitly, with the comment saying where the check actually lives. **`web/stories_test.go` keeps the suite honest**, also in Go: a component with no stories, or a story file missing from the import list, fails the build. Mutation-verified both ways. **Storybook 10 is unusable on Node 20.16 and lies about it** — it prints "you need Node 20.19+" and **exits 0**, so the build reports success and produces nothing; a CI job checking only the exit status would go green forever. Pinned to 9.1.20, which needs all four packages reinstalled together (npm ERESOLVEs on an in-place bump). That is now **two** majors held back by Node 20.16 — Vite and Storybook — and Part 12 pinning Node ≥ 20.19 unblocks both at once. **Split Part 10**: the in-flow components are a session, the overlays are another, and the overlays are where the hard work is (focus trapping, escape, restoring focus, scroll lock) and where jsdom stops helping. **Not verified this session:** keyboard navigation by hand. 10-b owns it, for all 27 components, and says so. |
 | 2026-09-21 | 9 | Vite 6 + React 19 + TS 5.9 + Tailwind 4 scaffold, TanStack Router and Query, a typed API client over the generated schema, design tokens as runtime CSS variables, `web/embed.go` with SPA fallback and caching, a document CSP, `make all` / `web-*` / `dev` targets, and 12 Go tests over the serving rules | **Two bugs shipped and were found by reading the compiled output, not the page.** `<alpha-value>` is Tailwind 3 syntax; Tailwind 4 emits it verbatim, browsers discard the whole declaration, and every themed utility silently did nothing — no error anywhere. And the theme bootstrap was an inline `<script>`, which the shell's `script-src 'self'` blocks outright, so the stored theme preference was never applied. Both are now mutation-verified tests. **A test of mine was wrong twice in one session:** first it passed against a mutation that does not actually break the property (`@theme` vs `@theme inline` — both preserve the indirection, contrary to my comment), then the strengthened version failed on a *clean* build because Tailwind 4's own `@property` rules legitimately contain `syntax:"<length>"`. Narrowed to the literal `<alpha-value>`. **Node 20.16 turned out to be the binding constraint on the whole toolchain.** Vite 7/8 and plugin-react 5/6 all need `^20.19 || >=22.12`; npm skips the mismatched optional native binding *silently*, so the failure reads as an npm bug rather than a Node one. Pinned to Vite 6 — which is what ADR-0002 chose anyway — with `engines` declared so the next person gets a legible warning, and a note for Part 12 to pin Node in CI. The Go tests run against a synthetic asset tree, so they pass on a clean checkout where no frontend has been built, which is exactly the case they most need to protect. |
 | 2026-09-21 | 8-b | `/auth/oidc/{provider}/{start,callback}`, the public provider list, admin CRUD for providers gated on `manage_organization`, `auth.Service.StartSession` shared with password login, `pivot admin add-provider`, `server.baseURL`, spec + TS client, and an opt-in Keycloak conformance test | **Discovery ran against Google's real OIDC issuer, live.** The Keycloak container test exists and skips unless `PIVOT_TEST_KEYCLOAK_URL` is set — the image is a large pull, and a suite that needs a container is a suite people stop running — but the live check turned out stronger than the plan: a complete authorization request against a genuinely independent implementation, with S256 challenge, nonce, state and `scope=openid` all present. **Added an open-redirect guard that was not in the plan.** The post-login `return` path accepted anything; `//evil.example` and `/\evil.example` both redirect off-site in real browsers, and an open redirect on the login route is what makes a phishing link convincing. Only a same-site absolute path is honored now, mutation-verified. **`SameSite=Lax` on the flow cookie is load-bearing, not a default.** Strict would withhold it on the callback, which arrives as a top-level navigation from the provider's origin — every login would break. A test asserts Lax specifically. **Session creation was factored, not duplicated:** SSO calls the same `StartSession` the password path does, so there is one expiry policy rather than two, and only one of two would have been covered by the tests that matter. Mutation-verified twice: deleting the state check and deleting the protocol-relative guard each fail tests by name. gosec flagged the start redirect as a taint-analysis open redirect; it is not — the destination is the configured provider's own discovered endpoint — and the nolint says why rather than just silencing it. |

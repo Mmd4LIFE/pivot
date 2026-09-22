@@ -149,3 +149,73 @@ func difference(a, b []string) []string {
 
 	return out
 }
+
+// Nothing removes the focus indicator without replacing it.
+//
+// `outline-none` is a legitimate thing to write: a menu row shows focus with a
+// background rather than a ring, and an outline drawn around a borderless
+// input inside a bordered row looks like a rendering fault. What is not
+// legitimate is writing it and stopping there, which leaves a keyboard user
+// with no way to tell where they are — the single most common accessibility
+// regression in an application like this one, and the reason the base
+// stylesheet sets a `:focus-visible` outline for everything by default.
+//
+// The check is per file rather than per class list, which is coarse: a file
+// that legitimately suppresses the ring in one place could hide an illegitimate
+// suppression in another. It is still worth having, because the failure it
+// guards against is somebody deleting a ring and never thinking about it again,
+// and it fails loudly enough to make the next person say why.
+func TestNothingRemovesTheFocusIndicator(t *testing.T) {
+	t.Parallel()
+
+	// What counts as putting one back.
+	substitutes := []string{
+		"data-[highlighted]", // a menu or listbox row
+		"data-[selected",     // a command palette row
+		"focus-visible:",     // an explicit ring
+		"focus-within:",      // a ring on the container instead
+	}
+
+	entries, err := os.ReadDir(uiDir)
+	if err != nil {
+		t.Fatalf("read %s: %v", uiDir, err)
+	}
+
+	for _, entry := range entries {
+		name := entry.Name()
+
+		if entry.IsDir() || !strings.HasSuffix(name, ".tsx") {
+			continue
+		}
+
+		if strings.Contains(name, ".stories.") || strings.Contains(name, ".test.") {
+			continue
+		}
+
+		data, rerr := os.ReadFile(filepath.Join(uiDir, name))
+		if rerr != nil {
+			t.Fatalf("read %s: %v", name, rerr)
+		}
+
+		body := string(data)
+
+		if !strings.Contains(body, "outline-none") {
+			continue
+		}
+
+		replaced := false
+
+		for _, substitute := range substitutes {
+			if strings.Contains(body, substitute) {
+				replaced = true
+
+				break
+			}
+		}
+
+		if !replaced {
+			t.Errorf("%s removes the focus outline but names no replacement (one of %s)",
+				name, strings.Join(substitutes, ", "))
+		}
+	}
+}
