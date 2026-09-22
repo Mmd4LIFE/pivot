@@ -315,8 +315,27 @@ jobs:
           # means the image ships a different standard library from the one
           # the Security job cleared, which is exactly how a patched CI and an
           # unpatched release coexist.
+          #
+          # The pattern allows anything between FROM and `golang:`, because
+          # there is: `--platform=$BUILDPLATFORM`. The first version of this
+          # anchored on `^FROM golang:` and silently extracted nothing the
+          # moment that flag was added, then failed comparing a real version
+          # against an empty string. A check that parses a file is coupled to
+          # that file's formatting, so it has to say when it parsed nothing
+          # rather than treat nothing as a value.
           want=$(sed -n 's/^toolchain go//p' go.mod)
-          got=$(sed -n 's/^FROM golang:\([0-9.]*\)-.*/\1/p' Dockerfile)
+          got=$(sed -n 's/^FROM .*golang:\([0-9.]*\)[-.].*/\1/p' Dockerfile | head -1)
+
+          if [ -z "$want" ]; then
+            echo "go.mod has no toolchain directive to compare against" >&2
+            exit 1
+          fi
+
+          if [ -z "$got" ]; then
+            echo "could not find a golang: base image version in the Dockerfile" >&2
+            grep -n '^FROM' Dockerfile >&2
+            exit 1
+          fi
 
           if [ "$want" != "$got" ]; then
             echo "go.mod names toolchain go$want; the Dockerfile builds with golang:$got" >&2
