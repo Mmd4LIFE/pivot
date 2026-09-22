@@ -77,6 +77,23 @@ readiness change before the drain begins, so no request is dropped.`,
 			log := logging.WithTrace(logging.New(cfg.Log, env.Stderr))
 			slog.SetDefault(log)
 
+			metrics, metricsHandler, shutdownMetrics, merr := observability.SetupMetrics(observability.MetricsConfig{
+				Enabled:     cfg.Observability.Metrics.Enabled,
+				ServiceName: cfg.Observability.Tracing.ServiceName,
+			}, log)
+			if merr != nil {
+				return merr
+			}
+
+			defer func() {
+				flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+
+				if ferr := shutdownMetrics(flushCtx); ferr != nil {
+					slog.Default().Warn("could not flush metrics", logging.Err(ferr))
+				}
+			}()
+
 			info := version.Get()
 			log.Info("starting pivot",
 				slog.String("version", info.Version),
@@ -152,6 +169,9 @@ readiness change before the drain begins, so no request is dropped.`,
 				api.WithOIDC(api.NewOIDCHandler(
 					repos, registry, authSvc, cookie, cfg.Server.BaseURL, log)),
 				api.WithSPA(web.Handler()),
+				// Nil handler when metrics are off, which leaves /metrics
+				// unregistered rather than serving an empty page.
+				api.ServingMetrics(metrics, metricsHandler),
 			)
 
 			if !web.Built() {

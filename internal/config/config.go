@@ -31,6 +31,18 @@ type Config struct {
 // stay unconditional.
 type ObservabilityConfig struct {
 	Tracing TracingConfig `yaml:"tracing"`
+	Metrics MetricsConfig `yaml:"metrics"`
+}
+
+// MetricsConfig controls the Prometheus endpoint.
+type MetricsConfig struct {
+	// Enabled exposes /metrics.
+	//
+	// Unlike tracing this defaults to *on*. It needs no collector to exist, it
+	// costs nothing until something scrapes it, and an operator who has to go
+	// and enable metrics before they can find out why the thing is slow has
+	// been failed already.
+	Enabled bool `yaml:"enabled"`
 }
 
 // TracingConfig configures OpenTelemetry export.
@@ -247,6 +259,7 @@ func Default() *Config {
 				SampleRatio: 1.0,
 				ServiceName: "pivot",
 			},
+			Metrics: MetricsConfig{Enabled: true},
 		},
 	}
 }

@@ -214,6 +214,13 @@ func bindings() []binding {
 			},
 		},
 		{
+			key:  EnvPrefix + "METRICS_ENABLED",
+			help: "Expose Prometheus metrics at /metrics",
+			apply: func(c *Config, v string) error {
+				return setBool(&c.Observability.Metrics.Enabled, v)
+			},
+		},
+		{
 			key:  EnvPrefix + "TRACING_ENABLED",
 			help: "Export traces over OTLP",
 			apply: func(c *Config, v string) error {

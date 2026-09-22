@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 
 	"github.com/Mmd4LIFE/pivot/internal/authz"
+	"github.com/Mmd4LIFE/pivot/internal/observability"
 )
 
 // APIPrefix is the versioned API root. The version is in the path because a
@@ -57,6 +58,17 @@ type RouterConfig struct {
 	// Limits, per endpoint class. Zero values use the defaults.
 	DefaultLimit RateLimit
 	AuthLimit    RateLimit
+
+	// Metrics is the instrument set the request middleware records into. Nil
+	// leaves the middleware off entirely rather than recording into a no-op,
+	// so a router built without it costs nothing at all.
+	Metrics *observability.Metrics
+
+	// MetricsHandler serves the Prometheus endpoint. Nil leaves /metrics
+	// unregistered, which answers 404 -- and a 404 tells an operator their
+	// scrape is pointed at a Pivot with metrics off, which is the truth. An
+	// empty 200 would not.
+	MetricsHandler http.Handler
 }
 
 // Router builds the handler tree.
@@ -145,10 +157,21 @@ func NewRouter(cfg RouterConfig) *Router {
 
 // Handler returns the fully wrapped handler.
 func (r *Router) Handler() http.Handler {
-	base := Chain(
+	chain := []Middleware{
 		// First, so everything below runs inside the span -- including the
 		// logging middleware, whose line then carries the trace.
 		WithTracing(),
+	}
+
+	// Recorded for every request that arrives, including the ones the rate
+	// limiter and the session middleware reject. A metric that only counts
+	// requests which got as far as a handler cannot show a service being
+	// hammered, which is when somebody looks at it.
+	if r.cfg.Metrics != nil {
+		chain = append(chain, WithMetrics(r.cfg.Metrics, r.mux))
+	}
+
+	chain = append(chain,
 		WithRequestID(),
 		WithLogging(r.cfg.Log),
 		WithRecovery(r.cfg.Log),
@@ -157,7 +180,7 @@ func (r *Router) Handler() http.Handler {
 		WithMaxBodySize(r.cfg.MaxBodyBytes),
 	)
 
-	return base(r.mux)
+	return Chain(chain...)(r.mux)
 }
 
 // routes registers the HTTP surface.
@@ -167,6 +190,18 @@ func (r *Router) routes() {
 	// dead precisely when it is busiest.
 	r.mux.HandleFunc("GET /healthz", r.handleLive)
 	r.mux.HandleFunc("GET /readyz", r.handleReady)
+
+	// Metrics sits beside the probes: outside the API prefix, outside rate
+	// limiting, and outside authentication.
+	//
+	// Unauthenticated is the deliberate part. Prometheus has no good way to
+	// hold a session, every scrape would otherwise cost an Argon2 verification,
+	// and the endpoint exposes request counts and latencies rather than
+	// anything about the data. It is the operator's job to keep :8080 off the
+	// public internet, which is already true of every other route here.
+	if r.cfg.MetricsHandler != nil {
+		r.mux.Handle("GET "+observability.MetricsPath, r.cfg.MetricsHandler)
+	}
 
 	// Everything under the API prefix is rate limited, session-aware and
 	// tenant scoped.
