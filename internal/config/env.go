@@ -221,6 +221,15 @@ func bindings() []binding {
 			},
 		},
 		{
+			key:  EnvPrefix + "SETUP_TOKEN",
+			help: "Setup token for the first run; generated and logged when unset",
+			apply: func(c *Config, v string) error {
+				c.Setup.Token = v
+
+				return nil
+			},
+		},
+		{
 			key:  EnvPrefix + "TRACING_ENABLED",
 			help: "Export traces over OTLP",
 			apply: func(c *Config, v string) error {

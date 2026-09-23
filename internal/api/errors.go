@@ -52,6 +52,16 @@ const (
 	CodeVersionConflict Code = "PIVOT-DATA-001"
 	CodeDuplicate       Code = "PIVOT-DATA-002"
 
+	// First run.
+	//
+	// Two codes rather than one, because the browser does different things
+	// with them: an already-claimed instance means "go to the login page",
+	// and a bad token means "you mistyped the one in the server's log". A
+	// single "setup failed" would make the UI guess.
+	CodeAlreadyInitialized Code = "PIVOT-SETUP-001"
+	// An error code, not a credential: gosec matches on the name.
+	CodeSetupTokenInvalid Code = "PIVOT-SETUP-002" //nolint:gosec // G101 false positive
+
 	// Throttling.
 	CodeRateLimited Code = "PIVOT-RATE-001"
 
@@ -84,6 +94,9 @@ var codes = map[Code]codeInfo{
 
 	CodeVersionConflict: {http.StatusConflict, "The resource was modified since it was read"},
 	CodeDuplicate:       {http.StatusConflict, "A resource with those values already exists"},
+
+	CodeAlreadyInitialized: {http.StatusConflict, "This Pivot already has an administrator"},
+	CodeSetupTokenInvalid:  {http.StatusForbidden, "The setup token is missing or incorrect"},
 
 	CodeRateLimited: {http.StatusTooManyRequests, "Too many requests"},
 

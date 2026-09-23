@@ -42,6 +42,10 @@ type Server struct {
 	// oidc serves single sign-on. Nil means no SSO surface.
 	oidc *OIDCHandler
 
+	// setup serves the first run. Nil means no setup surface, which is right
+	// for an instance provisioned from the CLI.
+	setup *SetupHandler
+
 	// spa serves the browser application. Nil serves none.
 	spa http.Handler
 
@@ -111,6 +115,14 @@ func ServingMetrics(m *observability.Metrics, handler http.Handler) Option {
 	}
 }
 
+// WithSetup serves the first run.
+//
+// Takes the handler rather than the service, because claiming an instance ends
+// in a session and the handler is what holds the way to make one.
+func WithSetup(h *SetupHandler) Option {
+	return func(s *Server) { s.setup = h }
+}
+
 func WithSPA(h http.Handler) Option {
 	return func(s *Server) { s.spa = h }
 }
@@ -137,6 +149,7 @@ func New(cfg config.ServerConfig, log *slog.Logger, opts ...Option) *Server {
 		Auth:  s.auth,
 		Roles: s.roles,
 		OIDC:  s.oidc,
+		Setup: s.setup,
 		SPA:   s.spa,
 
 		// Not an Option, because there is no deployment that wants it off and

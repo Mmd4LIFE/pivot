@@ -459,6 +459,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/setup/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Whether this Pivot has an administrator yet
+         * @description The browser asks this before deciding between the setup page and the
+         *     login page. A fresh install would otherwise show a login form that no
+         *     password can satisfy.
+         *
+         *     `initialized` is keyed on organizations rather than users: an
+         *     organization with no users is a half-finished setup that nobody can log
+         *     into, and calling it initialized would leave the instance permanently
+         *     unusable.
+         */
+        get: operations["getSetupStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create the first organization and administrator
+         * @description Claims an unclaimed Pivot: creates the organization, creates the first
+         *     user, grants them the administrator role, and **signs them in** — the
+         *     response is the same session envelope `POST /api/v1/auth/login`
+         *     returns, and the session cookie is set.
+         *
+         *     **Unauthenticated, unavoidably**: there is nobody to authenticate as.
+         *     That is the security problem of a first run, and it is answered in
+         *     three places rather than one — the endpoint refuses once an
+         *     organization exists, it requires the setup token the server printed
+         *     when it started, and the strict authentication rate limit stands
+         *     between an anonymous caller and an unbounded number of Argon2 hashes.
+         *
+         *     Setup **closes permanently** once it succeeds. There is no path back to
+         *     an unclaimed instance short of a new database.
+         */
+        post: operations["initializeInstance"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -504,6 +564,39 @@ export interface components {
              *     available, which is why both are here.
              */
             requestId?: string;
+        };
+        SetupStatus: {
+            /** @description True once this Pivot has an organization. */
+            initialized: boolean;
+            /**
+             * @description Whether the setup endpoint demands a token. Safe to publish: an
+             *     unclaimed instance says so to whoever asks either way, and a form
+             *     that hid the field would produce a rejection nobody could act on.
+             */
+            tokenRequired: boolean;
+        };
+        SetupRequest: {
+            /** @example Acme Analytics */
+            organization: string;
+            /** @example Ada Lovelace */
+            name?: string;
+            /**
+             * Format: email
+             * @example ada@example.com
+             */
+            email: string;
+            /**
+             * Format: password
+             * @description At least 12 characters. Length is the only rule: composition
+             *     requirements push people toward "Password1!" and away from length,
+             *     which is what actually matters.
+             */
+            password: string;
+            /**
+             * @description The token the server printed when it started. Required unless the
+             *     instance was configured with an empty `setup.token`.
+             */
+            token?: string;
         };
         LoginRequest: {
             /**
@@ -1444,6 +1537,79 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            429: components["responses"]["TooManyRequests"];
+        };
+    };
+    getSetupStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The instance status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetupStatus"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+        };
+    };
+    initializeInstance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetupRequest"];
+            };
+        };
+        responses: {
+            /** @description The instance was claimed; the caller is signed in */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionEnvelope"];
+                };
+            };
+            /**
+             * @description The setup token is missing or incorrect (`PIVOT-SETUP-002`). One
+             *     code for both, because the next step is the same and an
+             *     unauthenticated endpoint should not help somebody work out which
+             *     half they got right.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /**
+             * @description This Pivot already has an administrator (`PIVOT-SETUP-001`), or the
+             *     organization or email is taken (`PIVOT-DATA-002`).
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             422: components["responses"]["UnprocessableEntity"];
             429: components["responses"]["TooManyRequests"];
         };

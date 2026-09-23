@@ -43,6 +43,8 @@ tags:
     description: Instance metadata
   - name: telemetry
     description: Error reports from the browser
+  - name: setup
+    description: The first run, before this Pivot has any accounts
 
 paths:
   /api/v1/auth/login:
@@ -704,6 +706,88 @@ paths:
         "429":
           $ref: "#/components/responses/TooManyRequests"
 
+  /api/v1/setup/status:
+    get:
+      tags: [setup]
+      operationId: getSetupStatus
+      summary: Whether this Pivot has an administrator yet
+      description: |
+        The browser asks this before deciding between the setup page and the
+        login page. A fresh install would otherwise show a login form that no
+        password can satisfy.
+
+        `initialized` is keyed on organizations rather than users: an
+        organization with no users is a half-finished setup that nobody can log
+        into, and calling it initialized would leave the instance permanently
+        unusable.
+      security: []
+      responses:
+        "200":
+          description: The instance status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetupStatus"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /api/v1/setup:
+    post:
+      tags: [setup]
+      operationId: initializeInstance
+      summary: Create the first organization and administrator
+      description: |
+        Claims an unclaimed Pivot: creates the organization, creates the first
+        user, grants them the administrator role, and **signs them in** — the
+        response is the same session envelope `POST /api/v1/auth/login`
+        returns, and the session cookie is set.
+
+        **Unauthenticated, unavoidably**: there is nobody to authenticate as.
+        That is the security problem of a first run, and it is answered in
+        three places rather than one — the endpoint refuses once an
+        organization exists, it requires the setup token the server printed
+        when it started, and the strict authentication rate limit stands
+        between an anonymous caller and an unbounded number of Argon2 hashes.
+
+        Setup **closes permanently** once it succeeds. There is no path back to
+        an unclaimed instance short of a new database.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetupRequest"
+      responses:
+        "201":
+          description: The instance was claimed; the caller is signed in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionEnvelope"
+        "403":
+          description: |
+            The setup token is missing or incorrect (`PIVOT-SETUP-002`). One
+            code for both, because the next step is the same and an
+            unauthenticated endpoint should not help somebody work out which
+            half they got right.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: |
+            This Pivot already has an administrator (`PIVOT-SETUP-001`), or the
+            organization or email is taken (`PIVOT-DATA-002`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
 components:
   securitySchemes:
     sessionCookie:
@@ -764,6 +848,53 @@ components:
           description: |
             That same call's `X-Request-Id`. Unlike the trace ID this is always
             available, which is why both are here.
+
+    SetupStatus:
+      type: object
+      required: [initialized, tokenRequired]
+      properties:
+        initialized:
+          type: boolean
+          description: True once this Pivot has an organization.
+        tokenRequired:
+          type: boolean
+          description: |
+            Whether the setup endpoint demands a token. Safe to publish: an
+            unclaimed instance says so to whoever asks either way, and a form
+            that hid the field would produce a rejection nobody could act on.
+
+    SetupRequest:
+      type: object
+      required: [organization, email, password]
+      properties:
+        organization:
+          type: string
+          maxLength: 100
+          examples: [Acme Analytics]
+        name:
+          type: string
+          maxLength: 200
+          examples: [Ada Lovelace]
+        email:
+          type: string
+          format: email
+          maxLength: 320
+          examples: [ada@example.com]
+        password:
+          type: string
+          format: password
+          minLength: 12
+          maxLength: 1024
+          description: |
+            At least 12 characters. Length is the only rule: composition
+            requirements push people toward "Password1!" and away from length,
+            which is what actually matters.
+        token:
+          type: string
+          maxLength: 256
+          description: |
+            The token the server printed when it started. Required unless the
+            instance was configured with an empty `setup.token`.
 
     LoginRequest:
       type: object

@@ -53,8 +53,8 @@ At the end of every part, in this order:
 
 | | |
 |---|---|
-| **Last completed** | Part 14-d — Frontend error reporting |
-| **Next up** | **Part 15 — First-run experience & Phase 0 close-out** |
+| **Last completed** | Part 15-a — The first run |
+| **Next up** | **Part 15-b — Your own account** |
 | **Current phase** | Phase 0 — Foundations |
 | **Branch** | `main` |
 | **Blockers** | None |
@@ -84,6 +84,14 @@ from one series filtered by status class, so they cannot disagree with each othe
 are bounded by construction: the route label is the mux's *pattern*, so a scanner probing
 for `/wp-admin` cannot create a series per guess. `deploy/grafana/pivot-overview.json` is
 the reference dashboard, and a test matches every query in it against a real exposition.
+
+**A fresh binary can be set up from a browser.** `pivot serve` with no configuration
+creates `pivot.db`, migrates it, prints a setup token, and serves a `/setup` page that
+turns somebody with no account into a signed-in administrator — claiming the instance is
+the login, not a step before it. The token is what stops whoever reaches an unclaimed
+instance first from claiming it. Setup closes permanently once an organization exists,
+and the CLI (`pivot admin create-user`) remains the way to recover an instance nobody can
+log into.
 
 **A browser error reaches the server log**, carrying the trace and request ID of the API
 call that failed. The server hands those back in a `traceresponse` header rather than
@@ -471,7 +479,7 @@ needs an entry in `sqlc.yaml`'s SQLite override list**, or the packages silently
 ## Progress
 
 ```
-Phase 0  Foundations        [██████████████████████████] 26/27   (Parts 3, 4, 6, 7, 8, 10, 11, 12, 13 and 14 each split)
+Phase 0  Foundations        [█████████████████████████ ] 27/30   (Parts 3, 4, 6, 7, 8, 10, 11, 12, 13, 14 and 15 each split)
 Phase 1  Connect & Query    [                    ]  0/12   (detailed at Part 15)
 Phase 2+ ...                                            (expanded as we approach)
 ```
@@ -1374,17 +1382,123 @@ anywhere and no third-party script on the login page.
 
 ---
 
-### - [ ] Part 15 — First-run experience & Phase 0 close-out
+**Part 15 is split into four.** It carried the setup wizard, `pivot doctor`, SQLite
+backup, envelope encryption, the account page, the whole container stack *and* the Phase 0
+exit review. That is four sessions wearing one number, and the first of them — somebody
+downloading a binary and getting to a working Pivot — is the one the product is judged on.
 
-**Deliverable:** **The 30-second promise, proven on a clean machine.**
+### - [x] Part 15-a — The first run: nobody has an account yet ✅ 2026-09-23
 
-**Build:** Zero-config first run (SQLite auto-created, no config file), admin setup wizard,
-`pivot doctor` diagnostics, automatic SQLite backup, envelope encryption for secrets
-(local master key), **the account page and `POST /auth/password`** (moved here from
-Part 11-b: changing your own password needs a service method that verifies the current one
-and revokes every *other* session, which is backend work rather than shell work, and the
-API has none today — only `pivot admin reset-password`), and the **full containerized
-stack**:
+**Deliverable:** **Download, run, open a browser, become the administrator.** No CLI.
+
+**Build:** `internal/setup`, `GET /api/v1/setup/status`, `POST /api/v1/setup`, a one-time
+setup token printed at startup, and the `/setup` page the browser is sent to when the
+instance has no accounts.
+
+**Done when:**
+- [x] **A binary with no config, no database and no arguments takes somebody from nothing
+      to signed-in as an administrator**, in one form. Claiming the instance *is* the
+      login — the response is the same session envelope `/auth/login` returns, and it sets
+      the same cookie, because a password typed twice should not have to be typed a third
+      time into a login page
+- [x] **Setup closes permanently.** Keyed on organizations existing, checked against the
+      database inside the lock rather than cached at startup — an instance that decided at
+      boot that it was unclaimed would stay claimable for as long as it ran
+- [x] **The window between starting and claiming is not open to whoever reaches the port
+      first.** A token is generated per process and printed in a banner; an unclaimed
+      Pivot on a network is otherwise an instance takeover waiting for a port scan, and
+      "only for a few seconds" is not a security argument
+- [x] **Two concurrent claims produce one administrator**, and the test is
+      mutation-verified: with the lock removed, all 8 concurrent claims succeed and create
+      8 organizations
+- [x] **The first-user-becomes-admin rule now exists once**, shared by the CLI and the
+      browser. It is a rule about privilege, and a rule about privilege written twice is
+      one that is eventually only true in one of them
+- [x] **Four Playwright tests walk the whole thing** against a binary they spawn
+      themselves, with its own empty database — including parsing the token out of the
+      process's real output, which is the only instruction a first-time user gets
+
+**Found on the way:**
+- **The spec-drift test had never been able to fail.** It asserted a documented path does
+  not 404, but everything under the API prefix falls through to a catch-all that answers
+  **401** first — so a documented route that was never registered looked exactly like one
+  that was. It now asks the mux which pattern it would match, and immediately found that
+  the test fixture had never registered the single sign-on routes either
+- **`pivot serve` briefly became fatal when the schema was behind**, because the new
+  banner queried a table that did not exist yet. Caught by the test that asserts serve
+  warns rather than refuses. A banner must never stop a server from serving
+- **A too-long password had no sentinel error**, so it would have surfaced from the setup
+  form as an unexplained 500. `auth.ErrPasswordTooLong` now exists
+- **The coverage gate fired on `internal/auth` at 74.7%** — pre-existing debt, exposed
+  because touching `password.go` pulled the package into the changed set. The second time
+  the gate has caught old debt rather than new code, and it was right to: the uncovered
+  half was the lockout escalation, accounts with no password, corrupt stored hashes and
+  session revocation on a password change — every one of them silent in the happy path.
+  Now **85.9%**. (I also "simplified" an `if` in `SpendVerifyTime` that consumed both
+  return values, and put it straight back: errcheck runs with `check-blank`, so the
+  branch that looks pointless is what makes discarding the error legal. The comment now
+  says so.)
+
+**Notes:** Zero-config first run already worked — `pivot serve` with no arguments creates
+`pivot.db`, applies five migrations and listens. Verified rather than assumed. What did
+not exist was any way to create the first user except `pivot admin create-user`, and a
+product whose first step is a CLI flag has not made the 30-second promise.
+
+The mutex is per-process, which is the honest scope: a second Pivot pointed at the same
+fresh Postgres could still race it. That window is one request wide on an instance nobody
+has claimed, and closing it properly needs a database-level lock the repository layer does
+not have. Written down in the code rather than hidden.
+
+**Refs:** `P0-PKG-002`, `P0-PKG-004`
+
+---
+
+### - [ ] Part 15-b — Your own account
+
+**Deliverable:** Changing your own password, from the product.
+
+**Build:** `auth.Service.ChangePassword`, `POST /api/v1/auth/password`, and the account
+page.
+
+**Done when:**
+- Changing a password verifies the current one and **ends every other session**, leaving
+  the caller signed in on the device they changed it from
+- The account page shows the sessions Part 6 already lists, and can end them
+
+**Notes:** Moved here from Part 11-b. It needs a service method that verifies the current
+password and revokes the others, which is backend work rather than shell work, and the API
+has none today — only `pivot admin reset-password`.
+
+**Refs:** `P0-PKG-002`
+
+---
+
+### - [ ] Part 15-c — Operating it: doctor, backup, secrets
+
+**Deliverable:** The three things an operator needs that no feature asks for.
+
+**Build:** `pivot doctor` diagnostics, automatic SQLite backup, and envelope encryption for
+stored secrets with a local master key.
+
+**Done when:**
+- `pivot doctor` correctly diagnoses a **broken** install, not just a working one
+- A SQLite instance takes a consistent backup while serving, and the restore path is
+  documented and walked
+- `identity_providers.client_secret` is encrypted at rest, and the key rotation story is
+  written down before it is needed
+
+**Notes:** The plaintext `client_secret` has been on the watch list since Part 7. This is
+the part that owes it.
+
+**Refs:** `P0-PKG-005`, `P0-PKG-007`
+
+---
+
+### - [ ] Part 15-d — The container stack, and Phase 0 close-out
+
+**Deliverable:** The other install path, and the honest review of everything before it.
+
+**Build:** The full containerized stack:
 - `deploy/docker-compose.yml` — Pivot + Postgres + Valkey + MinIO, production-shaped
 - Uses the published image from Part 13, with a pinned tag
 - Health checks and `depends_on: service_healthy` so startup ordering is correct
@@ -1392,11 +1506,10 @@ stack**:
 - Volumes for data persistence; a documented backup/restore path
 
 **Done when:**
-- On a **clean machine**: download → run → browser → admin created → logged in, **in under
-  30 seconds, timed**
-- `pivot doctor` correctly diagnoses a broken install
 - `docker compose up` brings up the full stack and serves a working Pivot
 - **Both install paths verified:** the single binary *and* the container
+- On a **clean machine**: download → run → browser → admin created → logged in, **in under
+  30 seconds, timed**
 - **Phase 0 exit criteria all verified** — walk
   [the list](docs/roadmap/phase-0-foundations.md#exit-criteria) and confirm each one
 - Expand Phase 1 parts (16–27) in this checklist with the same detail as Phase 0
@@ -1451,6 +1564,7 @@ Newest first. Record what **actually** shipped, including what didn't work.
 
 | Date | Part | Shipped | Notes |
 |---|---|---|---|
+| 2026-09-23 | 15-a | `internal/setup`, `POST /api/v1/setup` and its status endpoint, the setup token and its startup banner, the `/setup` page, and a shared first-user rule | **A binary with no configuration, no database and no arguments now takes somebody from nothing to signed-in administrator in one form.** Claiming the instance *is* the login: the response is the same session envelope `/auth/login` returns and sets the same cookie, because a password typed twice should not then be typed into a login page. **The window between starting and being claimed is the security problem of a first run**, and it is answered with a token generated per process and printed in a banner — an unclaimed Pivot on a network is otherwise an instance takeover waiting for a port scan, and "only for a few seconds" is not an argument. **Setup closes permanently**, checked against the database inside a lock rather than cached at startup, because an instance that decided at boot that it was unclaimed would stay claimable for as long as it ran. **Two concurrent claims produce one administrator, mutation-verified**: with the mutex removed, all 8 concurrent claims succeed and create 8 organizations. **The first-user-becomes-admin rule now exists once**, shared by the CLI and the browser — it is a rule about privilege, and one written twice is eventually only true in one of them. **Three things were found on the way.** The spec-drift test *had never been able to fail*: everything under the API prefix falls through to a catch-all that answers 401 before the 404 handler, so a documented route that was never registered looked exactly like one that was — it now asks the mux which pattern it would match, and immediately found that the fixture had never registered the SSO routes either. `pivot serve` briefly became **fatal when the schema was behind**, because the banner queried a table that did not exist yet; caught by the test that asserts serve warns rather than refuses. And a too-long password had no sentinel error, so it would have surfaced from the setup form as an unexplained 500. **Four Playwright tests spawn their own binary against their own empty database**, including parsing the token out of its real output — the only instruction a first-time user is given. **Then CI's coverage gate refused the pull request**: touching `password.go` pulled `internal/auth` into the changed set at 74.7%, pre-existing debt the gate had never had reason to look at. It was right to. The untested half was the lockout escalation, accounts with no password at all, corrupt stored hashes and session revocation on a password change — every one silent until the day it matters. 85.9% now, and the doubling-and-cap test is mutation-verified. |
 | 2026-09-23 | 14-d | `internal/api/telemetry.go`, `web/src/lib/report.ts`, the `traceresponse` response header, `LimitTelemetry`, and the boundary and window listeners wired to them | **An error in a browser now lands in the same log as the request that caused it, carrying that request's identifiers.** The mechanism is the part worth keeping: the server returns its trace in a `traceresponse` header and the client reads it off the failed response, because a browser that *generates* a trace ID also generates the sampling decision and names a trace the store has never heard of. The request ID goes with it, since a trace ID only exists when tracing is on — which by default it is not — and a request ID is on every response Pivot has ever sent. **Exact or absent, never guessed**: the identifiers are attached only when the reported error *is* the failed request, because the tempting version — remember the last failure, staple it to whatever comes next — points an operator at an unrelated trace, which costs more time than having none. **Unauthenticated by necessity**, since the errors most worth having happen on the page where logging in was supposed to work, so it is defended by shape instead: a strict limiter with a burst of 10 (one broken render fires three events and a limit that hid two of them would hide the explanation), a 16 KiB cap rather than the API's 1 MiB, and a handler that writes one log line and nothing else. **Every field is treated as hostile** — control characters stripped so nothing can forge a log line or paint somebody's terminal, fields truncated rather than rejected, and the browser's trace logged as `browser_trace_id` so a report cannot overwrite the trace of the request carrying it. **Unknown fields are ignored here and rejected everywhere else**, because the client is a cached bundle in somebody's browser and losing its report over an unrecognised field would lose it exactly when a deploy has gone wrong. **Three layers, because each can only see its own**: jsdom for the reporter's restraint, Go for the endpoint's, and three Playwright tests throwing from a page served by the real binary — which is the only place that can prove the listeners are installed at all and that the request survives the application's own CSP. **Deliberately not Sentry's SDK: 0.6 KB gzipped against roughly 30, and the budget went 185.1 → 185.7 KB of 200.** What that gives up is real — no source maps, no grouping, no offline queue — and what it buys is that an air-gapped Pivot reports its own errors with no third-party script on the login page. |
 | 2026-09-22 | 14-c | `internal/observability/metrics.go`, `internal/api/metrics.go`, the `observability.metrics` config section, the `/metrics` route, `deploy/grafana/pivot-overview.json`, and three test files | **Three instruments, and errors are a label rather than a counter** — rate and error rate are one series filtered by status class, so the two numbers on the dashboard cannot drift apart. **Cardinality is bounded by construction, not by care**: the route label is the mux's *pattern*, so `/auth/sessions/{id}` is one series rather than one per session, and a scanner probing for `/wp-admin` collapses into the catch-all — asserted in a test named for the scanner. My first attempt read `r.Pattern` before the mux had dispatched, so **every request was labelled `unmatched`** and the whole dashboard would have been one flat line; asking `mux.Handler(r)` is what actually resolves it. **The dashboard has a test**, which sounds absurd until you ask how a reference dashboard rots: a metric gets renamed and four panels go quietly empty, so the test matches every query's metric and label against a real exposition. **Metrics default to on**, unlike tracing — an operator who must first enable metrics before they can find out why the thing is slow has already been failed — and `/metrics` is unauthenticated because Prometheus cannot hold a session and every scrape would otherwise cost an Argon2 verification. **The race detector found my own global**: `SetupMetrics` wrote package-level state that tests read concurrently, the fourth defect global mutable state has caused in Part 14 alone, so I deleted the global and returned the handler instead of protecting it with a mutex. **The cost is +18 modules and +2 MB.** Frontend error reporting moved to **14-d**: it is a backend endpoint plus a browser reporter, and bolting it onto a metrics session would have got both done badly. |
 | 2026-09-22 | 14-b | `internal/observability`, the `observability.tracing` config section, `logging.WithTrace`, `api.WithTracing`, a span on the authorization resolver, and a generated tracing decorator over all 63 `Querier` methods | **A trace spans HTTP → authz → database, asserted rather than demonstrated.** An in-memory exporter in a unit test checks the part that actually breaks — three spans sharing one trace ID, correctly nested — because a collector would only confirm the wire format, which is OpenTelemetry's problem and not ours. **A test found real fragility in my own design**: extraction of an incoming trace read OpenTelemetry's *global* propagator, which is a no-op until something sets it, so any process that had not called `Setup` would silently drop every incoming trace — the request still served, still traced, and belonging to the wrong story. `observability.Propagator()` is explicit now. **Log correlation's silent failure is forwarding**: a `traceHandler` that does not override `WithAttrs` and `WithGroup` returns the embedded handler unwrapped, so every derived logger — which is almost all of them — keeps logging perfectly and stops being connected to anything. Mutation-verified. **I put the tracing validation inside `if len(errs) > 0`**, which made it dead code in the only case that matters; the test caught it. **The repository layer is deliberately not instrumented**: its span would carry nothing the database span does not. The 63 decorator methods are generated, because that many identical wrappers is what somebody types wrong once and nobody notices. **The cost is +56 modules and +7 MB**, measured and written into ADR-0001 — including that choosing OTLP over HTTP to dodge the gRPC tree **did not dodge it**, since `proto/otlp` depends on gRPC either way. **Then CI refused the pull request** — the coverage gate fired on `internal/observability` at 37.5%, the first time it has caught new code rather than old debt, and it was right: I wrote the package and no tests for it. Writing them found **a bug that would have broken tracing for everyone who turned it on**: `resource.Merge` fails outright on conflicting schema URLs, and pinning semconv v1.26.0 against an SDK defaulting to v1.43.0 meant `Setup` returned an error and the server refused to start. Nothing else would have caught it, because the entire path is skipped when tracing is off. `resource.NewSchemaless` has no version to disagree about. **And I wrote a flaky test about global state while fixing a bug about global state**: the Setup tests ran `t.Parallel()` and raced over the global tracer provider, so the no-op provider intermittently decided whether another test's span was sampled. |

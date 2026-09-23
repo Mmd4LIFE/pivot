@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os/signal"
 	"syscall"
@@ -12,9 +13,11 @@ import (
 	"github.com/Mmd4LIFE/pivot/internal/api"
 	"github.com/Mmd4LIFE/pivot/internal/auth"
 	"github.com/Mmd4LIFE/pivot/internal/authz"
+	"github.com/Mmd4LIFE/pivot/internal/config"
 	"github.com/Mmd4LIFE/pivot/internal/logging"
 	"github.com/Mmd4LIFE/pivot/internal/observability"
 	"github.com/Mmd4LIFE/pivot/internal/oidc"
+	"github.com/Mmd4LIFE/pivot/internal/setup"
 	"github.com/Mmd4LIFE/pivot/internal/store"
 	"github.com/Mmd4LIFE/pivot/internal/store/repo"
 	"github.com/Mmd4LIFE/pivot/internal/version"
@@ -159,12 +162,34 @@ readiness change before the drain begins, so no request is dropped.`,
 			// one.
 			registry := oidc.NewRegistry()
 
+			// The first run.
+			//
+			// A token is generated per process when none is configured, and
+			// printed below. Without one, whoever reaches an unclaimed Pivot
+			// first becomes its administrator -- which on a laptop is nobody
+			// and on a network is whoever is scanning it.
+			setupToken := cfg.Setup.Token
+			if setupToken == "" {
+				generated, terr := setup.NewToken()
+				if terr != nil {
+					return terr
+				}
+
+				setupToken = generated
+			}
+
+			setupSvc := setup.NewService(repos, setupToken)
+			authHandler := api.NewAuthHandler(authSvc, repos, cookie, log)
+
+			announceSetup(ctx, env, log, setupSvc, setupToken, cfg)
+
 			srv := api.New(cfg.Server, log,
 				api.WithCheck(api.Check{
 					Name: "database",
 					Func: db.HealthCheck,
 				}),
-				api.WithAuth(api.NewAuthHandler(authSvc, repos, cookie, log)),
+				api.WithAuth(authHandler),
+				api.WithSetup(api.NewSetupHandler(setupSvc, authHandler, log)),
 				api.WithRoles(api.NewRoleHandler(repos, checker, cache, log)),
 				api.WithOIDC(api.NewOIDCHandler(
 					repos, registry, authSvc, cookie, cfg.Server.BaseURL, log)),
@@ -183,6 +208,57 @@ readiness change before the drain begins, so no request is dropped.`,
 			return srv.Run(ctx)
 		},
 	}
+}
+
+// announceSetup tells an operator how to claim an unclaimed instance.
+//
+// On stdout rather than only in the log, and deliberately: this is the one
+// message somebody has to read and act on, and a JSON log line among fifty
+// others is not how a person finds a token they need to paste. A claimed
+// instance prints nothing at all -- a banner that appears on every restart
+// forever is a banner nobody reads.
+func announceSetup(
+	ctx context.Context, env Env, log *slog.Logger,
+	svc *setup.Service, token string, cfg *config.Config,
+) {
+	status, err := svc.Status(ctx)
+	if err != nil {
+		// Never fatal. This is a banner, and an instance that refuses to serve
+		// because it could not decide whether to print one is worse than one
+		// that prints nothing -- most obviously when the schema is behind,
+		// which `pivot serve` deliberately warns about rather than refusing.
+		// That regression is what this comment is here to stop happening
+		// again: it was caught by the test that asserts serve keeps running.
+		log.Warn("could not tell whether this Pivot has been set up", logging.Err(err))
+
+		return
+	}
+
+	if status.Initialized {
+		return
+	}
+
+	url := cfg.Server.BaseURL
+	if url == "" {
+		url = fmt.Sprintf("http://localhost:%d", cfg.Server.Port)
+	}
+
+	fmt.Fprintf(env.Stdout, `
+  This Pivot has no administrator yet.
+
+    Open:  %s/setup
+    Token: %s
+
+  The token is what stops somebody else claiming this instance first. It is
+  generated per start and stops working the moment setup completes. Set
+  PIVOT_SETUP_TOKEN to pin your own.
+
+`, url, token)
+
+	// Also in the log, without the token. An operator scrolling back later
+	// should be able to see that the instance was unclaimed at this start
+	// without the secret being in a file that outlives the process.
+	log.Info("waiting to be set up", slog.String("setup_url", url+"/setup"))
 }
 
 func sourceOrNone(path string) string {

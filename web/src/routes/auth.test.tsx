@@ -102,13 +102,23 @@ function mountAt(path: string) {
   return { router, queryClient };
 }
 
+/** An instance that has been set up. Every test here assumes one. */
+function initialized() {
+  replies["GET /api/v1/setup/status"] = {
+    status: 200,
+    body: { initialized: true, tokenRequired: false },
+  };
+}
+
 /** The signed-out case, which is most of these tests. */
 function signedOut() {
+  initialized();
   replies["GET /api/v1/auth/me"] = { status: 401, body: { error: { code: "PIVOT-AUTH-001" } } };
   replies["GET /api/v1/auth/providers"] = { status: 200, body: { providers: [] } };
 }
 
 function signedIn() {
+  initialized();
   replies["GET /api/v1/auth/me"] = { status: 200, body: SESSION };
   replies["GET /api/v1/auth/providers"] = { status: 200, body: { providers: [] } };
 }

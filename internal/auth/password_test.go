@@ -136,6 +136,12 @@ func TestVerifyRejectsMalformedHashes(t *testing.T) {
 		"missing parts":  "$argon2id$v=19$m=65536,t=3,p=4",
 		"bad base64":     "$argon2id$v=19$m=65536,t=3,p=4$!!!!$!!!!",
 		"bad parameters": "$argon2id$v=19$nonsense$c2FsdA$aGFzaA",
+
+		// A valid salt and a corrupt key. The salt is decoded first, so
+		// without this case the key's own decode never runs -- and a hash
+		// whose key cannot be read must be refused rather than compared
+		// against whatever the decoder returned on the way to failing.
+		"bad key": "$argon2id$v=19$m=65536,t=3,p=4$c2FsdA$!!!!",
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -144,6 +150,28 @@ func TestVerifyRejectsMalformedHashes(t *testing.T) {
 				t.Errorf("a malformed hash %q was accepted", hash)
 			}
 		})
+	}
+}
+
+/*
+A hash from a different Argon2 version is refused, and distinctly.
+
+Not ErrInvalidHash: the hash is perfectly well-formed, it was simply produced
+by something this build cannot reproduce. The distinction is what lets an
+operator tell "somebody's stored hash is corrupt" from "these hashes came from
+a different Argon2 and every login against them will fail", which are the same
+symptom and completely different problems.
+*/
+func TestAHashFromAnotherArgonVersionIsRefusedDistinctly(t *testing.T) {
+	t.Parallel()
+
+	// v=16 is Argon2 0x10; this build is 0x13.
+	const older = "$argon2id$v=16$m=65536,t=3,p=4$c2FsdHNhbHRzYWx0c2FsdA$aGFzaGhhc2hoYXNoaGFzaA"
+
+	_, err := auth.VerifyPassword(goodPassword, older)
+
+	if !errors.Is(err, auth.ErrIncompatibleVersion) {
+		t.Fatalf("error = %v, want ErrIncompatibleVersion", err)
 	}
 }
 

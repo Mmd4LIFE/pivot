@@ -39,6 +39,11 @@ type RouterConfig struct {
 	// registers no SSO surface.
 	OIDC *OIDCHandler
 
+	// Setup serves the first run: whether this Pivot has been claimed, and the
+	// endpoint that claims it. Nil registers neither, which is what an
+	// instance provisioned entirely from the CLI wants.
+	Setup *SetupHandler
+
 	// Telemetry receives error reports from the browser. Nil registers no
 	// reporting endpoint, so the frontend's reports get a coded 404 and it
 	// stops trying -- which is what an API-only deployment wants.
@@ -223,6 +228,7 @@ func (r *Router) routes() {
 		r.withTenant(),
 	)
 
+	r.setupRoutes()
 	r.authRoutes(authed)
 	r.roleRoutes(authed)
 	r.oidcRoutes(authed)
@@ -360,6 +366,33 @@ func (r *Router) oidcRoutes(authed Middleware) {
 		manage(http.HandlerFunc(h.handleAdminUpdate)))
 	r.mux.Handle("DELETE "+APIPrefix+"/organization/identity-providers/{id}",
 		manage(http.HandlerFunc(h.handleAdminDelete)))
+}
+
+// setupRoutes registers the first run.
+//
+// Unauthenticated, and unavoidably so: there is nobody to authenticate as.
+// That is the whole security problem of a first run, and it is handled in
+// three places rather than one -- the endpoint refuses once an organization
+// exists, the service requires the token printed in the startup banner, and
+// the strict auth limiter is what stands between an anonymous caller and an
+// unbounded number of Argon2 hashes.
+//
+// Outside the tenant chain, like login, because claiming an instance is what
+// creates the organization a scope would be resolved from.
+func (r *Router) setupRoutes() {
+	h := r.cfg.Setup
+	if h == nil {
+		return
+	}
+
+	// The status endpoint gets the ordinary limiter: the browser asks it on
+	// every cold load, including after setup is long finished, and it reads
+	// one count.
+	r.mux.Handle("GET "+APIPrefix+"/setup/status",
+		Chain(WithRateLimit(r.defaultLimiter, KeyByIP))(http.HandlerFunc(h.handleStatus)))
+
+	r.mux.Handle("POST "+APIPrefix+"/setup",
+		Chain(WithRateLimit(r.authLimiter, KeyByIPAndPath))(http.HandlerFunc(h.handleInitialize)))
 }
 
 // telemetryRoutes registers the browser error endpoint.

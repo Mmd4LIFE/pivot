@@ -20,6 +20,7 @@ import (
 	"github.com/Mmd4LIFE/pivot/internal/authz"
 	"github.com/Mmd4LIFE/pivot/internal/config"
 	"github.com/Mmd4LIFE/pivot/internal/oidc"
+	"github.com/Mmd4LIFE/pivot/internal/setup"
 	"github.com/Mmd4LIFE/pivot/internal/store"
 	"github.com/Mmd4LIFE/pivot/internal/store/model"
 	"github.com/Mmd4LIFE/pivot/internal/store/repo"
@@ -45,11 +46,17 @@ const (
 type authFixture struct {
 	server  *httptest.Server
 	handler http.Handler
-	client  *http.Client
-	repos   *repo.Repositories
-	org     model.Organization
-	user    model.User
-	ctx     context.Context
+
+	// mux is the routing table itself, which the spec-drift test asks
+	// directly. Going through the handler cannot answer "is this route
+	// registered": everything under the API prefix hits a catch-all that
+	// answers 401 first.
+	mux    *http.ServeMux
+	client *http.Client
+	repos  *repo.Repositories
+	org    model.Organization
+	user   model.User
+	ctx    context.Context
 
 	// svc and cfg are kept so a test can re-serve the fixture with more wired
 	// up — see rebuildWithOIDC.
@@ -57,16 +64,17 @@ type authFixture struct {
 	cfg api.RouterConfig
 }
 
-// fullRouter builds the complete HTTP surface — authentication included —
-// over a throwaway SQLite database.
+// fullMux is the complete routing table — authentication, SSO, setup and
+// telemetry included — over a throwaway SQLite database.
 //
-// The spec-drift test needs it. A router built without an auth handler never
-// registers the auth paths, so every documented one would fall through to the
-// catch-all and 404, and the test would be checking a surface nobody serves.
-func fullRouter(t *testing.T) http.Handler {
+// The spec-drift test needs it, and needs the table rather than the handler: a
+// documented path that was never registered is answered by the catch-all with
+// a 401, which is indistinguishable from a route that exists. Asking the mux
+// which pattern it would match is the only question with a useful answer.
+func fullMux(t *testing.T) *http.ServeMux {
 	t.Helper()
 
-	return newAuthFixture(t, openSQLite(t)).handler
+	return newAuthFixture(t, openSQLite(t)).mux
 }
 
 func testDBConfig(url string) config.DatabaseConfig {
@@ -206,6 +214,25 @@ func newAuthFixture(t *testing.T, db *store.DB, opts ...func(*api.RouterConfig))
 		Auth:    authHandler,
 		Roles:   api.NewRoleHandler(repos, checker, cache, discardLogger()),
 		Checker: checker,
+
+		// Every handler the production server registers, so that the spec
+		// drift test is testing what it claims to.
+		//
+		// It compares a documented path against the router and fails on a 404.
+		// With these nil, an undocumented-but-registered route and a
+		// documented-but-missing one both answer 401 from the catch-all -- the
+		// test passes, and the one thing it exists to catch walks straight
+		// past it. Found while adding the setup endpoints, which is to say:
+		// found by adding a route the test could not see.
+		Setup: api.NewSetupHandler(
+			setup.NewService(repos, ""), authHandler, discardLogger()),
+		Telemetry: api.NewTelemetryHandler(discardLogger()),
+
+		// Single sign-on too. The SSO tests replace this with a handler
+		// pointed at their fake provider; what matters here is that the routes
+		// exist, so the drift test can see them.
+		OIDC: api.NewOIDCHandler(
+			repos, oidc.NewRegistry(), svc, api.DefaultCookie(), "", discardLogger()),
 	}
 
 	// Options run last so a test can substitute a broken checker without the
@@ -214,7 +241,8 @@ func newAuthFixture(t *testing.T, db *store.DB, opts ...func(*api.RouterConfig))
 		opt(&cfg)
 	}
 
-	handler := api.NewRouter(cfg).Handler()
+	router := api.NewRouter(cfg)
+	handler := router.Handler()
 
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
@@ -227,6 +255,7 @@ func newAuthFixture(t *testing.T, db *store.DB, opts ...func(*api.RouterConfig))
 	return &authFixture{
 		server:  srv,
 		handler: handler,
+		mux:     router.Mux(),
 		client:  newTestClient(jar),
 		repos:   repos,
 		org:     org,

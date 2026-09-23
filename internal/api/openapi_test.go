@@ -1,6 +1,9 @@
 package api_test
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -54,6 +57,14 @@ func TestOpenAPISpecParses(t *testing.T) {
 
 // Every documented endpoint must actually exist. A spec describing a route
 // that 404s is worse than no spec: a client trusts it.
+//
+// This asks the routing table rather than sending a request, and the
+// difference is the whole test. Sending one cannot answer the question:
+// everything under the API prefix falls through to a catch-all that answers
+// 401 before it ever reaches the 404 handler, so a documented path that was
+// never registered looked exactly like one that was. This test passed for
+// every path in the spec, including a deliberately misspelled one, until it
+// was rewritten to ask the mux which pattern it would match.
 func TestOpenAPIPathsExist(t *testing.T) {
 	t.Parallel()
 
@@ -68,7 +79,7 @@ func TestOpenAPIPathsExist(t *testing.T) {
 		t.Fatal("the spec documents no paths")
 	}
 
-	handler := fullRouter(t)
+	mux := fullMux(t)
 
 	for path, item := range paths {
 		methods, ok := item.(map[string]any)
@@ -84,11 +95,19 @@ func TestOpenAPIPathsExist(t *testing.T) {
 			}
 
 			t.Run(strings.ToUpper(method)+" "+path, func(t *testing.T) {
-				rec := do(t, handler, strings.ToUpper(method), path, nil)
+				want := strings.ToUpper(method) + " " + path
 
-				if rec.Code == 404 {
-					t.Errorf("the spec documents %s %s but the router returns 404",
-						strings.ToUpper(method), path)
+				req := httptest.NewRequestWithContext(
+					context.Background(), strings.ToUpper(method), path, http.NoBody)
+
+				// A literal "{id}" in the path matches the wildcard segment in
+				// the registered pattern, so a parameterized route resolves to
+				// its own pattern rather than to the catch-all.
+				_, pattern := mux.Handler(req)
+
+				if pattern != want {
+					t.Errorf("the spec documents %s, but the router matches it with %q",
+						want, pattern)
 				}
 			})
 		}

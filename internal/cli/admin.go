@@ -15,6 +15,7 @@ import (
 	"github.com/Mmd4LIFE/pivot/internal/authz"
 	"github.com/Mmd4LIFE/pivot/internal/config"
 	"github.com/Mmd4LIFE/pivot/internal/logging"
+	"github.com/Mmd4LIFE/pivot/internal/setup"
 	"github.com/Mmd4LIFE/pivot/internal/store"
 	"github.com/Mmd4LIFE/pivot/internal/store/repo"
 	"github.com/Mmd4LIFE/pivot/internal/tenant"
@@ -230,18 +231,14 @@ environment variable is readable by anything that can inspect the process.`,
 
 			ctx := tenant.WithScope(cmd.Context(), scope)
 
-			// Whether this is the first user has to be decided before creating
-			// them, or the answer is always "no".
-			existing, err := repos.Users.Count(ctx)
-			if err != nil {
-				return err
-			}
-
-			user, err := repos.Users.Create(ctx, repo.CreateUser{
+			// Shared with the browser's setup wizard, deliberately. "The first
+			// user becomes the administrator" is a rule about privilege, and a
+			// rule about privilege that exists in two implementations is a rule
+			// that is eventually only true in one of them.
+			user, granted, err := setup.CreateUser(ctx, repos, orgID, setup.CreateUserRequest{
 				Email:        email,
 				Name:         name,
 				PasswordHash: hash,
-				IsActive:     true,
 			})
 			if err != nil {
 				if errors.Is(err, repo.ErrDuplicate) {
@@ -254,23 +251,7 @@ environment variable is readable by anything that can inspect the process.`,
 			fmt.Fprintf(env.Stdout, "Created user %s (%s) in organization %s.\n",
 				user.Email, user.ID, slug)
 
-			// The first user in an organization becomes its administrator.
-			//
-			// Without this a fresh install has nobody who can grant a role, so
-			// nobody can ever be granted one — the instance is complete and
-			// unusable. Granting it only to the first user keeps it from being
-			// a standing privilege escalation: the second user gets nothing.
-			if existing == 0 {
-				if gerr := repos.Roles.Grant(ctx, repo.GrantRole{
-					SubjectType: "user",
-					SubjectID:   user.ID,
-					Relation:    string(authz.RelationAdmin),
-					ObjectType:  string(authz.TypeOrganization),
-					ObjectID:    orgID,
-				}); gerr != nil {
-					return fmt.Errorf("grant admin to the first user: %w", gerr)
-				}
-
+			if granted {
 				fmt.Fprintf(env.Stdout,
 					"Granted the admin role: %s is the first user in %s.\n", user.Email, slug)
 			}
@@ -376,33 +357,11 @@ func loadedLogConfig(cmd *cobra.Command, env Env, flags *globalFlags) config.Log
 }
 
 // slugify turns a name into a URL-safe slug.
-func slugify(in string) string {
-	out := make([]rune, 0, len(in))
-	lastDash := true
-
-	for _, r := range strings.ToLower(in) {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			out = append(out, r)
-			lastDash = false
-		default:
-			if !lastDash {
-				out = append(out, '-')
-				lastDash = true
-			}
-		}
-	}
-
-	if n := len(out); n > 0 && out[n-1] == '-' {
-		out = out[:n-1]
-	}
-
-	if len(out) == 0 {
-		return "org"
-	}
-
-	return string(out)
-}
+// slugify is [setup.Slugify], kept as a local name because this file reads
+// better for it. One implementation, shared with the setup wizard, so a CLI
+// organization and a browser organization cannot end up with different slugs
+// for the same name.
+func slugify(in string) string { return setup.Slugify(in) }
 
 // resolveRoleTarget finds the user a role command names.
 func resolveRoleTarget(

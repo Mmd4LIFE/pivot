@@ -77,6 +77,53 @@ export const en = {
     expired: "Your session ended. Sign in again to carry on where you left off.",
   },
 
+  /*
+   * The first run.
+   *
+   * Written for somebody who has downloaded a binary and has no idea what
+   * Pivot calls things yet, which is why the words here are plainer than the
+   * rest of the product's. "Organization" is explained rather than assumed.
+   */
+  setup: {
+    heading: "Set up Pivot",
+    subheading: "Create the first account. It becomes the administrator.",
+
+    organization: "Organization name",
+    organizationHelp: "Your company or team. You can change it later.",
+
+    name: "Your name",
+    email: "Email address",
+    password: "Password",
+    passwordHelp: "At least 12 characters. Length matters more than symbols.",
+
+    token: "Setup token",
+    tokenHelp: "Printed by the server when it started, under \u201cToken:\u201d.",
+
+    submit: "Create administrator",
+    submitting: "Creating",
+
+    // Shown when somebody lands on /setup and there is nothing to set up.
+    alreadyDone: "This Pivot is already set up.",
+    goToSignIn: "Go to sign in",
+
+    errors: {
+      alreadyInitialized:
+        "This Pivot already has an administrator. Sign in instead.",
+
+      // Deliberately one message for a missing token and a wrong one: the
+      // next step is the same, and an unauthenticated endpoint should not
+      // help somebody work out which half they got right.
+      badToken:
+        "That setup token is not right. Copy it from the output of the server you just started.",
+
+      passwordTooShort: "Use a longer password \u2014 at least 12 characters.",
+
+      duplicate: "That organization or email address is already taken.",
+
+      unexpected: "Something went wrong while setting up Pivot.",
+    },
+  },
+
   nav: {
     // The landmark labels. A screen reader user navigates by these, so they
     // are names rather than descriptions.
