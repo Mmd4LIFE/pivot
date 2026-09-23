@@ -23,12 +23,17 @@ and grepped thereafter.
 - **[architecture/adr/](architecture/adr/)** — Architecture Decision Records. The
   irreversible calls, dated and justified.
 
-### 3. Standing records
+### 3. Running it
+- **[operations/backup-and-restore.md](operations/backup-and-restore.md)** — taking a
+  backup that can actually be restored, and restoring it. Written for whoever runs the
+  instance rather than for whoever built it.
+
+### 4. Standing records
 - **[design/keyboard-audit.md](design/keyboard-audit.md)** — how `web/src/ui` behaves
   without a mouse: what four layers of test prove, and the ten things only a person with
   a keyboard and a screen reader can check.
 
-### 4. What gets built, when
+### 5. What gets built, when
 - **[roadmap/README.md](roadmap/README.md)** — the phase map and timeline.
 - **[roadmap/00-principles.md](roadmap/00-principles.md)** — engineering standards,
   definition of done, quality gates.
