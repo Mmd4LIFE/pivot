@@ -69,7 +69,19 @@ declare global {
   }
 }
 
-const PAGES = ["/", "/dashboards", "/questions", "/connections", "/people", "/settings"];
+const PAGES = [
+  "/",
+  "/dashboards",
+  "/questions",
+  "/connections",
+  "/people",
+  "/settings",
+
+  // The account page is the first one here with real controls on it -- a form,
+  // a table and a button per row -- so it is the first that could fail for a
+  // reason other than a token's contrast.
+  "/account",
+];
 
 for (const path of PAGES) {
   test(`${path} has no accessibility violations`, async ({ page }) => {

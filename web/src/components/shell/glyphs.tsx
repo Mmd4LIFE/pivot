@@ -76,6 +76,17 @@ export function People(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+// One person, for the account menu's own entry. People (above) is two, because
+// that page is about everybody else.
+export function Person(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <circle cx="10" cy="6.5" r="3.25" />
+      <path d="M3.5 17.5a6.5 6.5 0 0 1 13 0" />
+    </Icon>
+  );
+}
+
 export function Settings(props: SVGProps<SVGSVGElement>) {
   return (
     <Icon {...props}>

@@ -77,6 +77,7 @@ type Querier interface {
 	RevokeSession(context.Context, model.RevokeSessionParams) (int64, error)
 	RevokeSessionForUser(context.Context, model.RevokeSessionForUserParams) (int64, error)
 	RevokeUserSessions(context.Context, model.RevokeUserSessionsParams) (int64, error)
+	RevokeOtherUserSessions(context.Context, model.RevokeOtherUserSessionsParams) (int64, error)
 	ListUserSessions(context.Context, model.ListUserSessionsParams) ([]model.Session, error)
 	DeleteExpiredSessions(context.Context, model.DeleteExpiredSessionsParams) (int64, error)
 

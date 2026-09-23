@@ -113,18 +113,6 @@ func NewNullString(s string) NullString {
 	return NullString{String: s, Valid: true}
 }
 
-// StringOr returns the string, or fallback when null.
-//
-// A function rather than a method because Go does not allow methods on an
-// alias to a type from another package.
-func StringOr(n NullString, fallback string) string {
-	if !n.Valid {
-		return fallback
-	}
-
-	return n.String
-}
-
 // AttributeSource values allowed by the user_attributes CHECK constraint.
 const (
 	SourceManual = "manual"

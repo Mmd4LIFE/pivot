@@ -40,6 +40,15 @@ UPDATE sessions
 SET revoked_at = $1
 WHERE user_id = $2 AND org_id = $3 AND revoked_at IS NULL;
 
+-- Revoking every session *except* one is what changing your own password
+-- needs. Signing somebody out of the device they are changing their password
+-- on makes the safe action feel like a punishment, and the session being kept
+-- is the one whose owner just proved they know the current password.
+-- name: RevokeOtherUserSessions :execrows
+UPDATE sessions
+SET revoked_at = $1
+WHERE user_id = $2 AND org_id = $3 AND id <> $4 AND revoked_at IS NULL;
+
 -- name: ListUserSessions :many
 SELECT * FROM sessions
 WHERE user_id = $1 AND org_id = $2 AND revoked_at IS NULL

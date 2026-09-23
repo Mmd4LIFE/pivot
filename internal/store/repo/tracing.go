@@ -307,6 +307,13 @@ func (t *tracingQuerier) RevokeUserSessions(ctx context.Context, a1 model.Revoke
 	return t.next.RevokeUserSessions(ctx, a1)
 }
 
+func (t *tracingQuerier) RevokeOtherUserSessions(ctx context.Context, a1 model.RevokeOtherUserSessionsParams) (int64, error) {
+	ctx, span := observability.Start(ctx, "db.RevokeOtherUserSessions")
+	defer span.End()
+
+	return t.next.RevokeOtherUserSessions(ctx, a1)
+}
+
 func (t *tracingQuerier) ListUserSessions(ctx context.Context, a1 model.ListUserSessionsParams) ([]model.Session, error) {
 	ctx, span := observability.Start(ctx, "db.ListUserSessions")
 	defer span.End()

@@ -556,6 +556,96 @@ func (h *AuthHandler) handleListSessions(w http.ResponseWriter, r *http.Request)
 	WriteJSON(r.Context(), w, http.StatusOK, sessionListResponse{Sessions: out})
 }
 
+// --- POST /auth/password ---------------------------------------------------
+
+// changePasswordRequest is a password change by its owner.
+type changePasswordRequest struct {
+	CurrentPassword string `json:"currentPassword"`
+	NewPassword     string `json:"newPassword"`
+}
+
+// Validate checks that both fields are present and that the new password is
+// not the old one.
+//
+// The length floor is not checked here. It belongs to [auth.HashPassword],
+// which is the only place that enforces it for every caller -- a second copy
+// in this struct is a second thing to keep in step.
+func (b changePasswordRequest) Validate() []Detail {
+	var details []Detail
+
+	if b.CurrentPassword == "" {
+		details = append(details, Detail{
+			Field: "currentPassword", Message: "Enter your current password",
+		})
+	}
+
+	if b.NewPassword == "" {
+		details = append(details, Detail{
+			Field: "newPassword", Message: "Enter a new password",
+		})
+	}
+
+	// Refused rather than quietly accepted. "Changed" and "not changed" must
+	// not look the same to somebody who has just been told to change it.
+	if b.NewPassword != "" && b.NewPassword == b.CurrentPassword {
+		details = append(details, Detail{
+			Field: "newPassword", Message: "The new password must be different",
+		})
+	}
+
+	return details
+}
+
+// handleChangePassword changes the caller's own password.
+//
+// Not an administrative reset: it proves the current password, and it ends
+// every other session while keeping this one. `pivot admin reset-password` is
+// the operation for somebody who cannot prove anything, and it deliberately
+// ends every session including the one being used.
+func (h *AuthHandler) handleChangePassword(w http.ResponseWriter, r *http.Request) {
+	authed, ok := IdentityFrom(r.Context())
+	if !ok {
+		WriteError(w, r, NewError(CodeUnauthorized, CodeUnauthorized.Summary(), ErrNoSession))
+
+		return
+	}
+
+	var body changePasswordRequest
+	if err := Decode(w, r, &body); err != nil {
+		WriteError(w, r, err)
+
+		return
+	}
+
+	err := h.svc.ChangePassword(r.Context(),
+		authed.Session.UserID, authed.Session.ID, body.CurrentPassword, body.NewPassword)
+
+	switch {
+	case err == nil:
+	case errors.Is(err, auth.ErrPasswordIncorrect):
+		// 422 against the field, not 401. A 401 would send the browser's
+		// global session handler to the login page, signing the user out
+		// because they mistyped their own password into a form.
+		WriteError(w, r, ValidationError(Detail{
+			Field: "currentPassword", Message: "That is not your current password",
+		}))
+
+		return
+
+	case errors.Is(err, auth.ErrPasswordTooShort), errors.Is(err, auth.ErrPasswordTooLong):
+		WriteError(w, r, ValidationError(Detail{Field: "newPassword", Message: err.Error()}))
+
+		return
+
+	default:
+		WriteError(w, r, err)
+
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // --- DELETE /auth/sessions/{id} --------------------------------------------
 
 // handleRevokeSession ends one of the caller's own sessions.

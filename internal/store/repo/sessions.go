@@ -121,6 +121,38 @@ func (r *SessionRepo) RevokeAllForUser(ctx context.Context, userID uuid.UUID) (i
 	return n, nil
 }
 
+// RevokeAllForUserExcept ends every session a user holds except one.
+//
+// What changing your own password needs. Revoking everything would sign the
+// user out of the device they are standing at, which makes the safe action
+// feel like a punishment and teaches people not to take it -- and the session
+// being kept belongs to somebody who has just proved they know the current
+// password.
+func (r *SessionRepo) RevokeAllForUserExcept(
+	ctx context.Context, userID, keepSessionID uuid.UUID,
+) (int64, error) {
+	s, err := r.scope(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	n, rerr := r.q.RevokeOtherUserSessions(ctx, model.RevokeOtherUserSessionsParams{
+		RevokedAt: dbtypes.NewNullTime(r.now().Time),
+		UserID:    userID,
+		OrgID:     s.OrgID(),
+		ID:        keepSessionID,
+	})
+	if rerr != nil {
+		return 0, translate(rerr)
+	}
+
+	if n > 0 {
+		r.emit(ctx, ChangeDeleted, entitySession, userID, s.OrgID(), s.ActorID())
+	}
+
+	return n, nil
+}
+
 // --- unscoped session operations ------------------------------------------
 
 // CreateSession records a new session.

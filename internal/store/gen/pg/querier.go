@@ -117,6 +117,11 @@ type Querier interface {
 	RemoveGroupMember(ctx context.Context, arg RemoveGroupMemberParams) (int64, error)
 	// Removing a user or group takes its grants with it.
 	RevokeAllForSubject(ctx context.Context, arg RevokeAllForSubjectParams) (int64, error)
+	// Revoking every session *except* one is what changing your own password
+	// needs. Signing somebody out of the device they are changing their password
+	// on makes the safe action feel like a punishment, and the session being kept
+	// is the one whose owner just proved they know the current password.
+	RevokeOtherUserSessions(ctx context.Context, arg RevokeOtherUserSessionsParams) (int64, error)
 	RevokeRole(ctx context.Context, arg RevokeRoleParams) (int64, error)
 	RevokeSession(ctx context.Context, arg RevokeSessionParams) (int64, error)
 	// Revoking one's own session names the user as well as the organization.

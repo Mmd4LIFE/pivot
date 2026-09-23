@@ -79,6 +79,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change your own password
+         * @description Proves the current password, stores the new one, and **ends every other
+         *     session** — leaving the caller signed in on the device they changed it
+         *     from.
+         *
+         *     Each of those three is deliberate. Verifying the current password is
+         *     what stops an unlocked laptop or an XSS bug from being enough to take
+         *     an account: a session cookie is not a re-authentication. Ending the
+         *     other sessions is the point of the operation, since a password change
+         *     is usually a response to suspicion and one that leaves the other
+         *     party's session alive has done nothing. Keeping this one means the safe
+         *     action does not feel like a punishment.
+         *
+         *     A wrong current password is **422 against the field**, not 401. A 401
+         *     would send a browser's global session handling to the login page,
+         *     signing somebody out because they mistyped their own password into a
+         *     form.
+         *
+         *     This is not `pivot admin reset-password`, which exists for somebody who
+         *     cannot prove anything and ends every session including the one in use.
+         */
+        post: operations["changePassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/sessions": {
         parameters: {
             query?: never;
@@ -598,6 +636,18 @@ export interface components {
              */
             token?: string;
         };
+        ChangePasswordRequest: {
+            /** Format: password */
+            currentPassword: string;
+            /**
+             * Format: password
+             * @description At least 12 characters, and different from the current one. Length
+             *     is the only composition rule: requiring a digit and a symbol pushes
+             *     people toward "Password1!" and away from length, which is what
+             *     actually matters.
+             */
+            newPassword: string;
+        };
         LoginRequest: {
             /**
              * Format: email
@@ -1037,6 +1087,31 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    changePassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangePasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description The password was changed and the other sessions ended */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            422: components["responses"]["UnprocessableEntity"];
+            429: components["responses"]["TooManyRequests"];
         };
     };
     listSessions: {

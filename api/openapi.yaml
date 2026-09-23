@@ -133,6 +133,47 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /api/v1/auth/password:
+    post:
+      tags: [auth]
+      operationId: changePassword
+      summary: Change your own password
+      description: |
+        Proves the current password, stores the new one, and **ends every other
+        session** — leaving the caller signed in on the device they changed it
+        from.
+
+        Each of those three is deliberate. Verifying the current password is
+        what stops an unlocked laptop or an XSS bug from being enough to take
+        an account: a session cookie is not a re-authentication. Ending the
+        other sessions is the point of the operation, since a password change
+        is usually a response to suspicion and one that leaves the other
+        party's session alive has done nothing. Keeping this one means the safe
+        action does not feel like a punishment.
+
+        A wrong current password is **422 against the field**, not 401. A 401
+        would send a browser's global session handling to the login page,
+        signing somebody out because they mistyped their own password into a
+        form.
+
+        This is not `pivot admin reset-password`, which exists for somebody who
+        cannot prove anything and ends every session including the one in use.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordRequest"
+      responses:
+        "204":
+          description: The password was changed and the other sessions ended
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
   /api/v1/auth/sessions:
     get:
       tags: [auth]
@@ -895,6 +936,25 @@ components:
           description: |
             The token the server printed when it started. Required unless the
             instance was configured with an empty `setup.token`.
+
+    ChangePasswordRequest:
+      type: object
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword:
+          type: string
+          format: password
+          maxLength: 1024
+        newPassword:
+          type: string
+          format: password
+          minLength: 12
+          maxLength: 1024
+          description: |
+            At least 12 characters, and different from the current one. Length
+            is the only composition rule: requiring a digit and a symbol pushes
+            people toward "Password1!" and away from length, which is what
+            actually matters.
 
     LoginRequest:
       type: object
