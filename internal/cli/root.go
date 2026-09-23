@@ -78,6 +78,9 @@ value came from.`,
 		newAdminCmd(env, &flags),
 		newVersionCmd(env),
 		newHealthcheckCmd(env, &flags),
+		newDoctorCmd(env, &flags),
+		newBackupCmd(env, &flags),
+		newRestoreCmd(env, &flags),
 		newConfigCmd(env, &flags),
 	)
 

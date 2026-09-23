@@ -53,8 +53,8 @@ At the end of every part, in this order:
 
 | | |
 |---|---|
-| **Last completed** | Part 15-b — Your own account |
-| **Next up** | **Part 15-c — Operating it: doctor, backup, secrets** |
+| **Last completed** | Part 15-c — Doctor and backup |
+| **Next up** | **Part 15-d — Secrets at rest** |
 | **Current phase** | Phase 0 — Foundations |
 | **Branch** | `main` |
 | **Blockers** | None |
@@ -84,6 +84,12 @@ from one series filtered by status class, so they cannot disagree with each othe
 are bounded by construction: the route label is the mux's *pattern*, so a scanner probing
 for `/wp-admin` cannot create a series per guess. `deploy/grafana/pivot-overview.json` is
 the reference dashboard, and a test matches every query in it against a real exposition.
+
+**`pivot doctor` says what is wrong with an install**, and `pivot backup` / `pivot restore`
+take and replace a SQLite database consistently while it is being served — `VACUUM INTO`
+rather than a file copy, because WAL means three files and no atomic copy across them.
+[docs/operations/backup-and-restore.md](docs/operations/backup-and-restore.md) is the
+operator-facing version, and every command in it has been run.
 
 **Somebody can change their own password from the product**, at `/account`, which also
 lists every device holding a live session and can end any of them except the one in use.
@@ -485,7 +491,7 @@ needs an entry in `sqlc.yaml`'s SQLite override list**, or the packages silently
 ## Progress
 
 ```
-Phase 0  Foundations        [████████████████████████  ] 28/30   (Parts 3, 4, 6, 7, 8, 10, 11, 12, 13, 14 and 15 each split)
+Phase 0  Foundations        [████████████████████████  ] 29/31   (Parts 3, 4, 6, 7, 8, 10, 11, 12, 13, 14 and 15 each split)
 Phase 1  Connect & Query    [                    ]  0/12   (detailed at Part 15)
 Phase 2+ ...                                            (expanded as we approach)
 ```
@@ -1507,28 +1513,70 @@ a flag, because the difference is what they prove.
 
 ---
 
-### - [ ] Part 15-c — Operating it: doctor, backup, secrets
+### - [x] Part 15-c — Operating it: doctor and backup ✅ 2026-09-23
 
-**Deliverable:** The three things an operator needs that no feature asks for.
+**Deliverable:** Finding out what is wrong, and getting your data back.
 
-**Build:** `pivot doctor` diagnostics, automatic SQLite backup, and envelope encryption for
-stored secrets with a local master key.
+**Build:** `pivot doctor`, `pivot backup`, `pivot restore`, `store.Backup`, and
+[docs/operations/backup-and-restore.md](docs/operations/backup-and-restore.md).
 
 **Done when:**
-- `pivot doctor` correctly diagnoses a **broken** install, not just a working one
-- A SQLite instance takes a consistent backup while serving, and the restore path is
-  documented and walked
-- `identity_providers.client_secret` is encrypted at rest, and the key rotation story is
-  written down before it is needed
+- [x] **`pivot doctor` diagnoses broken installs**, and that is what the tests check: a
+      schema behind the binary, a directory that cannot be written to, a port already
+      taken, a database URL that is not one. The happy-path test is the shortest one in
+      the file, because it would still pass if every check were a no-op
+- [x] **Warnings never set the exit status.** A diagnostic that fails a provisioning
+      script over a file mode is one nobody runs twice
+- [x] **The backup is consistent under concurrent writes**, proved by running one against
+      a database being written to and checking `PRAGMA integrity_check` on the result.
+      `VACUUM INTO`, not a file copy: WAL means three files, no atomic copy across them,
+      and a `cp` under load restores as `database disk image is malformed` months later
+- [x] **Restore checks the backup before moving anything.** The dangerous version notices
+      the file is not a database *after* renaming the live one aside, leaving an instance
+      with no database at all
+- [x] The replaced database is kept, not deleted, and the stale `-wal`/`-shm` are removed
+      — left behind, SQLite applies one database's journal to another
+- [x] **The document was walked, not written.** Every command in it was run, including
+      the restore-into-an-empty-directory recipe and the round trip against a live server
 
-**Notes:** The plaintext `client_secret` has been on the watch list since Part 7. This is
-the part that owes it.
+**Found on the way:**
+- **A new SQLite database was mode 0644** — `pivot doctor` warned about it on its first
+  run against a real install, which is what it is for. Every session token hash and stored
+  secret in the instance, readable by any account on the machine. Pivot now creates it
+  `0600`; an existing file's mode stays the operator's decision and is warned about
+- **My own concurrency test was vacuous, twice.** First the writer inserted into a column
+  that does not exist and discarded the error, so the database sat perfectly still and a
+  file copy would have passed. Then, with that fixed, the writer goroutine could be
+  scheduled *after* the backup finished. It now waits for the first successful write
+  before the backup starts, and fails loudly if none arrives
 
-**Refs:** `P0-PKG-005`, `P0-PKG-007`
+**Refs:** `P0-PKG-005`
 
 ---
 
-### - [ ] Part 15-d — The container stack, and Phase 0 close-out
+### - [ ] Part 15-d — Secrets at rest
+
+**Deliverable:** `identity_providers.client_secret` stops being readable in the database.
+
+**Build:** Envelope encryption with a local master key, a migration that encrypts what is
+already stored, and the rotation procedure.
+
+**Done when:**
+- A stored client secret is unreadable to anybody with the database file and no key
+- Existing rows are migrated, and an instance whose key is missing says so at startup
+  rather than failing later inside an SSO login
+- **The rotation story is written down before it is needed**, because the day it is needed
+  is not the day to work it out
+
+**Notes:** The plaintext `client_secret` has been on the watch list since Part 7. This is
+the part that owes it, and it is its own session because it changes data at rest — a
+migration that gets this wrong is unrecoverable in a way a broken endpoint is not.
+
+**Refs:** `P0-PKG-007`
+
+---
+
+### - [ ] Part 15-e — The container stack, and Phase 0 close-out
 
 **Deliverable:** The other install path, and the honest review of everything before it.
 
@@ -1598,6 +1646,7 @@ Newest first. Record what **actually** shipped, including what didn't work.
 
 | Date | Part | Shipped | Notes |
 |---|---|---|---|
+| 2026-09-23 | 15-c | `pivot doctor`, `pivot backup`, `pivot restore`, `store.Backup`, and an operations document that was walked rather than written | **A diagnostic that only passes on a working machine is worth nothing**, so the tests break things on purpose: a schema behind the binary, a directory that cannot be written to, a port already taken, a database URL that is not one. The happy-path test is the shortest in the file, because it would still pass if every check were a no-op. **Warnings never set the exit status** — a diagnostic that fails a provisioning script over a file mode is one nobody runs twice. **Doctor found a real problem on its first run**: a new SQLite database is mode 0644, so every session token hash and stored secret was readable by any account on the machine. Pivot now creates it 0600, and leaves an existing file's mode alone because that is the operator's decision. **Backup is `VACUUM INTO`, not a file copy**: WAL means three files, there is no atomic copy across them, and a `cp` under load restores as "database disk image is malformed" months later when somebody needs it. Proved by backing up a database being written to and running `PRAGMA integrity_check` on the result. **Restore checks the backup before moving anything** — the dangerous version discovers the file is not a database after renaming the live one aside — keeps what it replaced, and removes the stale WAL, which otherwise applies one database's journal to another. **My own concurrency test was vacuous twice.** First the writer inserted into a column that does not exist and discarded the error, so the database sat perfectly still and a file copy would have passed; then, fixed, the writer goroutine could be scheduled after the backup had already finished. It now blocks until the first write lands and fails loudly if none does. |
 | 2026-09-23 | 15-b | `auth.Service.ChangePassword`, `POST /api/v1/auth/password`, the `RevokeOtherUserSessions` query through the engine abstraction, and the `/account` page | **Changing your own password proves the current one, ends every other session, and keeps this one** — and all three are the deliverable. Without the proof, an unlocked laptop or an XSS bug is enough to take the account outright, because a session cookie says somebody logged in at some point and not that the person at the keyboard now is the same one. Without the revocation the operation does nothing: a password change is a response to suspicion, and one that leaves the other party signed in only makes the owner feel safer. And without keeping this session, the safe action signs you out of the device you are standing at, which is how people learn not to take it. **A wrong current password is a 422 against the field, not a 401**: a 401 reaches the frontend's global session handling, so mistyping your own password in the change form would log you out — the safety feature causing the logout. **The account page lists every device and ends any of them except the one in use**, which is Sign out's job; a button in a device list that logs you out is a surprise. `SetPassword` stays as the administrative operation behind `pivot admin reset-password` — two operations rather than a flag, because the difference is what they prove. **Two test-harness bugs surfaced.** The jsdom harness built `new Response("", {status: 204})`, which throws because 204 is a null-body status — so every successful 204 looked like the server being unreachable, and the first test to depend on one was this part's. And a Playwright context made from the `browser` fixture **inherits the project's `storageState`**, so the "second device" in the e2e arrived holding the suite's own signed-in cookie and proved nothing. |
 | 2026-09-23 | 15-a | `internal/setup`, `POST /api/v1/setup` and its status endpoint, the setup token and its startup banner, the `/setup` page, and a shared first-user rule | **A binary with no configuration, no database and no arguments now takes somebody from nothing to signed-in administrator in one form.** Claiming the instance *is* the login: the response is the same session envelope `/auth/login` returns and sets the same cookie, because a password typed twice should not then be typed into a login page. **The window between starting and being claimed is the security problem of a first run**, and it is answered with a token generated per process and printed in a banner — an unclaimed Pivot on a network is otherwise an instance takeover waiting for a port scan, and "only for a few seconds" is not an argument. **Setup closes permanently**, checked against the database inside a lock rather than cached at startup, because an instance that decided at boot that it was unclaimed would stay claimable for as long as it ran. **Two concurrent claims produce one administrator, mutation-verified**: with the mutex removed, all 8 concurrent claims succeed and create 8 organizations. **The first-user-becomes-admin rule now exists once**, shared by the CLI and the browser — it is a rule about privilege, and one written twice is eventually only true in one of them. **Three things were found on the way.** The spec-drift test *had never been able to fail*: everything under the API prefix falls through to a catch-all that answers 401 before the 404 handler, so a documented route that was never registered looked exactly like one that was — it now asks the mux which pattern it would match, and immediately found that the fixture had never registered the SSO routes either. `pivot serve` briefly became **fatal when the schema was behind**, because the banner queried a table that did not exist yet; caught by the test that asserts serve warns rather than refuses. And a too-long password had no sentinel error, so it would have surfaced from the setup form as an unexplained 500. **Four Playwright tests spawn their own binary against their own empty database**, including parsing the token out of its real output — the only instruction a first-time user is given. **Then CI's coverage gate refused the pull request**: touching `password.go` pulled `internal/auth` into the changed set at 74.7%, pre-existing debt the gate had never had reason to look at. It was right to. The untested half was the lockout escalation, accounts with no password at all, corrupt stored hashes and session revocation on a password change — every one silent until the day it matters. 85.9% now, and the doubling-and-cap test is mutation-verified. |
 | 2026-09-23 | 14-d | `internal/api/telemetry.go`, `web/src/lib/report.ts`, the `traceresponse` response header, `LimitTelemetry`, and the boundary and window listeners wired to them | **An error in a browser now lands in the same log as the request that caused it, carrying that request's identifiers.** The mechanism is the part worth keeping: the server returns its trace in a `traceresponse` header and the client reads it off the failed response, because a browser that *generates* a trace ID also generates the sampling decision and names a trace the store has never heard of. The request ID goes with it, since a trace ID only exists when tracing is on — which by default it is not — and a request ID is on every response Pivot has ever sent. **Exact or absent, never guessed**: the identifiers are attached only when the reported error *is* the failed request, because the tempting version — remember the last failure, staple it to whatever comes next — points an operator at an unrelated trace, which costs more time than having none. **Unauthenticated by necessity**, since the errors most worth having happen on the page where logging in was supposed to work, so it is defended by shape instead: a strict limiter with a burst of 10 (one broken render fires three events and a limit that hid two of them would hide the explanation), a 16 KiB cap rather than the API's 1 MiB, and a handler that writes one log line and nothing else. **Every field is treated as hostile** — control characters stripped so nothing can forge a log line or paint somebody's terminal, fields truncated rather than rejected, and the browser's trace logged as `browser_trace_id` so a report cannot overwrite the trace of the request carrying it. **Unknown fields are ignored here and rejected everywhere else**, because the client is a cached bundle in somebody's browser and losing its report over an unrecognised field would lose it exactly when a deploy has gone wrong. **Three layers, because each can only see its own**: jsdom for the reporter's restraint, Go for the endpoint's, and three Playwright tests throwing from a page served by the real binary — which is the only place that can prove the listeners are installed at all and that the request survives the application's own CSP. **Deliberately not Sentry's SDK: 0.6 KB gzipped against roughly 30, and the budget went 185.1 → 185.7 KB of 200.** What that gives up is real — no source maps, no grouping, no offline queue — and what it buys is that an air-gapped Pivot reports its own errors with no third-party script on the login page. |

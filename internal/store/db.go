@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -77,6 +78,13 @@ func Open(ctx context.Context, cfg config.DatabaseConfig, log *slog.Logger) (*DB
 		return nil, err
 	}
 
+	// Whether the file exists *before* the driver touches it, so a database
+	// Pivot creates can be given a sensible mode and one the operator created
+	// is left exactly as they left it.
+	path, isFile := SQLitePath(cfg.URL)
+	_, statErr := os.Stat(path)
+	fresh := isFile && errors.Is(statErr, os.ErrNotExist)
+
 	sqlDB, err := sql.Open(driverName(engine), dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open %s database: %w", engine, err)
@@ -88,6 +96,20 @@ func Open(ctx context.Context, cfg config.DatabaseConfig, log *slog.Logger) (*DB
 		_ = sqlDB.Close()
 
 		return nil, fmt.Errorf("connect to %s database: %w", engine, redactError(err, dsn))
+	}
+
+	// A database Pivot just created is readable by its owner and nobody else.
+	//
+	// SQLite creates it 0644 minus the umask, which on a default machine
+	// leaves every session token hash and every stored secret readable by any
+	// account on the box. Only on creation: an existing file's mode is the
+	// operator's decision, and `pivot doctor` warns about it rather than
+	// changing it underneath them.
+	if fresh {
+		if cherr := os.Chmod(path, 0o600); cherr != nil {
+			log.Warn("could not restrict permissions on the new database file",
+				slog.String("path", path), slog.String("error", cherr.Error()))
+		}
 	}
 
 	log.Info("database connected",
