@@ -132,12 +132,18 @@ func New(cfg config.ServerConfig, log *slog.Logger, opts ...Option) *Server {
 	}
 
 	s.router = NewRouter(RouterConfig{
-		Log:            log,
-		CORS:           DefaultCORS(),
-		Auth:           s.auth,
-		Roles:          s.roles,
-		OIDC:           s.oidc,
-		SPA:            s.spa,
+		Log:   log,
+		CORS:  DefaultCORS(),
+		Auth:  s.auth,
+		Roles: s.roles,
+		OIDC:  s.oidc,
+		SPA:   s.spa,
+
+		// Not an Option, because there is no deployment that wants it off and
+		// every one that wants it needs no configuration: it takes a logger,
+		// which the server already has. An option here would only create a
+		// way to build a server whose frontend reports errors into a 404.
+		Telemetry:      NewTelemetryHandler(log),
 		TenantResolver: s.tenantResolver,
 		Checks:         s.checks,
 		Metrics:        s.metrics,

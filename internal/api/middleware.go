@@ -237,7 +237,7 @@ func DefaultCORS() CORSConfig {
 		AllowedOrigins:   nil,
 		AllowedMethods:   []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions},
 		AllowedHeaders:   []string{"Content-Type", "Authorization", RequestIDHeader},
-		ExposedHeaders:   []string{RequestIDHeader},
+		ExposedHeaders:   []string{RequestIDHeader, TraceResponseHeader},
 		AllowCredentials: true,
 		MaxAge:           10 * time.Minute,
 	}

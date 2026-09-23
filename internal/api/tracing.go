@@ -12,6 +12,15 @@ import (
 	"github.com/Mmd4LIFE/pivot/internal/observability"
 )
 
+// TraceResponseHeader carries this request's trace back to the caller.
+//
+// W3C Trace Context Level 2 names this header and fixes its format, which is
+// the same `00-<trace>-<span>-<flags>` as traceparent. A browser that wants to
+// report an error with something an operator can look up needs to be told the
+// trace ID, because the alternative -- letting it generate one -- hands the
+// sampling decision to the client.
+const TraceResponseHeader = "traceresponse"
+
 // WithTracing opens a span for every request and continues an incoming trace.
 //
 // Hand-rolled rather than `otelhttp`, and the reason is the span name. The
@@ -46,6 +55,16 @@ func WithTracing() Middleware {
 				),
 			)
 			defer span.End()
+
+			// Tell the caller which trace this was, before anything can write
+			// a status. This is how the browser learns a real trace ID to put
+			// on an error report: it cannot invent one without also inventing
+			// the sampling decision, and a trace ID that names nothing in the
+			// trace store is worse than none.
+			if sc := span.SpanContext(); sc.IsValid() {
+				w.Header().Set(TraceResponseHeader, "00-"+
+					sc.TraceID().String()+"-"+sc.SpanID().String()+"-"+sc.TraceFlags().String())
+			}
 
 			recorder := &tracedWriter{ResponseWriter: w, status: http.StatusOK}
 

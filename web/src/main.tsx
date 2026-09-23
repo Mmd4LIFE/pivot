@@ -8,6 +8,7 @@ import { routeTree } from "./routes/tree";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { initI18n } from "./i18n";
 import { currentDestination } from "./lib/redirect";
+import { installErrorReporting } from "./lib/report";
 import "./styles/app.css";
 
 /*
@@ -56,6 +57,14 @@ declare module "@tanstack/react-router" {
     router: typeof router;
   }
 }
+
+/*
+ * Before anything renders, so an error thrown while mounting is still caught.
+ * Installing it after the first render would miss exactly the errors that stop
+ * the first render from happening — which are the ones that leave a user
+ * looking at a blank page with nothing to report.
+ */
+installErrorReporting();
 
 const container = document.getElementById("root");
 

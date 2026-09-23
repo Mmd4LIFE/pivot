@@ -416,10 +416,95 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/telemetry/errors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report an error that happened in the browser
+         * @description Records a browser error in the server log and returns `204`. There is
+         *     no storage, no aggregation and no alerting behind it: a browser error
+         *     that lands in the same log as the request that caused it is worth more
+         *     than a second system to check.
+         *
+         *     **Unauthenticated, deliberately.** The errors most worth having are
+         *     the ones that happen before login — on the page where logging in was
+         *     supposed to work — so requiring a session would collect reports from
+         *     exactly the users who are not having the problem. It is defended by
+         *     shape instead: a strict rate limit per address, a 16 KiB body cap
+         *     rather than the general 1 MiB, and a handler that writes a log line
+         *     and nothing else. A report from somebody signed in is attributed to
+         *     them.
+         *
+         *     `traceId` and `requestId` describe the API call that failed, not this
+         *     report. The browser reads them from the `traceresponse` and
+         *     `X-Request-Id` headers of that failed response rather than inventing
+         *     them, which is what makes them findable afterwards. Both are optional
+         *     and a trace ID is only available when tracing is enabled.
+         *
+         *     Unknown fields are ignored here, unlike everywhere else in this API:
+         *     the client is a cached bundle in somebody's browser and may be older
+         *     than this server, and rejecting its report over a field would lose the
+         *     one thing this endpoint exists to collect.
+         */
+        post: operations["reportBrowserError"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * @description Every field is client-supplied and none of it is trusted: strings are
+         *     stripped of control characters and truncated before they reach a log,
+         *     and the identifiers are checked for shape rather than believed.
+         */
+        ErrorReport: {
+            /**
+             * @description The error's message. Truncated rather than rejected if longer.
+             * @example Cannot read properties of undefined (reading 'name')
+             */
+            message: string;
+            /**
+             * @description How the error surfaced. A render error, a rejected promise and a
+             *     plain `window.onerror` fail differently and are usually different
+             *     bugs.
+             * @example render
+             * @example unhandledrejection
+             * @example error
+             */
+            kind?: string;
+            /**
+             * @description Whatever the browser could produce. Often absent — a cross-origin
+             *     script error gives `Script error.` and nothing else.
+             */
+            stack?: string;
+            /**
+             * @description The page the error happened on, not the API call that failed.
+             * @example https://pivot.example.com/login
+             */
+            url?: string;
+            /**
+             * @description The trace of the API call that failed, from its `traceresponse`
+             *     header. Present only when the error came from an API call and
+             *     tracing is enabled.
+             */
+            traceId?: string;
+            /**
+             * @description That same call's `X-Request-Id`. Unlike the trace ID this is always
+             *     available, which is why both are here.
+             */
+            requestId?: string;
+        };
         LoginRequest: {
             /**
              * Format: email
@@ -722,6 +807,15 @@ export interface components {
         };
         /** @description The body failed validation */
         UnprocessableEntity: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description The body exceeded the limit for this endpoint */
+        PayloadTooLarge: {
             headers: {
                 [name: string]: unknown;
             };
@@ -1326,6 +1420,32 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    reportBrowserError: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ErrorReport"];
+            };
+        };
+        responses: {
+            /** @description The report was recorded */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            429: components["responses"]["TooManyRequests"];
         };
     };
 }

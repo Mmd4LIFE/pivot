@@ -32,6 +32,16 @@ var (
 
 	// LimitExpensive applies to query execution and exports, from Phase 1.
 	LimitExpensive = RateLimit{Rate: 2, Burst: 5}
+
+	// LimitTelemetry applies to browser error reports.
+	//
+	// The burst is what matters: one broken render can fire a render error, an
+	// onerror and a rejected promise within the same frame, and a limit that
+	// only let the first one through would hide the two that explain it. The
+	// sustained rate is low because the endpoint is unauthenticated and writes
+	// to the log -- an unbounded one is a way to fill somebody's disk from a
+	// browser tab.
+	LimitTelemetry = RateLimit{Rate: 0.2, Burst: 10}
 )
 
 // bucket is a token bucket.

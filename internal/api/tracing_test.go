@@ -3,6 +3,7 @@ package api_test
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -210,4 +211,45 @@ func TestAnIncomingTraceIsContinuedRatherThanRestarted(t *testing.T) {
 
 		t.Fatalf("no HTTP span recorded: %v", spanNames(recorder))
 	})
+}
+
+// The caller is told which trace this request was, so a browser reporting an
+// error later can name something an operator can actually look up.
+//
+// Not parallel: recordSpans installs the global tracer provider.
+func TestTheResponseNamesItsOwnTrace(t *testing.T) {
+	recorder := recordSpans(t)
+
+	router := api.NewRouter(api.RouterConfig{Log: discardLogger()})
+
+	req := httptest.NewRequestWithContext(context.Background(),
+		http.MethodGet, "/healthz", http.NoBody)
+	rec := httptest.NewRecorder()
+
+	router.Handler().ServeHTTP(rec, req)
+
+	header := rec.Header().Get(api.TraceResponseHeader)
+	if header == "" {
+		t.Fatal("the response carries no traceresponse header")
+	}
+
+	// W3C Trace Context Level 2: version, trace, span, flags.
+	parts := strings.Split(header, "-")
+	if len(parts) != 4 || parts[0] != "00" || len(parts[1]) != 32 || len(parts[2]) != 16 {
+		t.Fatalf("traceresponse = %q, want 00-<32 hex>-<16 hex>-<flags>", header)
+	}
+
+	// And it is this request's real trace, not a decorative one. A header that
+	// named a trace the server never recorded would be worse than no header.
+	var found bool
+
+	for _, s := range recorder.Ended() {
+		if s.SpanContext().TraceID().String() == parts[1] {
+			found = true
+		}
+	}
+
+	if !found {
+		t.Errorf("traceresponse names trace %s, which was never recorded", parts[1])
+	}
 }

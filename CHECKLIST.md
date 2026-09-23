@@ -53,8 +53,8 @@ At the end of every part, in this order:
 
 | | |
 |---|---|
-| **Last completed** | Part 14-c — Metrics, and the dashboard |
-| **Next up** | **Part 14-d — Frontend error reporting** |
+| **Last completed** | Part 14-d — Frontend error reporting |
+| **Next up** | **Part 15 — First-run experience & Phase 0 close-out** |
 | **Current phase** | Phase 0 — Foundations |
 | **Branch** | `main` |
 | **Blockers** | None |
@@ -84,6 +84,15 @@ from one series filtered by status class, so they cannot disagree with each othe
 are bounded by construction: the route label is the mux's *pattern*, so a scanner probing
 for `/wp-admin` cannot create a series per guess. `deploy/grafana/pivot-overview.json` is
 the reference dashboard, and a test matches every query in it against a real exposition.
+
+**A browser error reaches the server log**, carrying the trace and request ID of the API
+call that failed. The server hands those back in a `traceresponse` header rather than
+letting the browser invent them, and the reporter attaches them only when the reported
+error *is* that failed call — exact or absent, because a guessed trace ID sends an
+operator somewhere else. `POST /api/v1/telemetry/errors` is unauthenticated on purpose
+and defended by shape: strict rate limit, 16 KiB cap, control characters stripped, one
+log line and no response. **Not Sentry's SDK — 0.6 KB gzipped against roughly 30**, and
+no third-party script on the login page of a product people self-host.
 
 **Tracing is off by default and no-ops when off.** A laptop install should not dial a
 collector that does not exist, and OpenTelemetry's no-op tracer makes a span two pointer
@@ -462,7 +471,7 @@ needs an entry in `sqlc.yaml`'s SQLite override list**, or the packages silently
 ## Progress
 
 ```
-Phase 0  Foundations        [███████████████████ ] 25/27   (Parts 3, 4, 6, 7, 8, 10, 11, 12, 13 and 14 each split)
+Phase 0  Foundations        [██████████████████████████] 26/27   (Parts 3, 4, 6, 7, 8, 10, 11, 12, 13 and 14 each split)
 Phase 1  Connect & Query    [                    ]  0/12   (detailed at Part 15)
 Phase 2+ ...                                            (expanded as we approach)
 ```
@@ -1320,24 +1329,46 @@ section, and `deploy/grafana/pivot-overview.json`.
 
 ---
 
-### - [ ] Part 14-d — Frontend error reporting
+### - [x] Part 14-d — Frontend error reporting ✅ 2026-09-23
 
 **Deliverable:** An error in somebody's browser reaches the operator, with its trace.
 
-**Build:** A small reporter posting to Pivot's own endpoint, wired to the error boundary
-and to `window.onerror` / `unhandledrejection`, plus the endpoint that receives it.
+**Build:** `POST /api/v1/telemetry/errors`, `web/src/lib/report.ts`, the `traceresponse`
+response header, and the error boundary and `window` listeners wired to them.
 
 **Done when:**
-- A thrown error in the browser arrives at the backend and is logged with its trace ID
-- The endpoint is rate limited and size limited — it is unauthenticated by necessity,
-  since an error before login is exactly the one worth having
-- The bundle budget still passes
+- [x] **A thrown error in the browser is logged by the server with the trace of the API
+      call that failed.** The browser does not invent that trace: the server returns it
+      in a `traceresponse` header (W3C Trace Context Level 2) and the client reads it off
+      the failed response. A client-generated trace ID would also be a client-generated
+      *sampling decision*, and would name something the trace store has never heard of
+- [x] **The request ID is sent alongside it**, because the two are available at different
+      times — a trace ID exists only when tracing is on, which by default it is not, while
+      a request ID is on every response Pivot has ever sent
+- [x] **Exact or absent, never guessed.** The identifiers are attached only when the
+      reported error *is* the failed request. Remembering the last failure and stapling
+      it to whatever comes next points an operator at an unrelated trace, which costs
+      more than having none
+- [x] Rate limited (`LimitTelemetry`, burst 10 so one broken render's three events all
+      get through), size limited to **16 KiB** rather than the API's 1 MiB, and
+      unauthenticated by necessity — the errors worth having are the ones on the page
+      where logging in was supposed to work
+- [x] Every field is treated as hostile: control characters stripped so nothing can forge
+      a log line or paint a terminal, fields truncated rather than rejected, trace IDs
+      checked for shape, and the browser's trace logged under `browser_trace_id` so it
+      cannot overwrite the request's real one
+- [x] **Proved in a real browser**, not only in jsdom: three Playwright tests throw from
+      a page served by the real binary and assert the report arrives and is accepted. That
+      is the only layer that can check the listeners are actually installed, that a real
+      error event carries what the reporter expects, and that the request survives the
+      application's own Content-Security-Policy
+- [x] **The bundle budget still passes: 185.1 → 185.7 KB of 200 KB.** The reporter costs
+      **0.6 KB gzipped** against roughly 30 KB for Sentry's SDK
 
-**Notes:** **Deliberately not Sentry's SDK.** The initial bundle is at 185 KB of the NFRs'
-200 KB and that SDK is roughly 30 KB gzipped, so it does not fit — and a self-hosted
-product should not need a Sentry account to see its own errors. A reporter that posts to
-`/api/v1/telemetry/errors` costs a few hundred bytes and reuses the trace correlation
-14-b already built.
+**Notes:** What this gives up is real — no source maps, no grouping, no release tracking,
+no offline queue. Those are the reasons to reach for a service, and Phase 9 can add one.
+What it buys is that an air-gapped Pivot still reports its own errors, with no account
+anywhere and no third-party script on the login page.
 
 **Refs:** `P0-OBS-001` … `P0-OBS-005`
 
@@ -1420,6 +1451,7 @@ Newest first. Record what **actually** shipped, including what didn't work.
 
 | Date | Part | Shipped | Notes |
 |---|---|---|---|
+| 2026-09-23 | 14-d | `internal/api/telemetry.go`, `web/src/lib/report.ts`, the `traceresponse` response header, `LimitTelemetry`, and the boundary and window listeners wired to them | **An error in a browser now lands in the same log as the request that caused it, carrying that request's identifiers.** The mechanism is the part worth keeping: the server returns its trace in a `traceresponse` header and the client reads it off the failed response, because a browser that *generates* a trace ID also generates the sampling decision and names a trace the store has never heard of. The request ID goes with it, since a trace ID only exists when tracing is on — which by default it is not — and a request ID is on every response Pivot has ever sent. **Exact or absent, never guessed**: the identifiers are attached only when the reported error *is* the failed request, because the tempting version — remember the last failure, staple it to whatever comes next — points an operator at an unrelated trace, which costs more time than having none. **Unauthenticated by necessity**, since the errors most worth having happen on the page where logging in was supposed to work, so it is defended by shape instead: a strict limiter with a burst of 10 (one broken render fires three events and a limit that hid two of them would hide the explanation), a 16 KiB cap rather than the API's 1 MiB, and a handler that writes one log line and nothing else. **Every field is treated as hostile** — control characters stripped so nothing can forge a log line or paint somebody's terminal, fields truncated rather than rejected, and the browser's trace logged as `browser_trace_id` so a report cannot overwrite the trace of the request carrying it. **Unknown fields are ignored here and rejected everywhere else**, because the client is a cached bundle in somebody's browser and losing its report over an unrecognised field would lose it exactly when a deploy has gone wrong. **Three layers, because each can only see its own**: jsdom for the reporter's restraint, Go for the endpoint's, and three Playwright tests throwing from a page served by the real binary — which is the only place that can prove the listeners are installed at all and that the request survives the application's own CSP. **Deliberately not Sentry's SDK: 0.6 KB gzipped against roughly 30, and the budget went 185.1 → 185.7 KB of 200.** What that gives up is real — no source maps, no grouping, no offline queue — and what it buys is that an air-gapped Pivot reports its own errors with no third-party script on the login page. |
 | 2026-09-22 | 14-c | `internal/observability/metrics.go`, `internal/api/metrics.go`, the `observability.metrics` config section, the `/metrics` route, `deploy/grafana/pivot-overview.json`, and three test files | **Three instruments, and errors are a label rather than a counter** — rate and error rate are one series filtered by status class, so the two numbers on the dashboard cannot drift apart. **Cardinality is bounded by construction, not by care**: the route label is the mux's *pattern*, so `/auth/sessions/{id}` is one series rather than one per session, and a scanner probing for `/wp-admin` collapses into the catch-all — asserted in a test named for the scanner. My first attempt read `r.Pattern` before the mux had dispatched, so **every request was labelled `unmatched`** and the whole dashboard would have been one flat line; asking `mux.Handler(r)` is what actually resolves it. **The dashboard has a test**, which sounds absurd until you ask how a reference dashboard rots: a metric gets renamed and four panels go quietly empty, so the test matches every query's metric and label against a real exposition. **Metrics default to on**, unlike tracing — an operator who must first enable metrics before they can find out why the thing is slow has already been failed — and `/metrics` is unauthenticated because Prometheus cannot hold a session and every scrape would otherwise cost an Argon2 verification. **The race detector found my own global**: `SetupMetrics` wrote package-level state that tests read concurrently, the fourth defect global mutable state has caused in Part 14 alone, so I deleted the global and returned the handler instead of protecting it with a mutex. **The cost is +18 modules and +2 MB.** Frontend error reporting moved to **14-d**: it is a backend endpoint plus a browser reporter, and bolting it onto a metrics session would have got both done badly. |
 | 2026-09-22 | 14-b | `internal/observability`, the `observability.tracing` config section, `logging.WithTrace`, `api.WithTracing`, a span on the authorization resolver, and a generated tracing decorator over all 63 `Querier` methods | **A trace spans HTTP → authz → database, asserted rather than demonstrated.** An in-memory exporter in a unit test checks the part that actually breaks — three spans sharing one trace ID, correctly nested — because a collector would only confirm the wire format, which is OpenTelemetry's problem and not ours. **A test found real fragility in my own design**: extraction of an incoming trace read OpenTelemetry's *global* propagator, which is a no-op until something sets it, so any process that had not called `Setup` would silently drop every incoming trace — the request still served, still traced, and belonging to the wrong story. `observability.Propagator()` is explicit now. **Log correlation's silent failure is forwarding**: a `traceHandler` that does not override `WithAttrs` and `WithGroup` returns the embedded handler unwrapped, so every derived logger — which is almost all of them — keeps logging perfectly and stops being connected to anything. Mutation-verified. **I put the tracing validation inside `if len(errs) > 0`**, which made it dead code in the only case that matters; the test caught it. **The repository layer is deliberately not instrumented**: its span would carry nothing the database span does not. The 63 decorator methods are generated, because that many identical wrappers is what somebody types wrong once and nobody notices. **The cost is +56 modules and +7 MB**, measured and written into ADR-0001 — including that choosing OTLP over HTTP to dodge the gRPC tree **did not dodge it**, since `proto/otlp` depends on gRPC either way. **Then CI refused the pull request** — the coverage gate fired on `internal/observability` at 37.5%, the first time it has caught new code rather than old debt, and it was right: I wrote the package and no tests for it. Writing them found **a bug that would have broken tracing for everyone who turned it on**: `resource.Merge` fails outright on conflicting schema URLs, and pinning semconv v1.26.0 against an SDK defaulting to v1.43.0 meant `Setup` returned an error and the server refused to start. Nothing else would have caught it, because the entire path is skipped when tracing is off. `resource.NewSchemaless` has no version to disagree about. **And I wrote a flaky test about global state while fixing a bug about global state**: the Setup tests ran `t.Parallel()` and raced over the global tracer provider, so the no-op provider intermittently decided whether another test's span was sampled. |
 | 2026-09-22 | 14-a | `internal/api/admin_test.go` and `internal/config/env_test.go` — the administrative endpoints and the environment table, both driven for the first time | **Split Part 14**, because paying its coverage debt turned out to be the more valuable half. **The gate found a real hole, not a number.** The endpoint assertion harness from Part 7-b proves an unpermitted caller gets a 403 — and a 403 never reaches the handler, so `handleGrant`, `handleAdminCreate`, `handleAdminUpdate` and `handleAdminDelete` had **zero** coverage between them. Every test that needed a role granted called the repository directly and went around the endpoint entirely. The surface that writes role assignments and identity providers — the two things that decide who can get in — had never once been driven. It is **80.5%** now, tested granting, revoking, listing, and creating/updating/deleting a provider, plus what each refuses. **The environment table was 33% covered**, which meant a binding could point at the wrong field and nothing would notice — an operator sets a variable, the server reports success, the setting does nothing. `internal/config` is **87.3%** now, by setting every `PIVOT_*` variable and asking the resolved configuration whether it took. Mutation-verified: renaming one binding fails from both directions, as a variable that is documented and unsampled *and* as one that is sampled and unread. **Two properties are now asserted rather than assumed**: a provider update at a stale version loses, so one administrator cannot silently overwrite another's change; and the client secret is never echoed back in a response. |
