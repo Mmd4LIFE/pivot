@@ -208,6 +208,11 @@ func SpendVerifyTime(password string) {
 	// Both results are deliberately consumed and discarded: the point is to
 	// spend the time, not to learn anything. An error here could only mean the
 	// package-level dummy hash is broken, which this package's own tests catch.
+	//
+	// The `if` looks pointless and is not: errcheck runs with check-blank, so
+	// `_, _ = VerifyPassword(...)` is a lint failure. Consuming both values in
+	// a condition that returns either way is the form that satisfies it
+	// without pretending to handle something. Simplified once, put back.
 	if ok, err := VerifyPassword(password, dummyHash); ok || err != nil {
 		return
 	}
