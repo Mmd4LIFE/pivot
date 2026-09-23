@@ -20,6 +20,24 @@ type Config struct {
 	Log      LogConfig      `yaml:"log"`
 
 	Observability ObservabilityConfig `yaml:"observability"`
+	Setup         SetupConfig         `yaml:"setup"`
+}
+
+// SetupConfig controls the first run.
+//
+// The whole section stops mattering the moment somebody claims the instance,
+// which is why it has exactly one setting and no plans for more.
+type SetupConfig struct {
+	// Token protects the setup endpoint.
+	//
+	// Empty means one is generated at startup and printed in the banner, which
+	// is the right default: without a token, whoever reaches an unclaimed
+	// Pivot first becomes its administrator, and "it is only open for a few
+	// seconds" is not a security argument for anything on a network.
+	//
+	// Set it explicitly for automated provisioning, where reading a token back
+	// out of a log is not possible.
+	Token string `yaml:"token"`
 }
 
 // ObservabilityConfig controls tracing.
@@ -261,6 +279,9 @@ func Default() *Config {
 			},
 			Metrics: MetricsConfig{Enabled: true},
 		},
+
+		// Empty, so a token is generated per process. See SetupConfig.Token.
+		Setup: SetupConfig{Token: ""},
 	}
 }
 

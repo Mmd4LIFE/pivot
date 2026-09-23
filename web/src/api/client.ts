@@ -190,6 +190,20 @@ export type AuthProviderList = JSONResponse<
   paths["/api/v1/auth/providers"]["get"]["responses"]["200"]
 >;
 
+/** The body of `GET /api/v1/setup/status`. */
+export type SetupStatus = JSONResponse<
+  paths["/api/v1/setup/status"]["get"]["responses"]["200"]
+>;
+
+/** What claiming an instance needs. */
+export interface SetupRequest {
+  organization: string;
+  name: string;
+  email: string;
+  password: string;
+  token: string;
+}
+
 /** The body of `GET /healthz`. */
 export type HealthResponse = JSONResponse<paths["/healthz"]["get"]["responses"]["200"]>;
 
@@ -207,4 +221,12 @@ export const api = {
     }),
 
   logout: () => request<void>("/auth/logout", { method: "POST" }),
+
+  setupStatus: (signal?: AbortSignal) =>
+    request<SetupStatus>("/setup/status", signal ? { signal } : {}),
+
+  // Returns the same envelope as login, because it ends in the same place:
+  // claiming an instance signs you in on the spot.
+  setup: (body: SetupRequest) =>
+    request<SessionEnvelope>("/setup", { method: "POST", body }),
 };

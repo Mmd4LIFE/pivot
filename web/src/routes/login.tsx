@@ -7,6 +7,7 @@ import { ApiError } from "../api/client";
 import {
   loginErrorKey,
   sessionQuery,
+  setupStatusQuery,
   useAuthProviders,
   useLogin,
   type LoginErrorKey,
@@ -48,13 +49,31 @@ export const Route = createRoute({
     return out;
   },
 
-  // Somebody who is already signed in has no business on the login page; send
-  // them where they were going.
+  // Two people have no business on the login page: somebody already signed in,
+  // and somebody whose Pivot has no accounts at all. The second is the one
+  // that matters on a fresh install -- without this check the first thing a
+  // new operator sees is a form that no password can satisfy, with nothing on
+  // it saying why.
+  //
+  // The rule lives here rather than in every route, because every guard that
+  // turns somebody away sends them to this page.
   beforeLoad: async ({ context, search }) => {
     const session = await context.queryClient.ensureQueryData(sessionQuery);
 
     if (session !== null) {
       throw redirect({ to: safeDestination(search.redirect), replace: true });
+    }
+
+    // Fails open. If the probe itself fails -- the server is briefly
+    // unreachable, a proxy ate it -- the login page still renders, because
+    // "we could not check" is not a reason to stop somebody signing in. Only a
+    // definite "there are no accounts" sends them to setup.
+    const status = await context.queryClient
+      .ensureQueryData(setupStatusQuery)
+      .catch(() => null);
+
+    if (status !== null && !status.initialized) {
+      throw redirect({ to: "/setup", replace: true });
     }
   },
 

@@ -6,7 +6,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { ApiError, api, type SessionEnvelope } from "./client";
+import { ApiError, api, type SessionEnvelope, type SetupRequest } from "./client";
 
 /**
  * The query client.
@@ -60,6 +60,7 @@ export function createQueryClient(onUnauthenticated: () => void = () => {}): Que
 export const keys = {
   me: ["auth", "me"] as const,
   providers: ["auth", "providers"] as const,
+  setupStatus: ["setup", "status"] as const,
 };
 
 /**
@@ -84,6 +85,85 @@ export const sessionQuery = {
 
 export function useSession() {
   return useQuery(sessionQuery);
+}
+
+/**
+ * Whether this Pivot has an administrator yet.
+ *
+ * `staleTime: Infinity` because the answer only ever changes once, in this
+ * tab, as the direct result of this tab doing it -- and the setup mutation
+ * writes the new answer into the cache itself. Refetching would be a request
+ * on every navigation to ask a question whose answer cannot have changed.
+ */
+export const setupStatusQuery = {
+  queryKey: keys.setupStatus,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api.setupStatus(signal),
+  staleTime: Infinity,
+
+  // One attempt. The login page's guard waits on this before rendering, and
+  // the default two retries turn a server having a bad second into several
+  // seconds of blank page in front of a form that would have worked. The
+  // guard treats a failure as "assume it is set up", so failing fast is
+  // strictly better than failing slowly.
+  retry: false,
+};
+
+export function useSetupStatus() {
+  return useQuery(setupStatusQuery);
+}
+
+/**
+ * Claim the instance.
+ *
+ * On success the response is a session, so this seeds the session cache the
+ * same way login does -- the person is signed in and the next route guard has
+ * to agree, without a round trip that could fail and strand them on a page
+ * that has just told them it succeeded.
+ */
+export function useSetup() {
+  const client = useQueryClient();
+
+  return useMutation({
+    mutationFn: (body: SetupRequest) => api.setup(body),
+
+    onSuccess: (envelope) => {
+      client.clear();
+      client.setQueryData(keys.me, envelope);
+      client.setQueryData(keys.setupStatus, { initialized: true, tokenRequired: false });
+    },
+  });
+}
+
+/** The messages a failed setup can produce. */
+export type SetupErrorKey =
+  | "setup.errors.alreadyInitialized"
+  | "setup.errors.badToken"
+  | "setup.errors.passwordTooShort"
+  | "setup.errors.duplicate"
+  | "setup.errors.unexpected"
+  | "connection.offline";
+
+/**
+ * Which message a failed setup deserves.
+ *
+ * On the stable code, never the prose. The first two branches are why the
+ * server returns two codes rather than one: they lead to different next steps
+ * -- go and log in, or go and read the token out of the server's output.
+ */
+export function setupErrorKey(error: unknown): SetupErrorKey {
+  if (error instanceof ApiError) {
+    if (error.code === "PIVOT-SETUP-001") return "setup.errors.alreadyInitialized";
+    if (error.code === "PIVOT-SETUP-002") return "setup.errors.badToken";
+    if (error.code === "PIVOT-DATA-002") return "setup.errors.duplicate";
+
+    if (error.details.some((detail) => detail.field === "password")) {
+      return "setup.errors.passwordTooShort";
+    }
+
+    return "setup.errors.unexpected";
+  }
+
+  return "connection.offline";
 }
 
 /** The single sign-on buttons to offer. */

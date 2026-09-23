@@ -59,6 +59,15 @@ var (
 
 	// ErrPasswordTooShort is returned when a password fails the length floor.
 	ErrPasswordTooShort = errors.New("auth: password is too short")
+
+	// ErrPasswordTooLong is returned when a password exceeds the ceiling.
+	//
+	// A sentinel like its short counterpart, so an HTTP layer can report both
+	// as what they are: a person typed something the rules do not allow. Left
+	// as a bare error it reaches the caller as an unexplained 500, which is
+	// how "my password manager generated something too long" becomes a bug
+	// report about the server being broken.
+	ErrPasswordTooLong = errors.New("auth: password is too long")
 )
 
 // MinPasswordLength is the floor.
@@ -84,7 +93,7 @@ func HashPassword(password string) (string, error) {
 	}
 
 	if len(password) > MaxPasswordLength {
-		return "", fmt.Errorf("auth: password exceeds %d bytes", MaxPasswordLength)
+		return "", fmt.Errorf("%w: at most %d bytes", ErrPasswordTooLong, MaxPasswordLength)
 	}
 
 	salt := make([]byte, argonSaltLen)

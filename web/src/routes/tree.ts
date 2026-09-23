@@ -2,6 +2,7 @@ import { Route as rootRoute } from "./root";
 import { Route as authenticatedRoute } from "./authenticated";
 import { Route as indexRoute } from "./index";
 import { Route as loginRoute } from "./login";
+import { Route as setupRoute } from "./setup";
 import {
   connectionsRoute,
   dashboardsRoute,
@@ -21,6 +22,10 @@ import {
  */
 export const routeTree = rootRoute.addChildren([
   loginRoute,
+
+  // Outside the authenticated layout, necessarily: it is the page for an
+  // instance that has nobody to authenticate as.
+  setupRoute,
   authenticatedRoute.addChildren([
     indexRoute,
     dashboardsRoute,
