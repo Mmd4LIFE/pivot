@@ -42,7 +42,11 @@ beforeEach(async () => {
 
       const reply = replies[key] ?? { status: 404, body: { error: { code: "PIVOT-REQ-003" } } };
 
-      return new Response(reply.body === undefined ? "" : JSON.stringify(reply.body), {
+      // `null`, not `""`. A 204 is a null-body status and the Response
+      // constructor throws when given one -- which surfaces as a NetworkError
+      // from the client and makes every successful 204 look like the server
+      // being unreachable. Cost an hour once.
+      return new Response(reply.body === undefined ? null : JSON.stringify(reply.body), {
         status: reply.status,
         headers: { "Content-Type": "application/json" },
       });

@@ -16,7 +16,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../../ui/DropdownMenu";
-import { SignOut } from "./glyphs";
+import { Person, SignOut } from "./glyphs";
 
 /**
  * The account menu.
@@ -102,6 +102,16 @@ export function UserMenu() {
         )}
 
         <DropdownMenuSeparator />
+
+        <DropdownMenuItem
+          onSelect={() => {
+            void navigate({ to: "/account" });
+          }}
+          className="gap-2"
+        >
+          <Person />
+          {t("nav.account")}
+        </DropdownMenuItem>
 
         <DropdownMenuItem onSelect={signOut} className="gap-2">
           <SignOut />

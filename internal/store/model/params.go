@@ -271,6 +271,17 @@ type RevokeUserSessionsParams struct {
 	OrgID     uuid.UUID
 }
 
+// RevokeOtherUserSessionsParams keeps ID and revokes the rest.
+type RevokeOtherUserSessionsParams struct {
+	RevokedAt dbtypes.NullTime
+	UserID    uuid.UUID
+	OrgID     uuid.UUID
+
+	// ID is the session to keep, not the one to revoke. Named as the query
+	// names it; read the comment above before changing either.
+	ID uuid.UUID
+}
+
 type ListUserSessionsParams struct {
 	UserID uuid.UUID
 	OrgID  uuid.UUID

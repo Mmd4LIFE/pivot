@@ -3,6 +3,7 @@ import { Route as authenticatedRoute } from "./authenticated";
 import { Route as indexRoute } from "./index";
 import { Route as loginRoute } from "./login";
 import { Route as setupRoute } from "./setup";
+import { Route as accountRoute } from "./account";
 import {
   connectionsRoute,
   dashboardsRoute,
@@ -28,6 +29,7 @@ export const routeTree = rootRoute.addChildren([
   setupRoute,
   authenticatedRoute.addChildren([
     indexRoute,
+    accountRoute,
     dashboardsRoute,
     questionsRoute,
     connectionsRoute,

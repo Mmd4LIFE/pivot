@@ -438,6 +438,84 @@ func (s *Service) SetPassword(ctx context.Context, userID uuid.UUID, newPassword
 	return nil
 }
 
+// ErrPasswordIncorrect means the current password did not match.
+//
+// Distinct from ErrInvalidCredentials, which is what login returns: there is
+// no user enumeration to protect against here, because the caller is already
+// authenticated and is proving they are still the person who sat down at this
+// machine. Telling them the password they typed was wrong is the only useful
+// answer.
+var ErrPasswordIncorrect = errors.New("auth: the current password is not correct")
+
+// ChangePassword replaces a user's own password.
+//
+// Three properties, each of which has been a real vulnerability in real
+// products:
+//
+// The current password is verified first. Without that, anybody who gets
+// hold of an unlocked laptop -- or an XSS bug -- changes the password and owns
+// the account, and a session cookie is not a re-authentication.
+//
+// Every *other* session ends. A password change is usually a response to
+// suspicion, and one that leaves the other party's session alive has done
+// nothing but make the owner feel safer.
+//
+// This session survives. Signing somebody out of the device they are standing
+// at makes the safe action feel like a punishment, which teaches people not to
+// take it.
+func (s *Service) ChangePassword(
+	ctx context.Context, userID, sessionID uuid.UUID, current, next string,
+) error {
+	user, err := s.repos.Users.Get(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("auth: look up user: %w", err)
+	}
+
+	// An account with no password cannot have one changed by proving the old
+	// one. Setting the first password on an SSO account is a different
+	// operation with a different proof, and quietly accepting an empty current
+	// password here would be that operation by accident.
+	if !user.PasswordHash.Valid || user.PasswordHash.String == "" {
+		return ErrPasswordIncorrect
+	}
+
+	ok, err := VerifyPassword(current, user.PasswordHash.String)
+	if err != nil {
+		s.log.Error("stored password hash is unusable",
+			slog.String("user_id", userID.String()), logging.Err(err))
+
+		return ErrPasswordIncorrect
+	}
+
+	if !ok {
+		return ErrPasswordIncorrect
+	}
+
+	// Hashed before anything is written, so a password that fails the floor
+	// cannot leave the account halfway through a change.
+	hash, err := HashPassword(next)
+	if err != nil {
+		return err
+	}
+
+	if serr := s.repos.Users.SetPassword(ctx, userID, hash); serr != nil {
+		return fmt.Errorf("auth: set password: %w", serr)
+	}
+
+	// After the password is stored, not before. Revoking first would leave a
+	// window where the old password still works and the user has been signed
+	// out everywhere, which is the worst of both.
+	if _, rerr := s.repos.Sessions.RevokeAllForUserExcept(ctx, userID, sessionID); rerr != nil {
+		return fmt.Errorf("auth: revoke other sessions after password change: %w", rerr)
+	}
+
+	s.log.Info("password changed",
+		slog.String("user_id", userID.String()),
+		slog.String("session_id", sessionID.String()))
+
+	return nil
+}
+
 // Sweep removes expired sessions and stale login attempts.
 //
 // Part 5's scheduler does not exist yet, so this is called on startup and is

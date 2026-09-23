@@ -23,7 +23,12 @@ export function SideNav({ className }: { className?: string }) {
 
   return (
     <nav aria-label={t("nav.primary")} className={cn("flex flex-col gap-0.5", className)}>
-      {NAVIGATION.map((item) => {
+      {/*
+        Hidden items are filtered here rather than left out of the model. The
+        account page is still in the palette and still produces a breadcrumb;
+        it simply does not belong in a list of places in the product.
+      */}
+      {NAVIGATION.filter((item) => item.hidden !== true).map((item) => {
         const current = item === active;
 
         return (

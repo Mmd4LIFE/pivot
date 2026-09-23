@@ -293,6 +293,14 @@ func (r *Router) authRoutes(authed Middleware) {
 		Chain(WithRateLimit(r.defaultLimiter, KeyByIP))(http.HandlerFunc(h.handleLogout)))
 
 	r.mux.Handle("GET "+APIPrefix+"/auth/me", authed(http.HandlerFunc(h.handleMe)))
+
+	// The strict limiter, keyed by address and path like login. Changing a
+	// password costs two Argon2 hashes -- one to verify the old, one to store
+	// the new -- which makes it the most expensive authenticated endpoint in
+	// the product and the obvious one to hammer.
+	r.mux.Handle("POST "+APIPrefix+"/auth/password",
+		Chain(authed, WithRateLimit(r.authLimiter, KeyByIPAndPath))(
+			http.HandlerFunc(h.handleChangePassword)))
 	r.mux.Handle("GET "+APIPrefix+"/auth/sessions", authed(http.HandlerFunc(h.handleListSessions)))
 	r.mux.Handle("DELETE "+APIPrefix+"/auth/sessions/{id}", authed(http.HandlerFunc(h.handleRevokeSession)))
 }

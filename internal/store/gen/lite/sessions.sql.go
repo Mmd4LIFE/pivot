@@ -150,6 +150,36 @@ func (q *Queries) ListUserSessions(ctx context.Context, arg ListUserSessionsPara
 	return items, nil
 }
 
+const revokeOtherUserSessions = `-- name: RevokeOtherUserSessions :execrows
+UPDATE sessions
+SET revoked_at = ?
+WHERE user_id = ? AND org_id = ? AND id <> ? AND revoked_at IS NULL
+`
+
+type RevokeOtherUserSessionsParams struct {
+	RevokedAt dbtypes.NullTime
+	UserID    uuid.UUID
+	OrgID     uuid.UUID
+	ID        uuid.UUID
+}
+
+// Revoking every session *except* one is what changing your own password
+// needs. Signing somebody out of the device they are changing their password
+// on makes the safe action feel like a punishment, and the session being kept
+// is the one whose owner just proved they know the current password.
+func (q *Queries) RevokeOtherUserSessions(ctx context.Context, arg RevokeOtherUserSessionsParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, revokeOtherUserSessions,
+		arg.RevokedAt,
+		arg.UserID,
+		arg.OrgID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const revokeSession = `-- name: RevokeSession :execrows
 UPDATE sessions
 SET revoked_at = ?

@@ -61,6 +61,7 @@ export const keys = {
   me: ["auth", "me"] as const,
   providers: ["auth", "providers"] as const,
   setupStatus: ["setup", "status"] as const,
+  sessions: ["auth", "sessions"] as const,
 };
 
 /**
@@ -132,6 +133,92 @@ export function useSetup() {
       client.setQueryData(keys.setupStatus, { initialized: true, tokenRequired: false });
     },
   });
+}
+
+/**
+ * The caller's own active sessions.
+ *
+ * Short stale time rather than the default: this list is how somebody checks
+ * whether the thing they just ended is really gone, and a cached "still there"
+ * answers a question about security with a stale fact.
+ */
+export function useSessions() {
+  return useQuery({
+    queryKey: keys.sessions,
+    queryFn: ({ signal }: { signal: AbortSignal }) => api.sessions(signal),
+    staleTime: 0,
+  });
+}
+
+/** End one session. */
+export function useRevokeSession() {
+  const client = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) => api.revokeSession(id),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: keys.sessions });
+    },
+  });
+}
+
+/**
+ * Change your own password.
+ *
+ * The session list is refetched afterwards, because the change ends every
+ * other session and a list that still shows them would be telling somebody
+ * their other devices are signed in when they are not.
+ */
+export function useChangePassword() {
+  const client = useQueryClient();
+
+  return useMutation({
+    mutationFn: (body: { currentPassword: string; newPassword: string }) =>
+      api.changePassword(body.currentPassword, body.newPassword),
+
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: keys.sessions });
+    },
+  });
+}
+
+/** The messages a failed password change can produce. */
+export type ChangePasswordErrorKey =
+  | "account.password.errors.incorrect"
+  | "account.password.errors.tooShort"
+  | "account.password.errors.same"
+  | "account.password.errors.throttled"
+  | "account.password.errors.unexpected"
+  | "connection.offline";
+
+/**
+ * Which message a failed change deserves.
+ *
+ * On the field the server named, not on prose. The server reports a wrong
+ * current password as a 422 against `currentPassword` rather than a 401 --
+ * deliberately, because a 401 would reach the global session handling above
+ * and sign somebody out for mistyping their own password.
+ */
+export function changePasswordErrorKey(error: unknown): ChangePasswordErrorKey {
+  if (error instanceof ApiError) {
+    if (error.status === 429) return "account.password.errors.throttled";
+
+    if (error.details.some((detail) => detail.field === "currentPassword")) {
+      return "account.password.errors.incorrect";
+    }
+
+    const newPassword = error.details.find((detail) => detail.field === "newPassword");
+
+    if (newPassword !== undefined) {
+      return newPassword.message.includes("different")
+        ? "account.password.errors.same"
+        : "account.password.errors.tooShort";
+    }
+
+    return "account.password.errors.unexpected";
+  }
+
+  return "connection.offline";
 }
 
 /** The messages a failed setup can produce. */

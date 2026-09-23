@@ -190,6 +190,14 @@ export type AuthProviderList = JSONResponse<
   paths["/api/v1/auth/providers"]["get"]["responses"]["200"]
 >;
 
+/** The body of `GET /api/v1/auth/sessions`. */
+export type SessionList = JSONResponse<
+  paths["/api/v1/auth/sessions"]["get"]["responses"]["200"]
+>;
+
+/** One row of that list. */
+export type SessionSummary = SessionList["sessions"][number];
+
 /** The body of `GET /api/v1/setup/status`. */
 export type SetupStatus = JSONResponse<
   paths["/api/v1/setup/status"]["get"]["responses"]["200"]
@@ -221,6 +229,18 @@ export const api = {
     }),
 
   logout: () => request<void>("/auth/logout", { method: "POST" }),
+
+  sessions: (signal?: AbortSignal) =>
+    request<SessionList>("/auth/sessions", signal ? { signal } : {}),
+
+  revokeSession: (id: string) =>
+    request<void>(`/auth/sessions/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<void>("/auth/password", {
+      method: "POST",
+      body: { currentPassword, newPassword },
+    }),
 
   setupStatus: (signal?: AbortSignal) =>
     request<SetupStatus>("/setup/status", signal ? { signal } : {}),

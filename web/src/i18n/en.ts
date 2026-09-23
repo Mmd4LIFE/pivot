@@ -124,6 +124,75 @@ export const en = {
     },
   },
 
+  /*
+   * Your own account.
+   *
+   * The words here are about consequence rather than mechanism: somebody
+   * changing a password wants to know what happens to their other devices,
+   * and somebody ending a session wants to know what it does to whoever is
+   * using it.
+   */
+  account: {
+    title: "Your account",
+    subtitle: "Your details, your password, and the devices you are signed in on.",
+
+    profile: {
+      heading: "Details",
+      name: "Name",
+      email: "Email address",
+      organization: "Organization",
+
+      // Editing comes with the people-management screens in Phase 0's
+      // successor; saying so is better than a disabled field with no reason.
+      readOnly: "Ask an administrator to change these for now.",
+    },
+
+    password: {
+      heading: "Password",
+      description:
+        "Changing it signs you out everywhere else. You stay signed in here.",
+
+      current: "Current password",
+      new: "New password",
+      newHelp: "At least 12 characters. Length matters more than symbols.",
+
+      submit: "Change password",
+      submitting: "Changing",
+      changed: "Password changed. Your other sessions have been signed out.",
+
+      errors: {
+        incorrect: "That is not your current password.",
+        tooShort: "Use a longer password \u2014 at least 12 characters.",
+        same: "The new password must be different from the current one.",
+        throttled: "Too many attempts. Wait a few minutes before trying again.",
+        unexpected: "Something went wrong while changing your password.",
+      },
+    },
+
+    sessions: {
+      heading: "Signed in on",
+      description:
+        "Every device with a live session. Ending one takes effect immediately.",
+
+      current: "This device",
+      lastSeen: "Last used",
+      signedIn: "Signed in",
+      expires: "Expires",
+      unknownDevice: "Unknown device",
+
+      end: "End session",
+      ending: "Ending",
+      ended: "That session has been ended.",
+      endFailed: "That session could not be ended.",
+
+      // The row for the session you are using says this instead of offering a
+      // button that would sign you out by surprise.
+      endCurrent: "Use Sign out to end this one.",
+
+      empty: "No other devices are signed in.",
+    },
+  },
+
   nav: {
     // The landmark labels. A screen reader user navigates by these, so they
     // are names rather than descriptions.

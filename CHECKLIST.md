@@ -53,8 +53,8 @@ At the end of every part, in this order:
 
 | | |
 |---|---|
-| **Last completed** | Part 15-a — The first run |
-| **Next up** | **Part 15-b — Your own account** |
+| **Last completed** | Part 15-b — Your own account |
+| **Next up** | **Part 15-c — Operating it: doctor, backup, secrets** |
 | **Current phase** | Phase 0 — Foundations |
 | **Branch** | `main` |
 | **Blockers** | None |
@@ -84,6 +84,12 @@ from one series filtered by status class, so they cannot disagree with each othe
 are bounded by construction: the route label is the mux's *pattern*, so a scanner probing
 for `/wp-admin` cannot create a series per guess. `deploy/grafana/pivot-overview.json` is
 the reference dashboard, and a test matches every query in it against a real exposition.
+
+**Somebody can change their own password from the product**, at `/account`, which also
+lists every device holding a live session and can end any of them except the one in use.
+A change proves the current password and revokes every *other* session; `pivot admin
+reset-password` remains the operation for somebody who cannot prove anything, and it ends
+every session including the one making the request.
 
 **A fresh binary can be set up from a browser.** `pivot serve` with no configuration
 creates `pivot.db`, migrates it, prints a setup token, and serves a `/setup` page that
@@ -479,7 +485,7 @@ needs an entry in `sqlc.yaml`'s SQLite override list**, or the packages silently
 ## Progress
 
 ```
-Phase 0  Foundations        [█████████████████████████ ] 27/30   (Parts 3, 4, 6, 7, 8, 10, 11, 12, 13, 14 and 15 each split)
+Phase 0  Foundations        [████████████████████████  ] 28/30   (Parts 3, 4, 6, 7, 8, 10, 11, 12, 13, 14 and 15 each split)
 Phase 1  Connect & Query    [                    ]  0/12   (detailed at Part 15)
 Phase 2+ ...                                            (expanded as we approach)
 ```
@@ -1453,21 +1459,49 @@ not have. Written down in the code rather than hidden.
 
 ---
 
-### - [ ] Part 15-b — Your own account
+### - [x] Part 15-b — Your own account ✅ 2026-09-23
 
 **Deliverable:** Changing your own password, from the product.
 
-**Build:** `auth.Service.ChangePassword`, `POST /api/v1/auth/password`, and the account
-page.
+**Build:** `auth.Service.ChangePassword`, `POST /api/v1/auth/password`, the
+`RevokeOtherUserSessions` query, and `/account`.
 
 **Done when:**
-- Changing a password verifies the current one and **ends every other session**, leaving
-  the caller signed in on the device they changed it from
-- The account page shows the sessions Part 6 already lists, and can end them
+- [x] **The current password is proved first.** Without it an unlocked laptop or an XSS
+      bug is enough to take the account outright — a session cookie says somebody logged
+      in at some point, not that the person at the keyboard now is the same one
+- [x] **Every other session ends, and this one does not.** Both halves are the deliverable:
+      a change made in response to suspicion that leaves the other party signed in has done
+      nothing, and signing somebody out of the device they are standing at makes the safe
+      action feel like a punishment
+- [x] **A wrong current password is a 422 against the field, not a 401.** A 401 reaches the
+      frontend's global session handling, so mistyping your own password in the change form
+      would sign you out — a logout caused by the safety feature
+- [x] The account page lists every device with a live session and can end any of them,
+      except the one being used: that is Sign out's job, and a button in a device list
+      that logs you out is a surprise
+- [x] Rate limited with the strict authentication limiter, because a change costs **two**
+      Argon2 hashes — one to verify the old, one to store the new
 
-**Notes:** Moved here from Part 11-b. It needs a service method that verifies the current
-password and revokes the others, which is backend work rather than shell work, and the API
-has none today — only `pivot admin reset-password`.
+**Found on the way:**
+- **The jsdom test harness could not express a 204.** It built `new Response("", {status})`,
+  and a 204 is a null-body status, so the constructor throws — which surfaces as a
+  `NetworkError` and makes every successful 204 look like the server being unreachable.
+  Fixed in all three route test files; no existing test had depended on one
+- **A Playwright context made from the `browser` fixture inherits the project's
+  `storageState`.** The "second device" in the e2e arrived holding the suite's
+  already-signed-in cookie, so it was the same session and the test proved nothing — it
+  failed on the login page it never reached. Empty cookies and an explicit `baseURL` now
+- **`model.StringOr` was dead code**, and the coverage gate found it: touching
+  `store/model` pulled a six-statement package into the changed set at 50%, and the
+  uncovered half had no callers anywhere. Deleted rather than tested. `internal/store/repo`
+  also joined the set and passes at **89.2%** — worth knowing that it reads as 76% without
+  Postgres, because every `pgQuerier` method is then uncovered
+
+**Notes:** Moved here from Part 11-b. `SetPassword` (all sessions, no proof) stays as the
+administrative operation behind `pivot admin reset-password`; `ChangePassword` (proof,
+keeps this session) is the one a person performs on themselves. Two operations rather than
+a flag, because the difference is what they prove.
 
 **Refs:** `P0-PKG-002`
 
@@ -1564,6 +1598,7 @@ Newest first. Record what **actually** shipped, including what didn't work.
 
 | Date | Part | Shipped | Notes |
 |---|---|---|---|
+| 2026-09-23 | 15-b | `auth.Service.ChangePassword`, `POST /api/v1/auth/password`, the `RevokeOtherUserSessions` query through the engine abstraction, and the `/account` page | **Changing your own password proves the current one, ends every other session, and keeps this one** — and all three are the deliverable. Without the proof, an unlocked laptop or an XSS bug is enough to take the account outright, because a session cookie says somebody logged in at some point and not that the person at the keyboard now is the same one. Without the revocation the operation does nothing: a password change is a response to suspicion, and one that leaves the other party signed in only makes the owner feel safer. And without keeping this session, the safe action signs you out of the device you are standing at, which is how people learn not to take it. **A wrong current password is a 422 against the field, not a 401**: a 401 reaches the frontend's global session handling, so mistyping your own password in the change form would log you out — the safety feature causing the logout. **The account page lists every device and ends any of them except the one in use**, which is Sign out's job; a button in a device list that logs you out is a surprise. `SetPassword` stays as the administrative operation behind `pivot admin reset-password` — two operations rather than a flag, because the difference is what they prove. **Two test-harness bugs surfaced.** The jsdom harness built `new Response("", {status: 204})`, which throws because 204 is a null-body status — so every successful 204 looked like the server being unreachable, and the first test to depend on one was this part's. And a Playwright context made from the `browser` fixture **inherits the project's `storageState`**, so the "second device" in the e2e arrived holding the suite's own signed-in cookie and proved nothing. |
 | 2026-09-23 | 15-a | `internal/setup`, `POST /api/v1/setup` and its status endpoint, the setup token and its startup banner, the `/setup` page, and a shared first-user rule | **A binary with no configuration, no database and no arguments now takes somebody from nothing to signed-in administrator in one form.** Claiming the instance *is* the login: the response is the same session envelope `/auth/login` returns and sets the same cookie, because a password typed twice should not then be typed into a login page. **The window between starting and being claimed is the security problem of a first run**, and it is answered with a token generated per process and printed in a banner — an unclaimed Pivot on a network is otherwise an instance takeover waiting for a port scan, and "only for a few seconds" is not an argument. **Setup closes permanently**, checked against the database inside a lock rather than cached at startup, because an instance that decided at boot that it was unclaimed would stay claimable for as long as it ran. **Two concurrent claims produce one administrator, mutation-verified**: with the mutex removed, all 8 concurrent claims succeed and create 8 organizations. **The first-user-becomes-admin rule now exists once**, shared by the CLI and the browser — it is a rule about privilege, and one written twice is eventually only true in one of them. **Three things were found on the way.** The spec-drift test *had never been able to fail*: everything under the API prefix falls through to a catch-all that answers 401 before the 404 handler, so a documented route that was never registered looked exactly like one that was — it now asks the mux which pattern it would match, and immediately found that the fixture had never registered the SSO routes either. `pivot serve` briefly became **fatal when the schema was behind**, because the banner queried a table that did not exist yet; caught by the test that asserts serve warns rather than refuses. And a too-long password had no sentinel error, so it would have surfaced from the setup form as an unexplained 500. **Four Playwright tests spawn their own binary against their own empty database**, including parsing the token out of its real output — the only instruction a first-time user is given. **Then CI's coverage gate refused the pull request**: touching `password.go` pulled `internal/auth` into the changed set at 74.7%, pre-existing debt the gate had never had reason to look at. It was right to. The untested half was the lockout escalation, accounts with no password at all, corrupt stored hashes and session revocation on a password change — every one silent until the day it matters. 85.9% now, and the doubling-and-cap test is mutation-verified. |
 | 2026-09-23 | 14-d | `internal/api/telemetry.go`, `web/src/lib/report.ts`, the `traceresponse` response header, `LimitTelemetry`, and the boundary and window listeners wired to them | **An error in a browser now lands in the same log as the request that caused it, carrying that request's identifiers.** The mechanism is the part worth keeping: the server returns its trace in a `traceresponse` header and the client reads it off the failed response, because a browser that *generates* a trace ID also generates the sampling decision and names a trace the store has never heard of. The request ID goes with it, since a trace ID only exists when tracing is on — which by default it is not — and a request ID is on every response Pivot has ever sent. **Exact or absent, never guessed**: the identifiers are attached only when the reported error *is* the failed request, because the tempting version — remember the last failure, staple it to whatever comes next — points an operator at an unrelated trace, which costs more time than having none. **Unauthenticated by necessity**, since the errors most worth having happen on the page where logging in was supposed to work, so it is defended by shape instead: a strict limiter with a burst of 10 (one broken render fires three events and a limit that hid two of them would hide the explanation), a 16 KiB cap rather than the API's 1 MiB, and a handler that writes one log line and nothing else. **Every field is treated as hostile** — control characters stripped so nothing can forge a log line or paint somebody's terminal, fields truncated rather than rejected, and the browser's trace logged as `browser_trace_id` so a report cannot overwrite the trace of the request carrying it. **Unknown fields are ignored here and rejected everywhere else**, because the client is a cached bundle in somebody's browser and losing its report over an unrecognised field would lose it exactly when a deploy has gone wrong. **Three layers, because each can only see its own**: jsdom for the reporter's restraint, Go for the endpoint's, and three Playwright tests throwing from a page served by the real binary — which is the only place that can prove the listeners are installed at all and that the request survives the application's own CSP. **Deliberately not Sentry's SDK: 0.6 KB gzipped against roughly 30, and the budget went 185.1 → 185.7 KB of 200.** What that gives up is real — no source maps, no grouping, no offline queue — and what it buys is that an air-gapped Pivot reports its own errors with no third-party script on the login page. |
 | 2026-09-22 | 14-c | `internal/observability/metrics.go`, `internal/api/metrics.go`, the `observability.metrics` config section, the `/metrics` route, `deploy/grafana/pivot-overview.json`, and three test files | **Three instruments, and errors are a label rather than a counter** — rate and error rate are one series filtered by status class, so the two numbers on the dashboard cannot drift apart. **Cardinality is bounded by construction, not by care**: the route label is the mux's *pattern*, so `/auth/sessions/{id}` is one series rather than one per session, and a scanner probing for `/wp-admin` collapses into the catch-all — asserted in a test named for the scanner. My first attempt read `r.Pattern` before the mux had dispatched, so **every request was labelled `unmatched`** and the whole dashboard would have been one flat line; asking `mux.Handler(r)` is what actually resolves it. **The dashboard has a test**, which sounds absurd until you ask how a reference dashboard rots: a metric gets renamed and four panels go quietly empty, so the test matches every query's metric and label against a real exposition. **Metrics default to on**, unlike tracing — an operator who must first enable metrics before they can find out why the thing is slow has already been failed — and `/metrics` is unauthenticated because Prometheus cannot hold a session and every scrape would otherwise cost an Argon2 verification. **The race detector found my own global**: `SetupMetrics` wrote package-level state that tests read concurrently, the fourth defect global mutable state has caused in Part 14 alone, so I deleted the global and returned the handler instead of protecting it with a mutex. **The cost is +18 modules and +2 MB.** Frontend error reporting moved to **14-d**: it is a backend endpoint plus a browser reporter, and bolting it onto a metrics session would have got both done badly. |

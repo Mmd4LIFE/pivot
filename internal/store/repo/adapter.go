@@ -570,6 +570,12 @@ func (a *pgQuerier) RevokeUserSessions(ctx context.Context, p model.RevokeUserSe
 	return a.q.RevokeUserSessions(ctx, pg.RevokeUserSessionsParams(p))
 }
 
+func (a *pgQuerier) RevokeOtherUserSessions(
+	ctx context.Context, p model.RevokeOtherUserSessionsParams,
+) (int64, error) {
+	return a.q.RevokeOtherUserSessions(ctx, pg.RevokeOtherUserSessionsParams(p))
+}
+
 func (a *pgQuerier) ListUserSessions(ctx context.Context, p model.ListUserSessionsParams) ([]model.Session, error) {
 	rows, err := a.q.ListUserSessions(ctx, pg.ListUserSessionsParams(p))
 	if err != nil {
@@ -640,6 +646,12 @@ func (a *liteQuerier) RevokeSessionForUser(ctx context.Context, p model.RevokeSe
 
 func (a *liteQuerier) RevokeUserSessions(ctx context.Context, p model.RevokeUserSessionsParams) (int64, error) {
 	return a.q.RevokeUserSessions(ctx, lite.RevokeUserSessionsParams(p))
+}
+
+func (a *liteQuerier) RevokeOtherUserSessions(
+	ctx context.Context, p model.RevokeOtherUserSessionsParams,
+) (int64, error) {
+	return a.q.RevokeOtherUserSessions(ctx, lite.RevokeOtherUserSessionsParams(p))
 }
 
 func (a *liteQuerier) ListUserSessions(ctx context.Context, p model.ListUserSessionsParams) ([]model.Session, error) {
