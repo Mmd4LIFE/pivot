@@ -27,6 +27,9 @@ and grepped thereafter.
 - **[operations/backup-and-restore.md](operations/backup-and-restore.md)** — taking a
   backup that can actually be restored, and restoring it. Written for whoever runs the
   instance rather than for whoever built it.
+- **[operations/secrets.md](operations/secrets.md)** — the key that makes a stolen
+  database useless, where it lives, and how to rotate it without losing everything it
+  protects.
 
 ### 4. Standing records
 - **[design/keyboard-audit.md](design/keyboard-audit.md)** — how `web/src/ui` behaves

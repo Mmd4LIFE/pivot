@@ -81,6 +81,7 @@ value came from.`,
 		newDoctorCmd(env, &flags),
 		newBackupCmd(env, &flags),
 		newRestoreCmd(env, &flags),
+		newSecretsCmd(env, &flags),
 		newConfigCmd(env, &flags),
 	)
 

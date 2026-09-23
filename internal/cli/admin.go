@@ -118,7 +118,17 @@ func openRepos(cmd *cobra.Command, env Env, flags *globalFlags) (*store.DB, *rep
 		return nil, nil, err
 	}
 
-	return db, repo.New(db), nil
+	// Generating is allowed here: `pivot admin add-provider` on a fresh
+	// install is a legitimate first write of a secret, and refusing until the
+	// server has been started once would be a rule nobody could guess.
+	resolved, err := resolveSecrets(res.Config, true, log)
+	if err != nil {
+		_ = db.Close()
+
+		return nil, nil, err
+	}
+
+	return db, repo.New(db, repo.WithSecrets(resolved.Keyring)), nil
 }
 
 // resolveOrg finds the organization to act on.

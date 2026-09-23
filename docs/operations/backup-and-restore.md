@@ -101,9 +101,15 @@ pretend to. Stop the server.
 **In:** organizations, users, password hashes, groups, role assignments,
 sessions, identity-provider configuration.
 
-**Not in:** the configuration file, and any environment variables the instance
-needs. A backup restores the *data*; it does not restore an instance. Keep
-`pivot.yaml` wherever you keep the rest of your configuration.
+**Not in:** the configuration file, any environment variables the instance
+needs, and **the encryption key**. A backup restores the *data*; it does not
+restore an instance.
+
+The key's absence is deliberate. Stored secrets are encrypted with it, so a
+backup containing both is exactly as exposed as one with no encryption at all.
+Back the key up separately and store it somewhere these backups are not —
+see [secrets.md](secrets.md). Restoring a database without its key gives you an
+instance whose stored secrets cannot be read; everything else works.
 
 ## A schedule
 

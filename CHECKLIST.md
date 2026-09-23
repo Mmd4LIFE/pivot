@@ -53,8 +53,8 @@ At the end of every part, in this order:
 
 | | |
 |---|---|
-| **Last completed** | Part 15-c — Doctor and backup |
-| **Next up** | **Part 15-d — Secrets at rest** |
+| **Last completed** | Part 15-d — Secrets at rest |
+| **Next up** | **Part 15-e — The container stack, and Phase 0 close-out** |
 | **Current phase** | Phase 0 — Foundations |
 | **Branch** | `main` |
 | **Blockers** | None |
@@ -84,6 +84,13 @@ from one series filtered by status class, so they cannot disagree with each othe
 are bounded by construction: the route label is the mux's *pattern*, so a scanner probing
 for `/wp-admin` cannot create a series per guess. `deploy/grafana/pivot-overview.json` is
 the reference dashboard, and a test matches every query in it against a real exposition.
+
+**Stored secrets are encrypted at rest.** `identity_providers.client_secret` is an
+envelope — a per-value data key wrapped by a master key held outside the database — so a
+stolen database, backup or disk is useless without the key. The key is generated on first
+run beside the database and can be supplied by an orchestrator instead;
+`pivot secrets status|rewrap` handles the migration from plaintext and the rotation, and
+[docs/operations/secrets.md](docs/operations/secrets.md) is the procedure.
 
 **`pivot doctor` says what is wrong with an install**, and `pivot backup` / `pivot restore`
 take and replace a SQLite database consistently while it is being served — `VACUUM INTO`
@@ -174,10 +181,9 @@ which an organization migrates onto SSO. Group membership follows the directory 
 directions; groups are matched by name and **never created**, because a directory with
 hundreds of them would otherwise fill the organization with empty ones. Attributes are
 written with `source = 'oidc'`, so a sync replaces exactly what the provider owns and
-leaves anything set by hand alone. **`identity_providers.client_secret` is stored in
-plaintext** — Part 15 owns envelope encryption for this column and Phase 1's connection
-credentials together; the API never returns it, and `hasClientSecret` reports presence
-instead.
+leaves anything set by hand alone. **`identity_providers.client_secret` is encrypted at
+rest** since Part 15-d; the API never returns it either, and `hasClientSecret` reports
+presence instead.
 
 `/api/v1/auth/oidc/{provider}/{start,callback}` and `/auth/providers` are live, plus
 admin CRUD gated on `manage_organization`. The flow's `state`, `nonce` and PKCE verifier
@@ -491,7 +497,7 @@ needs an entry in `sqlc.yaml`'s SQLite override list**, or the packages silently
 ## Progress
 
 ```
-Phase 0  Foundations        [████████████████████████  ] 29/31   (Parts 3, 4, 6, 7, 8, 10, 11, 12, 13, 14 and 15 each split)
+Phase 0  Foundations        [█████████████████████████ ] 30/31   (Parts 3, 4, 6, 7, 8, 10, 11, 12, 13, 14 and 15 each split)
 Phase 1  Connect & Query    [                    ]  0/12   (detailed at Part 15)
 Phase 2+ ...                                            (expanded as we approach)
 ```
@@ -1554,23 +1560,51 @@ a flag, because the difference is what they prove.
 
 ---
 
-### - [ ] Part 15-d — Secrets at rest
+### - [x] Part 15-d — Secrets at rest ✅ 2026-09-23
 
 **Deliverable:** `identity_providers.client_secret` stops being readable in the database.
 
-**Build:** Envelope encryption with a local master key, a migration that encrypts what is
-already stored, and the rotation procedure.
+**Build:** `internal/secrets` (envelope encryption), an encrypting decorator over the
+`Querier`, `pivot secrets status|rewrap|generate-key`, a `doctor` check, and
+[docs/operations/secrets.md](docs/operations/secrets.md).
 
 **Done when:**
-- A stored client secret is unreadable to anybody with the database file and no key
-- Existing rows are migrated, and an instance whose key is missing says so at startup
-  rather than failing later inside an SSO login
-- **The rotation story is written down before it is needed**, because the day it is needed
-  is not the day to work it out
+- [x] **A stored secret is an envelope, checked with SQL against the file** rather than
+      through the code that wrote it — which would be asking the guard whether the door
+      is locked
+- [x] **Rotation works in the order the documentation gives**, walked end to end: new key
+      primary with the old one retained → `rewrap` → drop the old key, and everything is
+      still readable. Doing the last step first is unrecoverable, and the document says so
+      in those words
+- [x] **Legacy plaintext keeps working and is reported.** An upgrade that broke every SSO
+      login would not be an upgrade, so plaintext reads through unchanged and
+      `secrets status` counts it until `rewrap` seals it
+- [x] **An instance with no key refuses to write a secret rather than writing it in the
+      clear.** The default cipher is one that cannot encrypt: a repository built without a
+      key fails loudly instead of silently storing plaintext, which is the exact failure
+      this part exists to remove
+- [x] The key is generated on first run beside the database at `0600`, and **`pivot doctor`
+      warns that a key beside the database is a copy of one being a copy of both**
 
-**Notes:** The plaintext `client_secret` has been on the watch list since Part 7. This is
-the part that owes it, and it is its own session because it changes data at rest — a
-migration that gets this wrong is unrecoverable in a way a broken endpoint is not.
+**Decisions worth keeping:**
+- **The ciphertext is bound to its column.** The purpose string is authenticated data, so
+  a secret lifted out of one column cannot be pasted into another and decrypted there
+- **A key's ID is a fingerprint of its material**, not a name somebody chose, so two
+  instances given the same key agree on its identity without being told
+- **Encryption lives in a decorator over the `Querier`**, like tracing, so every secret
+  column is one short list. A repository method that forgets to encrypt is invisible; a
+  decorator that does not mention a column is a gap you can see
+- **What this does not protect against is written down**: Pivot decrypts on demand, so
+  root on the host can have the plaintext. That needs a KMS, which the envelope's key
+  identifier leaves room for
+
+**Found on the way:**
+- **Two instances starting at once could refuse to start.** `O_EXCL` makes the key file
+  appear before its contents do, so the process that lost the race read an empty file and
+  reported the winner's key as unusable — with a message telling the operator not to
+  delete it. Found by running the concurrency test twenty times under `-race`, and there
+  were *two* such windows, not one: the second is in the ordinary read path and was still
+  failing after the first was fixed
 
 **Refs:** `P0-PKG-007`
 
@@ -1646,6 +1680,7 @@ Newest first. Record what **actually** shipped, including what didn't work.
 
 | Date | Part | Shipped | Notes |
 |---|---|---|---|
+| 2026-09-23 | 15-d | `internal/secrets`, an encrypting decorator over the `Querier`, `pivot secrets status\|rewrap\|generate-key`, a `doctor` check, and the rotation procedure | **The client secret that has been plaintext since Part 7 is an envelope now** — a per-value data key wrapped by a master key held outside the database — and the test checks that with SQL against the file rather than through the code that wrote it, because asking the application whether it encrypted something is asking the guard whether the door is locked. **Envelope rather than encrypting with the master key directly**, because rotation then rewraps data keys instead of re-encrypting data: the same work for five secrets or five thousand. **The ciphertext is bound to its column** through AEAD's additional data, so a value lifted out of one cannot be pasted into another and decrypted there. **A key's ID is a fingerprint of its own material**, so two instances given the same key agree on its identity without being told, and nobody can rotate the label while leaving the key. **Encryption lives in a decorator over the `Querier`, like tracing**: a repository method that forgets to encrypt is invisible, while a decorator that does not mention a column is a gap somebody can see. **The default cipher cannot encrypt** — an instance with no key refuses to write a secret rather than quietly writing it in the clear, which is the exact failure this part exists to remove, and it broke two tests that were then given a real keyring instead of a no-op. **Rotation was walked, not described**: new key primary with the old retained, rewrap, drop the old key, everything still readable — and the document says in those words that doing the last step first is unrecoverable. Legacy plaintext reads through unchanged, because an upgrade that breaks every SSO login is not an upgrade. **What this does not protect against is written down too**: Pivot decrypts on demand, so root on the host can have the plaintext; that needs a KMS, which the envelope's key identifier leaves room for. **And a bug in my own key handling, found by repetition**: two instances starting at once could both refuse to start, because `O_EXCL` makes the key file appear before its contents do — the loser read an empty file and declared the winner's key unusable, with a message telling the operator not to delete it. There were two such windows, not one; the second was still failing after the first was fixed, and only twenty repetitions under `-race` showed it. |
 | 2026-09-23 | 15-c | `pivot doctor`, `pivot backup`, `pivot restore`, `store.Backup`, and an operations document that was walked rather than written | **A diagnostic that only passes on a working machine is worth nothing**, so the tests break things on purpose: a schema behind the binary, a directory that cannot be written to, a port already taken, a database URL that is not one. The happy-path test is the shortest in the file, because it would still pass if every check were a no-op. **Warnings never set the exit status** — a diagnostic that fails a provisioning script over a file mode is one nobody runs twice. **Doctor found a real problem on its first run**: a new SQLite database is mode 0644, so every session token hash and stored secret was readable by any account on the machine. Pivot now creates it 0600, and leaves an existing file's mode alone because that is the operator's decision. **Backup is `VACUUM INTO`, not a file copy**: WAL means three files, there is no atomic copy across them, and a `cp` under load restores as "database disk image is malformed" months later when somebody needs it. Proved by backing up a database being written to and running `PRAGMA integrity_check` on the result. **Restore checks the backup before moving anything** — the dangerous version discovers the file is not a database after renaming the live one aside — keeps what it replaced, and removes the stale WAL, which otherwise applies one database's journal to another. **My own concurrency test was vacuous twice.** First the writer inserted into a column that does not exist and discarded the error, so the database sat perfectly still and a file copy would have passed; then, fixed, the writer goroutine could be scheduled after the backup had already finished. It now blocks until the first write lands and fails loudly if none does. |
 | 2026-09-23 | 15-b | `auth.Service.ChangePassword`, `POST /api/v1/auth/password`, the `RevokeOtherUserSessions` query through the engine abstraction, and the `/account` page | **Changing your own password proves the current one, ends every other session, and keeps this one** — and all three are the deliverable. Without the proof, an unlocked laptop or an XSS bug is enough to take the account outright, because a session cookie says somebody logged in at some point and not that the person at the keyboard now is the same one. Without the revocation the operation does nothing: a password change is a response to suspicion, and one that leaves the other party signed in only makes the owner feel safer. And without keeping this session, the safe action signs you out of the device you are standing at, which is how people learn not to take it. **A wrong current password is a 422 against the field, not a 401**: a 401 reaches the frontend's global session handling, so mistyping your own password in the change form would log you out — the safety feature causing the logout. **The account page lists every device and ends any of them except the one in use**, which is Sign out's job; a button in a device list that logs you out is a surprise. `SetPassword` stays as the administrative operation behind `pivot admin reset-password` — two operations rather than a flag, because the difference is what they prove. **Two test-harness bugs surfaced.** The jsdom harness built `new Response("", {status: 204})`, which throws because 204 is a null-body status — so every successful 204 looked like the server being unreachable, and the first test to depend on one was this part's. And a Playwright context made from the `browser` fixture **inherits the project's `storageState`**, so the "second device" in the e2e arrived holding the suite's own signed-in cookie and proved nothing. |
 | 2026-09-23 | 15-a | `internal/setup`, `POST /api/v1/setup` and its status endpoint, the setup token and its startup banner, the `/setup` page, and a shared first-user rule | **A binary with no configuration, no database and no arguments now takes somebody from nothing to signed-in administrator in one form.** Claiming the instance *is* the login: the response is the same session envelope `/auth/login` returns and sets the same cookie, because a password typed twice should not then be typed into a login page. **The window between starting and being claimed is the security problem of a first run**, and it is answered with a token generated per process and printed in a banner — an unclaimed Pivot on a network is otherwise an instance takeover waiting for a port scan, and "only for a few seconds" is not an argument. **Setup closes permanently**, checked against the database inside a lock rather than cached at startup, because an instance that decided at boot that it was unclaimed would stay claimable for as long as it ran. **Two concurrent claims produce one administrator, mutation-verified**: with the mutex removed, all 8 concurrent claims succeed and create 8 organizations. **The first-user-becomes-admin rule now exists once**, shared by the CLI and the browser — it is a rule about privilege, and one written twice is eventually only true in one of them. **Three things were found on the way.** The spec-drift test *had never been able to fail*: everything under the API prefix falls through to a catch-all that answers 401 before the 404 handler, so a documented route that was never registered looked exactly like one that was — it now asks the mux which pattern it would match, and immediately found that the fixture had never registered the SSO routes either. `pivot serve` briefly became **fatal when the schema was behind**, because the banner queried a table that did not exist yet; caught by the test that asserts serve warns rather than refuses. And a too-long password had no sentinel error, so it would have surfaced from the setup form as an unexplained 500. **Four Playwright tests spawn their own binary against their own empty database**, including parsing the token out of its real output — the only instruction a first-time user is given. **Then CI's coverage gate refused the pull request**: touching `password.go` pulled `internal/auth` into the changed set at 74.7%, pre-existing debt the gate had never had reason to look at. It was right to. The untested half was the lockout escalation, accounts with no password at all, corrupt stored hashes and session revocation on a password change — every one silent until the day it matters. 85.9% now, and the doubling-and-cap test is mutation-verified. |
