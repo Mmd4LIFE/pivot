@@ -41,6 +41,8 @@ tags:
     description: Single sign-on and identity providers
   - name: system
     description: Instance metadata
+  - name: telemetry
+    description: Error reports from the browser
 
 paths:
   /api/v1/auth/login:
@@ -653,6 +655,55 @@ paths:
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
+  /api/v1/telemetry/errors:
+    post:
+      tags: [telemetry]
+      operationId: reportBrowserError
+      summary: Report an error that happened in the browser
+      description: |
+        Records a browser error in the server log and returns `204`. There is
+        no storage, no aggregation and no alerting behind it: a browser error
+        that lands in the same log as the request that caused it is worth more
+        than a second system to check.
+
+        **Unauthenticated, deliberately.** The errors most worth having are
+        the ones that happen before login — on the page where logging in was
+        supposed to work — so requiring a session would collect reports from
+        exactly the users who are not having the problem. It is defended by
+        shape instead: a strict rate limit per address, a 16 KiB body cap
+        rather than the general 1 MiB, and a handler that writes a log line
+        and nothing else. A report from somebody signed in is attributed to
+        them.
+
+        `traceId` and `requestId` describe the API call that failed, not this
+        report. The browser reads them from the `traceresponse` and
+        `X-Request-Id` headers of that failed response rather than inventing
+        them, which is what makes them findable afterwards. Both are optional
+        and a trace ID is only available when tracing is enabled.
+
+        Unknown fields are ignored here, unlike everywhere else in this API:
+        the client is a cached bundle in somebody's browser and may be older
+        than this server, and rejecting its report over a field would lose the
+        one thing this endpoint exists to collect.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ErrorReport"
+      responses:
+        "204":
+          description: The report was recorded
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
 components:
   securitySchemes:
     sessionCookie:
@@ -668,6 +719,52 @@ components:
         browser. It is `HttpOnly`, so no client code reads or writes it.
 
   schemas:
+    ErrorReport:
+      type: object
+      required: [message]
+      description: |
+        Every field is client-supplied and none of it is trusted: strings are
+        stripped of control characters and truncated before they reach a log,
+        and the identifiers are checked for shape rather than believed.
+      properties:
+        message:
+          type: string
+          maxLength: 1024
+          description: The error's message. Truncated rather than rejected if longer.
+          examples: ["Cannot read properties of undefined (reading 'name')"]
+        kind:
+          type: string
+          maxLength: 32
+          description: |
+            How the error surfaced. A render error, a rejected promise and a
+            plain `window.onerror` fail differently and are usually different
+            bugs.
+          examples: [render, unhandledrejection, error]
+        stack:
+          type: string
+          maxLength: 8192
+          description: |
+            Whatever the browser could produce. Often absent — a cross-origin
+            script error gives `Script error.` and nothing else.
+        url:
+          type: string
+          maxLength: 512
+          description: The page the error happened on, not the API call that failed.
+          examples: ["https://pivot.example.com/login"]
+        traceId:
+          type: string
+          pattern: "^[0-9a-fA-F]{32}$"
+          description: |
+            The trace of the API call that failed, from its `traceresponse`
+            header. Present only when the error came from an API call and
+            tracing is enabled.
+        requestId:
+          type: string
+          maxLength: 128
+          description: |
+            That same call's `X-Request-Id`. Unlike the trace ID this is always
+            available, which is why both are here.
+
     LoginRequest:
       type: object
       required: [email, password]
@@ -1100,6 +1197,13 @@ components:
 
     UnprocessableEntity:
       description: The body failed validation
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    PayloadTooLarge:
+      description: The body exceeded the limit for this endpoint
       content:
         application/json:
           schema:

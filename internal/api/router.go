@@ -39,6 +39,11 @@ type RouterConfig struct {
 	// registers no SSO surface.
 	OIDC *OIDCHandler
 
+	// Telemetry receives error reports from the browser. Nil registers no
+	// reporting endpoint, so the frontend's reports get a coded 404 and it
+	// stops trying -- which is what an API-only deployment wants.
+	Telemetry *TelemetryHandler
+
 	// SPA serves the browser application on every path that is not an API
 	// call or a health probe. Nil answers those paths with a coded 404, which
 	// is what an API-only deployment and most tests want.
@@ -56,8 +61,9 @@ type RouterConfig struct {
 	MaxBodyBytes int64
 
 	// Limits, per endpoint class. Zero values use the defaults.
-	DefaultLimit RateLimit
-	AuthLimit    RateLimit
+	DefaultLimit   RateLimit
+	AuthLimit      RateLimit
+	TelemetryLimit RateLimit
 
 	// Metrics is the instrument set the request middleware records into. Nil
 	// leaves the middleware off entirely rather than recording into a no-op,
@@ -77,8 +83,9 @@ type Router struct {
 	mux    *http.ServeMux
 	checks []Check
 
-	defaultLimiter *Limiter
-	authLimiter    *Limiter
+	defaultLimiter   *Limiter
+	authLimiter      *Limiter
+	telemetryLimiter *Limiter
 
 	// readyFlag is owned by the Server, which flips it during shutdown. The
 	// router only reads it, so readiness and the drain stay in one place.
@@ -131,6 +138,10 @@ func NewRouter(cfg RouterConfig) *Router {
 		cfg.AuthLimit = LimitAuth
 	}
 
+	if cfg.TelemetryLimit.Rate <= 0 {
+		cfg.TelemetryLimit = LimitTelemetry
+	}
+
 	// Authentication implies session-derived scoping. Making it the default
 	// rather than something the caller remembers to pass is what stops an
 	// instance booting with login endpoints and no tenant enforcement.
@@ -143,11 +154,12 @@ func NewRouter(cfg RouterConfig) *Router {
 	}
 
 	r := &Router{
-		cfg:            cfg,
-		mux:            http.NewServeMux(),
-		checks:         cfg.Checks,
-		defaultLimiter: NewLimiter(cfg.DefaultLimit),
-		authLimiter:    NewLimiter(cfg.AuthLimit),
+		cfg:              cfg,
+		mux:              http.NewServeMux(),
+		checks:           cfg.Checks,
+		defaultLimiter:   NewLimiter(cfg.DefaultLimit),
+		authLimiter:      NewLimiter(cfg.AuthLimit),
+		telemetryLimiter: NewLimiter(cfg.TelemetryLimit),
 	}
 
 	r.routes()
@@ -214,6 +226,7 @@ func (r *Router) routes() {
 	r.authRoutes(authed)
 	r.roleRoutes(authed)
 	r.oidcRoutes(authed)
+	r.telemetryRoutes()
 
 	// A catch-all so an unknown API path produces the standard error envelope
 	// rather than net/http's plain-text 404, which a client cannot parse.
@@ -347,6 +360,41 @@ func (r *Router) oidcRoutes(authed Middleware) {
 		manage(http.HandlerFunc(h.handleAdminUpdate)))
 	r.mux.Handle("DELETE "+APIPrefix+"/organization/identity-providers/{id}",
 		manage(http.HandlerFunc(h.handleAdminDelete)))
+}
+
+// telemetryRoutes registers the browser error endpoint.
+//
+// Unauthenticated, and that is the whole point: the errors worth having are
+// disproportionately the ones that happen before login, on the page where
+// logging in was supposed to work. Requiring a session would collect reports
+// from exactly the users who are not having the problem.
+//
+// So it is defended by shape instead. The strict telemetry limiter is keyed by
+// address and path, the body cap is 16 KiB rather than the general 1 MiB, and
+// the handler writes to the log and nothing else -- there is no store to fill,
+// no query to run, and no response worth probing.
+//
+// The session middleware runs but is not required: a report from somebody
+// logged in gets their user ID attached, which is the difference between "an
+// error happened" and "an error happened to this person, who can be asked what
+// they were doing". It sits after the rate limiter, so a flood is refused
+// before it costs a session lookup.
+func (r *Router) telemetryRoutes() {
+	h := r.cfg.Telemetry
+	if h == nil {
+		return
+	}
+
+	// No body-size middleware here: the handler applies [MaxErrorReportBytes]
+	// itself, so it stays safe wherever it is mounted. Two readers with the
+	// same limit would only make it ambiguous which one refused.
+	report := Chain(
+		WithRateLimit(r.telemetryLimiter, KeyByIPAndPath),
+		r.withSession(),
+	)
+
+	r.mux.Handle("POST "+APIPrefix+"/telemetry/errors",
+		report(http.HandlerFunc(h.handleErrorReport)))
 }
 
 // require builds the permission middleware for a route.

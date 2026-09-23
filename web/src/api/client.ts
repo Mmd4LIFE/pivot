@@ -35,7 +35,17 @@ export class ApiError extends Error {
   readonly requestId: string | undefined;
   readonly docs: string | undefined;
 
-  constructor(status: number, body: Partial<ApiErrorBody>) {
+  /**
+   * The server's trace for this request, from its `traceresponse` header.
+   *
+   * Carried on the error rather than kept in a module variable somewhere so
+   * that reporting it later is exact: "the call that failed" is this object,
+   * not whichever call happened most recently. Undefined when tracing is off,
+   * which is the default -- `requestId` is the correlation that always exists.
+   */
+  readonly traceId: string | undefined;
+
+  constructor(status: number, body: Partial<ApiErrorBody>, traceId?: string) {
     super(body.message ?? `Request failed with status ${status}`);
     this.name = "ApiError";
     this.status = status;
@@ -43,6 +53,7 @@ export class ApiError extends Error {
     this.details = body.details ?? [];
     this.requestId = body.requestId;
     this.docs = body.docs;
+    this.traceId = traceId;
   }
 
   /** Whether this means "you are not signed in". */
@@ -124,10 +135,33 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   if (!response.ok) {
     const envelope =
       isRecord(parsed) && isRecord(parsed.error) ? (parsed.error as Partial<ApiErrorBody>) : {};
-    throw new ApiError(response.status, envelope);
+
+    // The envelope already carries the request ID. The trace is only in the
+    // header, so it is read here and attached rather than being lost.
+    throw new ApiError(response.status, envelope, traceIdOf(response));
   }
 
   return parsed as T;
+}
+
+/**
+ * The trace ID from a response, or undefined.
+ *
+ * `traceresponse` is W3C Trace Context Level 2 and has the same shape as
+ * `traceparent`: `00-<32 hex trace>-<16 hex span>-<2 hex flags>`. Only the
+ * trace ID is kept, because that is what an operator pastes into a trace
+ * viewer.
+ */
+function traceIdOf(response: Response): string | undefined {
+  const header = response.headers.get("traceresponse");
+
+  if (header === null) return undefined;
+
+  const parts = header.split("-");
+
+  if (parts.length !== 4 || !/^[0-9a-f]{32}$/.test(parts[1] ?? "")) return undefined;
+
+  return parts[1];
 }
 
 function safeParse(text: string): unknown {

@@ -1,5 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 
+import { reportError } from "../lib/report";
+
 interface Props {
   children: ReactNode;
 }
@@ -26,8 +28,14 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   override componentDidCatch(error: Error, info: ErrorInfo): void {
-    // Part 14 wires this to the error reporter. Logging it here means a
-    // developer still sees it in the console until then.
+    // The component stack is sent instead of the JavaScript stack: after
+    // minification the latter names `a` calling `b`, while the component stack
+    // names the component that broke. It is the difference between a report
+    // somebody can act on and one they cannot.
+    reportError(error, "render", info.componentStack ?? undefined);
+
+    // Still logged locally. A developer with the console open should not have
+    // to go and read the server's log to see what they just broke.
     console.error("Unhandled render error", error, info.componentStack);
   }
 
