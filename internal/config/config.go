@@ -21,6 +21,38 @@ type Config struct {
 
 	Observability ObservabilityConfig `yaml:"observability"`
 	Setup         SetupConfig         `yaml:"setup"`
+	Secrets       SecretsConfig       `yaml:"secrets"`
+}
+
+// SecretsConfig controls encryption of stored secrets.
+//
+// The key is what makes a stolen database useless, so where it lives matters
+// more than any setting here: **not beside the database**, and not in the same
+// backup. See docs/operations/secrets.md.
+type SecretsConfig struct {
+	// Key is the master key, base64-encoded, 32 bytes.
+	//
+	// Supplied directly for container deployments, where a file is awkward and
+	// the orchestrator already has a way to deliver a secret. Takes precedence
+	// over KeyFile.
+	Key string `yaml:"key"`
+
+	// KeyFile is where to read the key from, and where to write one if none
+	// exists yet.
+	//
+	// Empty means `pivot.key` beside the database, which is the zero-config
+	// answer: an instance that has never been configured still encrypts, and
+	// the database on its own is no longer enough. It is a weaker position
+	// than a key held elsewhere, and it is the one a first run can actually
+	// take -- refusing to start until somebody provisions a key would make the
+	// thirty-second promise a lie.
+	KeyFile string `yaml:"keyFile"`
+
+	// PreviousKeys are accepted for decryption but never used to encrypt.
+	//
+	// This is the middle of a rotation: values written under the old key have
+	// to stay readable until `pivot secrets rewrap` has been through them.
+	PreviousKeys []string `yaml:"previousKeys"`
 }
 
 // SetupConfig controls the first run.
@@ -282,6 +314,10 @@ func Default() *Config {
 
 		// Empty, so a token is generated per process. See SetupConfig.Token.
 		Setup: SetupConfig{Token: ""},
+
+		// Empty key and key file: a key is generated on first run and written
+		// beside the database. See SecretsConfig.KeyFile.
+		Secrets: SecretsConfig{},
 	}
 }
 

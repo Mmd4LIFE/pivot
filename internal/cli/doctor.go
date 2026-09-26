@@ -15,6 +15,7 @@ import (
 
 	"github.com/Mmd4LIFE/pivot/internal/config"
 	"github.com/Mmd4LIFE/pivot/internal/logging"
+	"github.com/Mmd4LIFE/pivot/internal/secrets"
 	"github.com/Mmd4LIFE/pivot/internal/store"
 	"github.com/Mmd4LIFE/pivot/internal/version"
 	"github.com/Mmd4LIFE/pivot/web"
@@ -127,6 +128,7 @@ func diagnose(ctx context.Context, env Env, cmd *cobra.Command, flags *globalFla
 		configCheck(res),
 		frontendCheck(),
 		listenerCheck(ctx, res.Config.Server),
+		secretsCheck(res.Config),
 	)
 
 	findings = append(findings, databaseFindings(ctx, env, res.Config)...)
@@ -190,6 +192,53 @@ func listenerCheck(ctx context.Context, cfg config.ServerConfig) finding {
 	// starting, anything could take it. What was established is that it was
 	// bindable a moment ago, which is what the operator needs to know.
 	return ok("listener", addr+" was bindable")
+}
+
+// secretsCheck reports whether this instance can read its own stored secrets.
+//
+// Read-only: `Generate: false`, so running the diagnostic cannot create a key.
+// A command whose job is to tell you what state something is in must not be
+// able to change that state -- and a doctor that generated a key would tell an
+// operator their instance was fine right after making the old secrets
+// unreadable.
+func secretsCheck(cfg *config.Config) finding {
+	file := cfg.Secrets.KeyFile
+	if file == "" {
+		path, _ := store.SQLitePath(cfg.Database.URL)
+		file = secrets.DefaultKeyFile(path)
+	}
+
+	resolved, err := secrets.Resolve(secrets.Options{
+		Key:          cfg.Secrets.Key,
+		File:         file,
+		PreviousKeys: cfg.Secrets.PreviousKeys,
+	}, nil)
+	if err != nil {
+		if errors.Is(err, secrets.ErrNoKey) {
+			// Not a failure. An instance that has never started has no key
+			// yet, and the first start makes one.
+			return warn("secrets", "no key yet at "+file,
+				"one is generated on the first start; keep it out of the database's backups")
+		}
+
+		return fail("secrets", err.Error(),
+			"without the key the stored secrets cannot be read; find it rather than replacing it")
+	}
+
+	detail := fmt.Sprintf("key %s, from the %s", resolved.Keyring.PrimaryID(), resolved.Source)
+
+	// A key file sitting in the same directory as the database is the default
+	// and the weakest arrangement: whoever takes a copy of one takes both.
+	if resolved.Source == secrets.SourceFile {
+		if dbPath, isFile := store.SQLitePath(cfg.Database.URL); isFile &&
+			filepath.Dir(dbPath) == filepath.Dir(resolved.Path) {
+			return warn("secrets", detail,
+				"the key is in the same directory as the database, so a copy of one is a copy "+
+					"of both. Move it, or set secrets.key from your orchestrator")
+		}
+	}
+
+	return ok("secrets", detail)
 }
 
 // databaseFindings covers everything that needs the database open.

@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -230,6 +231,33 @@ func bindings() []binding {
 			},
 		},
 		{
+			key:  EnvPrefix + "SECRETS_KEY",
+			help: "Master key for stored secrets, base64, 32 bytes",
+			apply: func(c *Config, v string) error {
+				c.Secrets.Key = v
+
+				return nil
+			},
+		},
+		{
+			key:  EnvPrefix + "SECRETS_KEY_FILE",
+			help: "Where to read the master key from (default: pivot.key beside the database)",
+			apply: func(c *Config, v string) error {
+				c.Secrets.KeyFile = v
+
+				return nil
+			},
+		},
+		{
+			key:  EnvPrefix + "SECRETS_PREVIOUS_KEYS",
+			help: "Comma-separated keys accepted for decryption during a rotation",
+			apply: func(c *Config, v string) error {
+				c.Secrets.PreviousKeys = splitList(v)
+
+				return nil
+			},
+		},
+		{
 			key:  EnvPrefix + "TRACING_ENABLED",
 			help: "Export traces over OTLP",
 			apply: func(c *Config, v string) error {
@@ -319,6 +347,23 @@ func setInt(dst *int, raw string) error {
 	*dst = v
 
 	return nil
+}
+
+// splitList reads a comma-separated setting.
+//
+// Empty entries are dropped rather than becoming empty keys, because a trailing
+// comma in an environment variable is the most ordinary typo there is and the
+// result would be a keyring that refuses to build.
+func splitList(raw string) []string {
+	var out []string
+
+	for part := range strings.SplitSeq(raw, ",") {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+
+	return out
 }
 
 func setBool(dst *bool, raw string) error {

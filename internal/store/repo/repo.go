@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Mmd4LIFE/pivot/internal/secrets"
 	"github.com/Mmd4LIFE/pivot/internal/store"
 	"github.com/Mmd4LIFE/pivot/internal/store/dbtypes"
 	"github.com/Mmd4LIFE/pivot/internal/tenant"
@@ -49,9 +50,31 @@ type Repositories struct {
 	events *EventBus
 }
 
+// Option configures the repositories.
+type Option func(*options)
+
+type options struct{ cipher secrets.Cipher }
+
+// WithSecrets supplies the cipher that seals secret columns.
+//
+// Without it the repositories refuse to *write* a secret and still read the
+// plaintext ones an older instance left behind. Defaulting to plaintext would
+// be the quiet failure this whole part exists to prevent: an instance that
+// stores client secrets in the clear because somebody forgot an argument, and
+// nobody finds out until they read the database.
+func WithSecrets(c secrets.Cipher) Option {
+	return func(o *options) { o.cipher = c }
+}
+
 // New builds the repositories over a database.
-func New(db *store.DB) *Repositories {
-	return NewWithQuerier(NewQuerier(db))
+func New(db *store.DB, opts ...Option) *Repositories {
+	var o options
+
+	for _, opt := range opts {
+		opt(&o)
+	}
+
+	return NewWithQuerier(encrypting(NewQuerier(db), o.cipher))
 }
 
 // NewWithQuerier builds the repositories over an arbitrary Querier, for tests

@@ -20,12 +20,34 @@ import (
 	"github.com/Mmd4LIFE/pivot/internal/authz"
 	"github.com/Mmd4LIFE/pivot/internal/config"
 	"github.com/Mmd4LIFE/pivot/internal/oidc"
+	"github.com/Mmd4LIFE/pivot/internal/secrets"
 	"github.com/Mmd4LIFE/pivot/internal/setup"
 	"github.com/Mmd4LIFE/pivot/internal/store"
 	"github.com/Mmd4LIFE/pivot/internal/store/model"
 	"github.com/Mmd4LIFE/pivot/internal/store/repo"
 	"github.com/Mmd4LIFE/pivot/internal/tenant"
 )
+
+// testKeyring is a real keyring for tests that store secrets.
+//
+// A real one rather than a no-op cipher, so the tests exercise the encryption
+// the production path uses. A fixed key, because a test that generates one
+// cannot check that what reached the database was sealed.
+func testKeyring(t *testing.T) secrets.Cipher {
+	t.Helper()
+
+	key, err := secrets.ParseKey("c2l4dGVlbi1ieXRlcy10aW1lcy10d28tZXhhY3RseSE=")
+	if err != nil {
+		t.Fatalf("parse test key: %v", err)
+	}
+
+	ring, err := secrets.NewKeyring(key)
+	if err != nil {
+		t.Fatalf("test keyring: %v", err)
+	}
+
+	return ring
+}
 
 // These tests drive the real stack — router, middleware, auth service,
 // repositories, migrated database — over a real HTTP listener with a real
@@ -179,7 +201,7 @@ func newAuthFixture(t *testing.T, db *store.DB, opts ...func(*api.RouterConfig))
 		t.Fatalf("migrate: %v", err)
 	}
 
-	repos := repo.New(db)
+	repos := repo.New(db, repo.WithSecrets(testKeyring(t)))
 
 	org, err := repos.System().CreateOrganization(context.Background(),
 		repo.CreateOrganization{Name: "Acme", Slug: fixtureSlug})

@@ -125,7 +125,19 @@ readiness change before the drain begins, so no request is dropped.`,
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 
-			repos := repo.New(db)
+			// The key for stored secrets, before anything can try to use one.
+			// An instance whose key is missing says so here rather than
+			// failing later, inside somebody's SSO login.
+			resolved, serr := resolveSecrets(cfg, true, log)
+			if serr != nil {
+				return serr
+			}
+
+			log.Info("stored secrets are encrypted",
+				slog.String("key_id", resolved.Keyring.PrimaryID()),
+				slog.String("key_source", string(resolved.Source)))
+
+			repos := repo.New(db, repo.WithSecrets(resolved.Keyring))
 			authSvc := auth.NewService(repos, auth.PolicyFrom(cfg.Auth), log)
 
 			// Expired sessions and stale login-attempt rows accumulate
