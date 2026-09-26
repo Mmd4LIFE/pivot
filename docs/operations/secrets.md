@@ -55,7 +55,7 @@ different key source is a new implementation rather than a migration.
 ## What a stored secret looks like
 
 ```
-pivot.v1.c78cccd1.DnBhqD8ewykhmpTW...Kesd.zLgLVy5ZXiyfWlh7kDtk...dlJa
+pivot.v1.c78cccd1.WRAPPED-DATA-KEY-BASE64URL.CIPHERTEXT-BASE64URL
 └───┬──┘ └───┬──┘ └────────┬──────────┘ └──────────┬──────────┘
   format    key id    wrapped data key          ciphertext
 ```

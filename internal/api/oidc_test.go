@@ -235,7 +235,7 @@ func newSSOFixture(t *testing.T, db *store.DB, in repo.CreateIdentityProvider) *
 
 // follow walks a redirect chain by hand, carrying the fixture's cookie jar, so
 // a test can inspect each hop rather than only the destination.
-func (f *ssoFixture) follow(t *testing.T, path string) response {
+func (f *authFixture) follow(t *testing.T, path string) response {
 	t.Helper()
 
 	req, err := http.NewRequestWithContext(context.Background(),

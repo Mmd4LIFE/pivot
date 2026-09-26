@@ -4,7 +4,14 @@ This is the design corpus for Pivot. It is written to be read in order the first
 and grepped thereafter.
 
 > **Building right now?** The work queue is [../CHECKLIST.md](../CHECKLIST.md) — it tracks
-> what's done, what's next, and how each session picks up where the last left off.
+> what's done, what's next, and how each session picks up where the last left off. It
+> covers the phase in progress; finished phases are archived in
+> [checklists/](checklists/).
+
+> **Catching up?** [roadmap/phases-0-to-2.md](roadmap/phases-0-to-2.md) is every step of
+> the first three phases in one table, and
+> [presentation/phase-0-review.md](presentation/phase-0-review.md) is the twenty-minute
+> version of what Phase 0 produced.
 
 ## Read in this order
 
@@ -23,7 +30,17 @@ and grepped thereafter.
 - **[architecture/adr/](architecture/adr/)** — Architecture Decision Records. The
   irreversible calls, dated and justified.
 
-### 3. Running it
+### 3. What was built, and what it cost
+- **[roadmap/phases-0-to-2.md](roadmap/phases-0-to-2.md)** — phases 0 to 2 as one table:
+  every step, sub-step, description and definition of done.
+- **[roadmap/phase-0-exit-review.md](roadmap/phase-0-exit-review.md)** — the seven exit
+  criteria walked one at a time, with what was actually run.
+- **[presentation/phase-0-review.md](presentation/phase-0-review.md)** — the same thing
+  for an audience, with a demo script that has been run.
+- **[checklists/](checklists/)** — the build log of every finished phase, part by part,
+  including what went wrong.
+
+### 4. Running it
 - **[operations/backup-and-restore.md](operations/backup-and-restore.md)** — taking a
   backup that can actually be restored, and restoring it. Written for whoever runs the
   instance rather than for whoever built it.
@@ -31,12 +48,12 @@ and grepped thereafter.
   database useless, where it lives, and how to rotate it without losing everything it
   protects.
 
-### 4. Standing records
+### 5. Standing records
 - **[design/keyboard-audit.md](design/keyboard-audit.md)** — how `web/src/ui` behaves
   without a mouse: what four layers of test prove, and the ten things only a person with
   a keyboard and a screen reader can check.
 
-### 5. What gets built, when
+### 6. What gets built, when
 - **[roadmap/README.md](roadmap/README.md)** — the phase map and timeline.
 - **[roadmap/00-principles.md](roadmap/00-principles.md)** — engineering standards,
   definition of done, quality gates.
