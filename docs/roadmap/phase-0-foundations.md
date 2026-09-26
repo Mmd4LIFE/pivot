@@ -16,13 +16,16 @@ in month 9, when adding row-level security means rewriting every handler.
 
 ## Exit criteria
 
-- [ ] `./pivot` starts on a clean machine, serves a login page, and creates an admin user
-- [ ] A developer clones, runs `make dev`, and has a working environment in under 5 minutes
-- [ ] CI runs the full gate suite on every PR in under 10 minutes
-- [ ] A release tag produces signed binaries for 6 platforms and a multi-arch container
-- [ ] OIDC login works end to end against Keycloak in an integration test
-- [ ] The authz layer answers a permission check and is enforced in a middleware test
-- [ ] Design system Storybook covers 20+ components, light and dark
+**All met, 2026-09-26.** Each was walked rather than reasoned about; what was actually run
+is recorded in [phase-0-exit-review.md](phase-0-exit-review.md).
+
+- [x] `./pivot` starts on a clean machine, serves a login page, and creates an admin user
+- [x] A developer clones, runs `make dev`, and has a working environment in under 5 minutes
+- [x] CI runs the full gate suite on every PR in under 10 minutes
+- [x] A release tag produces signed binaries for 6 platforms and a multi-arch container
+- [x] OIDC login works end to end against Keycloak in an integration test
+- [x] The authz layer answers a permission check and is enforced in a middleware test
+- [x] Design system Storybook covers 20+ components, light and dark
 
 ---
 

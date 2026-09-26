@@ -25,11 +25,18 @@ Phase 1 onward.
 make build && ./bin/pivot serve     # SQLite, zero configuration
 ```
 
-[CHECKLIST.md](CHECKLIST.md) tracks exactly what is done and what is next. Start here:
+**Phase 0 — Foundations — is complete.** One binary serves the API and the application,
+with authentication, single sign-on, authorization, tenancy, observability, signed
+releases and a first run that needs no command line. It cannot yet connect to a data
+source; that is Phase 1.
 
 | Document | What it covers |
 |---|---|
-| **[CHECKLIST.md](CHECKLIST.md)** | **The build checklist — what's done, what's next** |
+| **[CHECKLIST.md](CHECKLIST.md)** | **The build checklist — what's next, one part per session** |
+| [docs/presentation/phase-0-review.md](docs/presentation/phase-0-review.md) | What the first phase produced, with a demo script that has been run |
+| [docs/roadmap/phases-0-to-2.md](docs/roadmap/phases-0-to-2.md) | Phases 0–2 as one table: step, sub-step, description, definition of done |
+| [docs/roadmap/phase-0-exit-review.md](docs/roadmap/phase-0-exit-review.md) | The seven exit criteria walked one at a time |
+| [docs/operations/installing.md](docs/operations/installing.md) | Both install paths: the binary and the container stack |
 | [docs/vision.md](docs/vision.md) | Why Pivot exists, who it's for, how it wins |
 | [docs/architecture/tech-stack.md](docs/architecture/tech-stack.md) | Every technology choice, with rationale and rejected alternatives |
 | [docs/architecture/system-design.md](docs/architecture/system-design.md) | Services, data flow, deployment topologies |

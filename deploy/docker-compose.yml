@@ -1,0 +1,122 @@
+# Pivot, production-shaped.
+#
+#   cp .env.example .env     # then edit it; it will not start without that
+#   docker compose up -d
+#   docker compose logs -f pivot
+#
+# Open http://localhost:8080 and follow the setup page. The token is in the
+# logs, printed once, on the first start.
+#
+# What this is: one Pivot against one PostgreSQL, both with health checks, both
+# with named volumes, nothing else running. See the note at the bottom for why
+# there is no Valkey and no MinIO here yet.
+
+name: pivot
+
+services:
+  pivot:
+    # Pinned to a release rather than :latest. An image tag that moves means
+    # `docker compose up` on a Tuesday gives a different product than it did on
+    # Monday, and the first anybody hears about it is a restart during an
+    # incident. Change this line deliberately, having read the release notes.
+    image: ghcr.io/mmd4life/pivot:${PIVOT_VERSION:-0.0.1-alpha}
+    container_name: pivot
+    restart: unless-stopped
+
+    depends_on:
+      postgres:
+        # Not `service_started`. The database accepting TCP is not the same as
+        # the database being ready to answer, and Pivot's first act is to
+        # migrate — which fails against a PostgreSQL still starting up.
+        condition: service_healthy
+
+    environment:
+      PIVOT_DATABASE_URL: postgres://pivot:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/pivot?sslmode=disable
+      PIVOT_SERVER_HOST: 0.0.0.0
+      PIVOT_SERVER_PORT: 8080
+      PIVOT_SERVER_BASE_URL: ${PIVOT_BASE_URL:-http://localhost:8080}
+      PIVOT_LOG_FORMAT: json
+      PIVOT_LOG_LEVEL: ${PIVOT_LOG_LEVEL:-info}
+
+      # The key that makes a stolen database useless. Supplied here rather than
+      # written beside the database, because a container's filesystem is not
+      # where anybody should be keeping the one thing the backups must not
+      # contain. `pivot secrets generate-key` produces one.
+      PIVOT_SECRETS_KEY: ${PIVOT_SECRETS_KEY:?set PIVOT_SECRETS_KEY in .env}
+
+      # Pinned rather than generated per start, so a restart between `up` and
+      # finishing setup does not invalidate the token in your paste buffer.
+      PIVOT_SETUP_TOKEN: ${PIVOT_SETUP_TOKEN:?set PIVOT_SETUP_TOKEN in .env}
+
+      # Set true once TLS terminates in front of this. It marks the session
+      # cookie Secure, which a browser then refuses to send over plain HTTP --
+      # so turning it on before TLS exists makes every login silently fail.
+      PIVOT_AUTH_COOKIE_SECURE: ${PIVOT_COOKIE_SECURE:-false}
+
+      PIVOT_METRICS_ENABLED: ${PIVOT_METRICS_ENABLED:-true}
+
+    ports:
+      - "${PIVOT_PORT:-8080}:8080"
+
+    healthcheck:
+      # The binary probes itself: the runtime image is distroless, so there is
+      # no shell and no curl to write this with. /healthz asks only whether the
+      # process is serving -- a database blip should not make the orchestrator
+      # destroy an otherwise healthy instance.
+      test: ["CMD", "/usr/local/bin/pivot", "healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+    # Nothing is written to the container filesystem: the database holds the
+    # data and the key arrives in the environment. A read-only root filesystem
+    # turns "an attacker got code execution" into a much smaller problem.
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: pivot-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: pivot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: pivot
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pivot -d pivot"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+    # No ports. PostgreSQL is reachable from Pivot over the compose network and
+    # from nowhere else -- publishing 5432 puts a database on the host's
+    # interfaces for the convenience of the few minutes anybody spends with
+    # psql. Use `docker compose exec postgres psql -U pivot` instead.
+
+volumes:
+  postgres-data:
+    name: pivot-postgres-data
+
+# ── Why there is no Valkey and no MinIO here ──────────────────────────────────
+#
+# The plan for this file named four services. Two of them are not here, because
+# nothing in Pivot connects to them yet:
+#
+#   Valkey  — Phase 9 moves rate limiting and caching off in-process state.
+#             Until then it would be a container using memory to hold nothing.
+#   MinIO   — Phase 5 needs object storage for exports and scheduled deliveries.
+#             Same.
+#
+# A compose file that starts services the product never talks to teaches
+# operators that they are required, and makes the first upgrade that actually
+# needs one indistinguishable from the state before it. They go in when
+# something reads from them.
