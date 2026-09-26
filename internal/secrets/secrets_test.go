@@ -429,3 +429,104 @@ func flip(s string) string {
 
 	return "A" + s[1:]
 }
+
+// A keyring cannot be built from a key that was never initialized. The zero
+// value of a Key looks usable and holds no cipher, so this is the difference
+// between an error at startup and a panic on the first secret.
+func TestAKeyringRefusesAZeroKey(t *testing.T) {
+	t.Parallel()
+
+	if _, err := secrets.NewKeyring(secrets.Key{}); !errors.Is(err, secrets.ErrNoKey) {
+		t.Errorf("a zero primary key = %v, want ErrNoKey", err)
+	}
+
+	usable, err := secrets.GenerateKey()
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+
+	if _, err := secrets.NewKeyring(usable, secrets.Key{}); !errors.Is(err, secrets.ErrNoKey) {
+		t.Errorf("a zero previous key = %v, want ErrNoKey", err)
+	}
+}
+
+/*
+An envelope whose fields are not what they claim.
+
+The shape is right -- five fields, the correct prefix, a key this instance has
+-- and the contents are rubbish. Somebody editing the database by hand, or a
+column that has been through a lossy export. Each has to fail rather than
+produce a string.
+*/
+func TestAnEnvelopeWithUnreadableFieldsIsRefused(t *testing.T) {
+	t.Parallel()
+
+	ring := newRing(t)
+
+	sealed, err := ring.Encrypt(purpose, "a-secret")
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+
+	parts := strings.Split(sealed, ".")
+
+	for name, mutated := range map[string]string{
+		"the wrapped key is not base64": strings.Join(
+			[]string{parts[0], parts[1], parts[2], "not base64!!", parts[4]}, "."),
+		"the ciphertext is not base64": strings.Join(
+			[]string{parts[0], parts[1], parts[2], parts[3], "not base64!!"}, "."),
+		"the ciphertext is shorter than a nonce": strings.Join(
+			[]string{parts[0], parts[1], parts[2], parts[3], "AAAA"}, "."),
+		"the wrapped key is shorter than a nonce": strings.Join(
+			[]string{parts[0], parts[1], parts[2], "AAAA", parts[4]}, "."),
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			if _, derr := ring.Decrypt(purpose, mutated); !errors.Is(derr, secrets.ErrMalformed) {
+				t.Errorf("error = %v, want ErrMalformed", derr)
+			}
+		})
+	}
+}
+
+/*
+The plaintext cipher does nothing, in both directions.
+
+It exists for one caller: the tooling that reads a column as the database holds
+it, in order to tell a sealed value from a plaintext one. A test, because "does
+nothing" is a contract like any other and the day it starts doing something is
+the day secrets get written in the clear.
+*/
+func TestThePlaintextCipherIsATruePassThrough(t *testing.T) {
+	t.Parallel()
+
+	c := secrets.Plaintext()
+
+	ring := newRing(t)
+
+	sealed, err := ring.Encrypt(purpose, "a-secret")
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+
+	for name, value := range map[string]string{
+		"a plaintext secret": "an-ordinary-secret",
+		"an envelope":        sealed,
+		"nothing":            "",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			out, eerr := c.Encrypt(purpose, value)
+			if eerr != nil || out != value {
+				t.Errorf("Encrypt(%s) = %q, %v; want it unchanged", name, out, eerr)
+			}
+
+			back, derr := c.Decrypt(purpose, value)
+			if derr != nil || back != value {
+				t.Errorf("Decrypt(%s) = %q, %v; want it unchanged", name, back, derr)
+			}
+		})
+	}
+}

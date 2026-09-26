@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Mmd4LIFE/pivot/internal/secrets"
 )
@@ -373,4 +374,182 @@ func mustRing(t *testing.T, key secrets.Key) *secrets.Keyring {
 	}
 
 	return ring
+}
+
+/*
+The empty-file window, deterministically.
+
+The concurrency test above hits this by luck. This one arranges it: a file that
+exists and is empty, which is exactly what a sibling process looks like between
+`O_EXCL` creating the file and the key being written into it. Resolve must wait
+for the contents rather than declare the file unusable.
+
+This is the bug the race test found, pinned so it cannot come back quietly.
+*/
+func TestAnEmptyKeyFileIsWaitedForRatherThanCondemned(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "pivot.key")
+
+	// The file exists and holds nothing, as it does for a few microseconds in
+	// production and for as long as this test likes here.
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	key, err := secrets.GenerateKey()
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+
+	// The sibling finishes its write shortly after we start looking.
+	go func() {
+		time.Sleep(80 * time.Millisecond)
+
+		_ = os.WriteFile(path, []byte(key.Encode()+"\n"), 0o600)
+	}()
+
+	resolved, err := secrets.Resolve(secrets.Options{File: path, Generate: true}, nil)
+	if err != nil {
+		t.Fatalf("resolve while the key was being written: %v", err)
+	}
+
+	if resolved.Keyring.PrimaryID() != key.ID {
+		t.Error("resolved a different key than the one that was written")
+	}
+}
+
+// And the wait is bounded. A file that stays empty really is unusable, and
+// saying so eventually is better than hanging at startup forever.
+func TestAnEmptyKeyFileEventuallyGivesUp(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "pivot.key")
+
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	start := time.Now()
+
+	_, err := secrets.Resolve(secrets.Options{File: path, Generate: true}, nil)
+
+	if err == nil {
+		t.Fatal("a permanently empty key file was accepted")
+	}
+
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Errorf("gave up after %s, which is long enough to look like a hang", elapsed)
+	}
+
+	if !strings.Contains(err.Error(), "Do not delete it") {
+		t.Errorf("error = %v, want the ordinary unusable-key message", err)
+	}
+}
+
+// Previous keys survive the wait. The loser of a creation race is still in the
+// middle of a rotation, and dropping its retained keys would make the values it
+// then reads unopenable.
+func TestPreviousKeysSurviveTheWait(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "pivot.key")
+
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	older, err := secrets.GenerateKey()
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+
+	sealed, err := mustRing(t, older).Encrypt(purpose, "an-old-secret")
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+
+	newer, err := secrets.GenerateKey()
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+
+	go func() {
+		time.Sleep(80 * time.Millisecond)
+
+		_ = os.WriteFile(path, []byte(newer.Encode()+"\n"), 0o600)
+	}()
+
+	resolved, err := secrets.Resolve(secrets.Options{
+		File: path, Generate: true, PreviousKeys: []string{older.Encode()},
+	}, nil)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+
+	if _, derr := resolved.Keyring.Decrypt(purpose, sealed); derr != nil {
+		t.Errorf("the retained key was dropped during the wait: %v", derr)
+	}
+}
+
+// A key file that is a directory, or lives under one that cannot be created.
+// Both are configuration mistakes, and both must say which path was the
+// problem rather than failing somewhere later.
+func TestAnUnusableKeyPathIsReported(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	t.Run("the path is a directory", func(t *testing.T) {
+		t.Parallel()
+
+		asDir := filepath.Join(dir, "a-directory")
+		if err := os.Mkdir(asDir, 0o750); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+
+		if _, err := secrets.Resolve(
+			secrets.Options{File: asDir, Generate: true}, nil); err == nil {
+			t.Error("a directory was accepted as a key file")
+		}
+	})
+
+	t.Run("the parent is a file", func(t *testing.T) {
+		t.Parallel()
+
+		asFile := filepath.Join(dir, "a-file")
+		if err := os.WriteFile(asFile, []byte("x"), 0o600); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+
+		_, err := secrets.Resolve(
+			secrets.Options{File: filepath.Join(asFile, "pivot.key"), Generate: true}, nil)
+
+		if err == nil {
+			t.Error("a key path under a regular file was accepted")
+		}
+	})
+}
+
+// A directory nothing can be written to. The generated-key path has to fail
+// here rather than reporting a key it did not manage to keep.
+func TestGeneratingIntoAnUnwritableDirectoryFails(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root, which can write to anything")
+	}
+
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	if _, err := secrets.Resolve(
+		secrets.Options{File: filepath.Join(dir, "pivot.key"), Generate: true}, nil); err == nil {
+		t.Error("a key was reported as generated in a directory that cannot be written to")
+	}
 }
