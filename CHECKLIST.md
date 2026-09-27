@@ -60,8 +60,8 @@ At the end of every part, in this order:
 
 | | |
 |---|---|
-| **Last completed** | Part 16 — The connector interface |
-| **Next up** | **Part 17 — The conformance suite** |
+| **Last completed** | Part 17 — The conformance suite |
+| **Next up** | **Part 18 — Two more connectors, and resource governance** |
 | **Current phase** | Phase 1 — Connect & Query → v0.1 |
 | **Branch** | `main` |
 | **Blockers** | None |
@@ -88,17 +88,22 @@ and the `connections` table; `pivot admin add-connection` is the way in until Pa
 builds the screens. `internal/query` and `internal/semantic` are still `doc.go` stubs, so
 there is no way to *run* a question and nothing to show the answer in.
 
+**There is now a bar every connector has to clear.**
+`internal/connectors/conformance` is sixteen named properties — NULL against empty, unicode
+byte-for-byte, zoned against naive timestamps, streaming order, truncation, cancellation,
+timeouts, error classification, identifier quoting, and every declared capability
+demonstrated rather than believed. It is a library, not a runner: a connector supplies one
+file and calls `conformance.Run`. PostgreSQL passes all sixteen in CI.
+
 **Carried in from Phase 0**, and owned by parts in this phase or named in them:
-- **The container stack now pins a release that predates nothing** — `v0.0.2-alpha` was
-  cut on 2026-09-26. `deploy/docker-compose.yml` and `deploy/.env.example` still default
-  to `0.0.1-alpha` and should move to it.
+- **The container stack pins a superseded release.** `v0.0.2-alpha` was cut on
+  2026-09-26 and is the first tag containing the setup wizard, but
+  `deploy/docker-compose.yml` and `deploy/.env.example` still default to `0.0.1-alpha`.
+  A one-line change in each, not owned by any part in this phase.
 - The Keycloak round trip is opt-in and does not run in CI. It belongs in a scheduled job:
   what it protects against is Keycloak changing, not Pivot changing.
 - `X-Forwarded-For` is not trusted, so rate limiting behind a proxy keys on the proxy.
   Phase 9 owns it; it matters more as soon as an instance is worth exposing.
-- The container stack pins `0.0.1-alpha`, which predates the setup wizard. **The release
-  containing Phase 0 has to be cut**, and `deploy/docker-compose.yml` and
-  `deploy/.env.example` updated to it.
 
 **Environment.** Go 1.27.1 locally with a `toolchain go1.26.8` directive — the floor in
 `go.mod` is for contributors, the toolchain line is what builds, and CI derives its Go
@@ -113,7 +118,7 @@ few points high; leave margin above 80%.
 
 ```
 Phase 0  Foundations        [██████████████████████████] 31/31   COMPLETE
-Phase 1  Connect & Query    [██                        ]  1/12
+Phase 1  Connect & Query    [████                      ]  2/12
 Phase 2+ ...                                            (expanded as we approach)
 ```
 
@@ -189,7 +194,7 @@ over database/sql, the PostgreSQL dialect), migration 00006 with the `connection
 
 ---
 
-### - [ ] Part 17 — The conformance suite
+### - [x] Part 17 — The conformance suite ✅ 2026-09-27
 
 **Deliverable:** one test suite every connector must pass, and PostgreSQL passing it.
 
@@ -216,6 +221,11 @@ gets shaped to what those two already do.
 ---
 
 ### - [ ] Part 18 — Two more connectors, and resource governance
+
+> Part 17 built the suite these two are measured against. Each connector needs one file:
+> a `conformance.Subject` with its fixture DDL, a sleep and a series expression, two
+> statements it rejects, and an identifier that needs quoting.
+> `internal/connectors/postgres_conformance_test.go` is the worked example.
 
 **Deliverable:** MySQL and SQLite/DuckDB, both through the same door — and no query can
 take the instance down.
@@ -450,4 +460,5 @@ Phase 0's log is in
 
 | Date | Part | Shipped | Notes |
 |---|---|---|---|
+| 2026-09-27 | 17 | `internal/connectors/conformance` — sixteen named properties, a breakable reference connector that proves each one can fail, and `postgres_conformance_test.go` as the worked example | **The suite is a library, not a runner.** A connector supplies a `Subject` — its fixture DDL, a sleep and a series expression, two statements it rejects, an identifier that needs quoting — and calls `conformance.Run`. Nothing in the package names a connector, so adding one is writing one file. **PostgreSQL passes all sixteen against the containerized database, in CI** (`ci.yml` sets `PIVOT_TEST_POSTGRES_URL` and fails the build if a Postgres test skips, so this cannot quietly stop running). **The part that makes the rest worth anything is `broken_test.go`**: seventeen deliberate defects — a NULL arriving as `\"\"`, unicode normalized on the way out, a zone applied to a naive timestamp, a result cut at the cap without the flag, a row repeated mid-stream so the count still comes out right, errors returned unclassified, a capability declared and not delivered — each wired into a working connector one at a time, each asserted to fail *its own named property*. A suite that passes is worth exactly the confidence that it would have failed, and that cannot come from reading it. **The fake's dialect is deliberately nothing like PostgreSQL** (`series 40`, `sleep 3`): if the suite only passed against something Postgres-shaped it would be a regression test in a conformance suite's clothes, and this is how that gets caught. **Capabilities are demonstrated, not believed** — declaring `CTEs` means a CTE runs, and declaring `LateralJoins` without supplying a query to prove it is a *failure*, because the compiler reading that field in Phase 3 will emit SQL the source rejects in front of whoever built the dashboard. **The fixture runs on Asia/Tehran**, +03:30: row 1 is stored at 23:30Z and comes back as March **16** at 03:00 local — verified by hand — so a connector confusing zoned for naive lands on the wrong *day*, and the half-hour offset also catches anything assuming whole hours. **Quoting is checked through a real round trip**, aliasing a column to `a \"quoted\" name` with the dialect's own `QuoteIdentifier`: a rule that fails to escape the inner quote is a syntax error, which is the injection this catches. **`Check.Failure` was extracted so the promise — a failure opens with the property, not the assertion — is one tested function rather than a convention.** The readers are permissive about the Go type a driver returns and strict about the value; Part 19 is where normalization becomes a contract. Coverage 88.9% here and 91.3% on `internal/connectors`. **The repo's own gate turned out to be lying locally**: `make coverage-gate` built its profile without `PIVOT_TEST_POSTGRES_URL`, so it reported `FAIL 54.0%` for a package CI measures at 91.3% — every opt-in Postgres test skipped. A local guard that disagrees with CI in either direction is one people learn to ignore, so the target now depends on `dev-db` and sets the URL, exactly as `test-all` and CI do. **Lint caught three things I would not have**: `catalogued` (misspell wants US spelling), `text, _ := asString(v)` in four places (errcheck's check-blank), and two `%v`s that should have been `%w`. |
 | 2026-09-27 | 16 | `internal/connectors` (interface, registry, `SQLConnector`, PostgreSQL), migration 00006 and the `connections` table, `ConnectionRepo`, and three `pivot admin` commands | **Pivot connects to a database somebody else owns.** Created, tested and stored against a real PostgreSQL, with the password landing as `pivot.v1.4a44cfc0...` rather than a string — checked with SQL against the file on both engines, because asking the repository whether it encrypted something is asking the guard whether the door is locked. **All four failure modes were caused for real rather than mocked**: a refused password, a host that does not resolve, a closed port, a missing database. Each says what to do and none contains the password. **The interface is the decision this part exists for.** `Dialect` is not `Connector`: pooling, scanning, truncation and timeouts are identical for every database/sql source, so they live in `SQLConnector` once and a driver supplies the DSN, the capabilities, the catalog query and the error classification — with BigQuery in mind, which is not database/sql-shaped, so this is a helper implementing the interface rather than the interface itself. **A truncated result carries a flag**, because a silently cut result is a wrong answer presented as a right one and the chart Phase 2 draws from it is wrong in a way nobody can see. **The DSN is built with `net/url`**: a generated password contains a colon, an at sign or a slash about a third of the time, and concatenation turns that into a DSN naming a different host. **`Query` still takes a string** — the package comment promised compiled query objects and Phase 3 owns the compiler that makes them; inventing the type now would be designing against an imaginary caller, so Part 20 replaces it. **Three things bit me.** `--host` and `--port` collided with the root command's persistent flags, so `--port 5433` set the *server* port to zero and the command failed before it ran; they are `--db-host` and `--db-port` now. The pgx driver was not registered in this package and had been reaching it by luck of import order. And my own error message hid its cause — `sql.Open` failing said "could not prepare a postgres connection" and nothing else, which sent me looking in the wrong place for ten minutes; at that point nothing secret can be in the error, so it carries the driver's text. **The portability harness caught the new table** before I remembered to declare it, and `sqlc.yaml`'s own warning caught the SQLite type overrides I had not added — the two models had silently diverged on eleven columns. |

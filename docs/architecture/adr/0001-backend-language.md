@@ -98,7 +98,8 @@ single-artifact story.
 
 **Negative**
 - **Every connector is hand-written.** No JDBC fallback. This is the real cost, and it
-  shapes the Phase 1 emphasis on the connector conformance suite
+  shapes the Phase 1 emphasis on the connector conformance suite — built in Part 17 as
+  `internal/connectors/conformance`, which is where that cost is now paid
 - **No Calcite.** We build the semantic compiler and lean on SQLGlot (Python) for dialect
   transpilation and lineage
 - CGo for DuckDB complicates cross-compilation and requires a per-platform build matrix

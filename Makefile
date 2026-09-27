@@ -335,8 +335,13 @@ audit: $(TOOLS_DIR)/osv-scanner ## Scan Go and npm dependencies for known vulner
 GOVULNCHECK_VERSION := v1.8.0
 
 .PHONY: coverage-gate
-coverage-gate: ## Fail if a changed package is under 80% covered
-	go test -count=1 -p 1 -coverpkg=$(PKG) -coverprofile=coverage.out -covermode=atomic $(PKG) >/dev/null
+coverage-gate: dev-db ## Fail if a changed package is under 80% covered
+	# Against Postgres, like CI. Without it every package whose tests are
+	# opt-in on PIVOT_TEST_POSTGRES_URL is measured with half its tests
+	# skipped, and the gate reports a failure CI will not reproduce -- which
+	# is how a guard stops being one.
+	PIVOT_TEST_POSTGRES_URL='$(DEV_PG_URL)' go test -count=1 -p 1 -coverpkg=$(PKG) \
+	  -coverprofile=coverage.out -covermode=atomic $(PKG) >/dev/null
 	@./scripts/coverage-gate.sh $(BASE_REF) 80
 
 # The base to diff against. CI passes the pull request's target branch; locally
