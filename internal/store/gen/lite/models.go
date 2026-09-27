@@ -11,6 +11,35 @@ import (
 	"github.com/google/uuid"
 )
 
+type Connection struct {
+	ID                  uuid.UUID
+	OrgID               uuid.UUID
+	Slug                string
+	Name                string
+	Kind                string
+	Description         string
+	Host                string
+	Port                int64
+	Database            string
+	Username            string
+	Password            string
+	SslMode             string
+	Options             dbtypes.JSON
+	MaxOpenConns        int64
+	MaxRows             int64
+	QueryTimeoutSeconds int64
+	IsEnabled           dbtypes.Bool
+	LastTestedAt        dbtypes.NullTime
+	LastTestOk          dbtypes.Bool
+	LastTestError       string
+	CreatedAt           dbtypes.Time
+	UpdatedAt           dbtypes.Time
+	CreatedBy           uuid.NullUUID
+	UpdatedBy           uuid.NullUUID
+	DeletedAt           dbtypes.NullTime
+	Version             int64
+}
+
 type FederatedIdentity struct {
 	ID          uuid.UUID
 	OrgID       uuid.UUID

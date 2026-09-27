@@ -42,6 +42,9 @@ administrator. Anyone who can run them already has the database credentials.`,
 		newGrantRoleCmd(env, flags),
 		newRevokeRoleCmd(env, flags),
 		newAddProviderCmd(env, flags),
+		newAddConnectionCmd(env, flags),
+		newTestConnectionCmd(env, flags),
+		newListConnectionsCmd(env, flags),
 	)
 
 	return cmd

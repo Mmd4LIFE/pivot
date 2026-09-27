@@ -16,6 +16,7 @@ import (
 // expectedTables is the schema contract. Both engines must produce exactly
 // this set — no more, no less.
 var expectedTables = []string{
+	"connections",
 	"federated_identities",
 	"group_members",
 	"groups",
@@ -74,6 +75,13 @@ var expectedColumns = map[string][]string{
 	"login_attempts": {
 		"email", "failed_count", "first_failed_at", "id", "last_failed_at",
 		"locked_until", "org_id",
+	},
+	"connections": {
+		"created_at", "created_by", "database", "deleted_at", "description",
+		"host", "id", "is_enabled", "kind", "last_test_error", "last_test_ok",
+		"last_tested_at", "max_open_conns", "max_rows", "name", "options",
+		"org_id", "password", "port", "query_timeout_seconds", "slug",
+		"ssl_mode", "updated_at", "updated_by", "username", "version",
 	},
 }
 

@@ -461,3 +461,78 @@ type RecordFederatedLoginParams struct {
 	ProviderID  uuid.UUID
 	Subject     string
 }
+
+// --- connections -----------------------------------------------------------
+//
+// Field order mirrors the generated structs exactly: the conversions in
+// repo/adapter.go are direct, and a differing order breaks them - the lesson
+// of Part 4-a.
+
+type CreateConnectionParams struct {
+	ID                  uuid.UUID
+	OrgID               uuid.UUID
+	Slug                string
+	Name                string
+	Kind                string
+	Description         string
+	Host                string
+	Port                int64
+	Database            string
+	Username            string
+	Password            string
+	SslMode             string
+	Options             dbtypes.JSON
+	MaxOpenConns        int64
+	MaxRows             int64
+	QueryTimeoutSeconds int64
+	IsEnabled           dbtypes.Bool
+	CreatedBy           uuid.NullUUID
+	UpdatedBy           uuid.NullUUID
+}
+
+type GetConnectionParams struct {
+	ID    uuid.UUID
+	OrgID uuid.UUID
+}
+
+type GetConnectionBySlugParams struct {
+	OrgID uuid.UUID
+	Slug  string
+}
+
+type UpdateConnectionParams struct {
+	Slug                string
+	Name                string
+	Description         string
+	Host                string
+	Port                int64
+	Database            string
+	Username            string
+	Password            string
+	SslMode             string
+	Options             dbtypes.JSON
+	MaxOpenConns        int64
+	MaxRows             int64
+	QueryTimeoutSeconds int64
+	IsEnabled           dbtypes.Bool
+	UpdatedBy           uuid.NullUUID
+	UpdatedAt           dbtypes.Time
+	ID                  uuid.UUID
+	OrgID               uuid.UUID
+	Version             int64
+}
+
+type RecordConnectionTestParams struct {
+	LastTestedAt  dbtypes.NullTime
+	LastTestOk    dbtypes.Bool
+	LastTestError string
+	ID            uuid.UUID
+	OrgID         uuid.UUID
+}
+
+type SoftDeleteConnectionParams struct {
+	DeletedAt dbtypes.NullTime
+	UpdatedBy uuid.NullUUID
+	ID        uuid.UUID
+	OrgID     uuid.UUID
+}

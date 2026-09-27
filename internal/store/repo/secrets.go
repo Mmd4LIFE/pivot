@@ -30,7 +30,10 @@ does not fail.
 // Purposes bind a ciphertext to where it is stored. Authenticated, not secret:
 // a value lifted out of one column cannot be pasted into another and decrypted
 // there.
-const PurposeClientSecret = "identity_provider.client_secret"
+const (
+	PurposeClientSecret       = "identity_provider.client_secret"
+	PurposeConnectionPassword = "connection.password"
+)
 
 // encryptingQuerier seals secret columns on the way in and opens them on the
 // way out.
@@ -135,6 +138,103 @@ func (e *encryptingQuerier) ListIdentityProviders(
 	}
 
 	return rows, nil
+}
+
+// --- connections ------------------------------------------------------------
+
+func (e *encryptingQuerier) CreateConnection(
+	ctx context.Context, p model.CreateConnectionParams,
+) (model.Connection, error) {
+	sealed, err := e.cipher.Encrypt(PurposeConnectionPassword, p.Password)
+	if err != nil {
+		return model.Connection{}, err
+	}
+
+	p.Password = sealed
+
+	row, err := e.Querier.CreateConnection(ctx, p)
+	if err != nil {
+		return row, err
+	}
+
+	return e.openConnection(row)
+}
+
+func (e *encryptingQuerier) UpdateConnection(
+	ctx context.Context, p model.UpdateConnectionParams,
+) (model.Connection, error) {
+	sealed, err := e.cipher.Encrypt(PurposeConnectionPassword, p.Password)
+	if err != nil {
+		return model.Connection{}, err
+	}
+
+	p.Password = sealed
+
+	row, err := e.Querier.UpdateConnection(ctx, p)
+	if err != nil {
+		return row, err
+	}
+
+	return e.openConnection(row)
+}
+
+func (e *encryptingQuerier) GetConnection(
+	ctx context.Context, p model.GetConnectionParams,
+) (model.Connection, error) {
+	row, err := e.Querier.GetConnection(ctx, p)
+	if err != nil {
+		return row, err
+	}
+
+	return e.openConnection(row)
+}
+
+func (e *encryptingQuerier) GetConnectionBySlug(
+	ctx context.Context, p model.GetConnectionBySlugParams,
+) (model.Connection, error) {
+	row, err := e.Querier.GetConnectionBySlug(ctx, p)
+	if err != nil {
+		return row, err
+	}
+
+	return e.openConnection(row)
+}
+
+func (e *encryptingQuerier) ListConnections(
+	ctx context.Context, orgID uuid.UUID,
+) ([]model.Connection, error) {
+	rows, err := e.Querier.ListConnections(ctx, orgID)
+	if err != nil {
+		return rows, err
+	}
+
+	for i, row := range rows {
+		opened, oerr := e.openConnection(row)
+		if oerr != nil {
+			// One unreadable password does not make the list unreadable. An
+			// administrator looking at this page during a botched key rotation
+			// needs to see which connection is broken; the query that needs
+			// the password fails on its own.
+			opened = row
+			opened.Password = ""
+		}
+
+		rows[i] = opened
+	}
+
+	return rows, nil
+}
+
+// openConnection decrypts a connection's secret columns.
+func (e *encryptingQuerier) openConnection(row model.Connection) (model.Connection, error) {
+	plaintext, err := e.cipher.Decrypt(PurposeConnectionPassword, row.Password)
+	if err != nil {
+		return model.Connection{}, err
+	}
+
+	row.Password = plaintext
+
+	return row, nil
 }
 
 // open decrypts a row's secret columns.

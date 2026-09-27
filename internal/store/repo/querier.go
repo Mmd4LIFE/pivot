@@ -93,6 +93,16 @@ type Querier interface {
 	RevokeAllForSubject(context.Context, model.RevokeAllForSubjectParams) (int64, error)
 	CountRoleHolders(context.Context, model.CountRoleHoldersParams) (int64, error)
 
+	// Connections: the data sources an organization can query.
+	CreateConnection(context.Context, model.CreateConnectionParams) (model.Connection, error)
+	GetConnection(context.Context, model.GetConnectionParams) (model.Connection, error)
+	GetConnectionBySlug(context.Context, model.GetConnectionBySlugParams) (model.Connection, error)
+	ListConnections(context.Context, uuid.UUID) ([]model.Connection, error)
+	UpdateConnection(context.Context, model.UpdateConnectionParams) (model.Connection, error)
+	RecordConnectionTest(context.Context, model.RecordConnectionTestParams) (int64, error)
+	SoftDeleteConnection(context.Context, model.SoftDeleteConnectionParams) (int64, error)
+	CountConnections(context.Context, uuid.UUID) (int64, error)
+
 	// Identity providers and the federated identities they issue.
 	CreateIdentityProvider(context.Context, model.CreateIdentityProviderParams) (model.IdentityProvider, error)
 	GetIdentityProvider(context.Context, model.GetIdentityProviderParams) (model.IdentityProvider, error)

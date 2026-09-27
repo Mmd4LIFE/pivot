@@ -14,9 +14,18 @@ type Querier interface {
 	AddGroupMember(ctx context.Context, arg AddGroupMemberParams) error
 	// A successful login clears the record entirely.
 	ClearLoginAttempts(ctx context.Context, arg ClearLoginAttemptsParams) (int64, error)
+	CountConnections(ctx context.Context, orgID uuid.UUID) (int64, error)
 	CountOrganizations(ctx context.Context) (int64, error)
 	CountRoleHolders(ctx context.Context, arg CountRoleHoldersParams) (int64, error)
 	CountUsers(ctx context.Context, orgID uuid.UUID) (int64, error)
+	// Connections: the data sources an organization can query.
+	//
+	// Placeholders are positional in both dialects and must appear in the same
+	// order, because the two generated parameter structs are converted directly
+	// into one another and a differing field order breaks the conversion - the
+	// lesson of Part 4-a. Query files are ASCII: sqlc's SQLite generator miscounts
+	// byte offsets on multibyte characters and corrupts generation.
+	CreateConnection(ctx context.Context, arg CreateConnectionParams) (Connection, error)
 	CreateGroup(ctx context.Context, arg CreateGroupParams) (Group, error)
 	// Identity providers and the federated identities they issue.
 	//
@@ -53,6 +62,8 @@ type Querier interface {
 	// Replacing an IdP's attributes must not disturb manually assigned ones, so
 	// deletion is scoped by source.
 	DeleteUserAttributesBySource(ctx context.Context, arg DeleteUserAttributesBySourceParams) (int64, error)
+	GetConnection(ctx context.Context, arg GetConnectionParams) (Connection, error)
+	GetConnectionBySlug(ctx context.Context, arg GetConnectionBySlugParams) (Connection, error)
 	// Federated identities.
 	//
 	// Lookup is by (provider, subject) and never by email: an address can be
@@ -79,6 +90,7 @@ type Querier interface {
 	IsGroupMember(ctx context.Context, arg IsGroupMemberParams) (bool, error)
 	LinkFederatedIdentity(ctx context.Context, arg LinkFederatedIdentityParams) (FederatedIdentity, error)
 	ListChildGroups(ctx context.Context, arg ListChildGroupsParams) ([]Group, error)
+	ListConnections(ctx context.Context, orgID uuid.UUID) ([]Connection, error)
 	ListFederatedIdentitiesForUser(ctx context.Context, arg ListFederatedIdentitiesForUserParams) ([]FederatedIdentity, error)
 	ListGrantsOnObject(ctx context.Context, arg ListGrantsOnObjectParams) ([]RoleAssignment, error)
 	ListGroupMembers(ctx context.Context, arg ListGroupMembersParams) ([]User, error)
@@ -111,6 +123,11 @@ type Querier interface {
 	ListUserGroups(ctx context.Context, arg ListUserGroupsParams) ([]Group, error)
 	ListUserSessions(ctx context.Context, arg ListUserSessionsParams) ([]Session, error)
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]User, error)
+	// Recording a test result is deliberately not a versioned update. It is not a
+	// change somebody made, it is an observation about the world, and making it
+	// bump the version would mean a background health check invalidates the form
+	// an administrator has open.
+	RecordConnectionTest(ctx context.Context, arg RecordConnectionTestParams) (int64, error)
 	RecordFailedLogin(ctx context.Context, arg RecordFailedLoginParams) (LoginAttempt, error)
 	RecordFederatedLogin(ctx context.Context, arg RecordFederatedLoginParams) (int64, error)
 	RecordUserLogin(ctx context.Context, arg RecordUserLoginParams) (int64, error)
@@ -135,6 +152,7 @@ type Querier interface {
 	RevokeUserSessions(ctx context.Context, arg RevokeUserSessionsParams) (int64, error)
 	// Applied after a lockout threshold is crossed, once the new count is known.
 	SetLoginLock(ctx context.Context, arg SetLoginLockParams) (int64, error)
+	SoftDeleteConnection(ctx context.Context, arg SoftDeleteConnectionParams) (int64, error)
 	SoftDeleteGroup(ctx context.Context, arg SoftDeleteGroupParams) (int64, error)
 	SoftDeleteIdentityProvider(ctx context.Context, arg SoftDeleteIdentityProviderParams) (int64, error)
 	SoftDeleteOrganization(ctx context.Context, arg SoftDeleteOrganizationParams) (int64, error)
@@ -142,6 +160,10 @@ type Querier interface {
 	// Sliding idle expiry. The absolute cap is never touched, so an active session
 	// still ends when it reaches it.
 	TouchSession(ctx context.Context, arg TouchSessionParams) (int64, error)
+	// A versioned update, like every other mutable row here: a stale version
+	// matches nothing, which the repository reports as a conflict rather than as a
+	// missing row.
+	UpdateConnection(ctx context.Context, arg UpdateConnectionParams) (Connection, error)
 	UpdateGroup(ctx context.Context, arg UpdateGroupParams) (Group, error)
 	UpdateIdentityProvider(ctx context.Context, arg UpdateIdentityProviderParams) (IdentityProvider, error)
 	// Optimistic concurrency: the WHERE clause carries the caller's expected

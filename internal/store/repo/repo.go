@@ -45,6 +45,7 @@ type Repositories struct {
 	Sessions          *SessionRepo
 	Roles             *RoleRepo
 	IdentityProviders *IdentityProviderRepo
+	Connections       *ConnectionRepo
 
 	q      Querier
 	events *EventBus
@@ -94,6 +95,7 @@ func NewWithQuerier(q Querier) *Repositories {
 		Sessions:          &SessionRepo{base: b},
 		Roles:             &RoleRepo{base: b},
 		IdentityProviders: &IdentityProviderRepo{base: b},
+		Connections:       &ConnectionRepo{base: b},
 	}
 }
 

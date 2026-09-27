@@ -210,6 +210,53 @@ type IdentityProvider struct {
 	Version       int64
 }
 
+// Connection is a data source an organization can query.
+//
+// Password holds an envelope from internal/secrets, never plaintext, and the
+// repository layer seals and opens it -- so above that layer this is the
+// password and the fact that it is stored sealed is a property of storage.
+//
+// Host, Port, Database and Username are separate fields rather than one DSN
+// because a DSN cannot be validated, redacted, partially shown, or edited one
+// field at a time. Settings that do not generalize across sources live in
+// Options.
+//
+// LastTestOk is meaningful only when LastTestedAt is valid: "never tested" is
+// the absent timestamp, not a third state of the boolean.
+type Connection struct {
+	ID          uuid.UUID
+	OrgID       uuid.UUID
+	Slug        string
+	Name        string
+	Kind        string
+	Description string
+
+	Host     string
+	Port     int64
+	Database string
+	Username string
+	Password string
+	SslMode  string
+	Options  dbtypes.JSON
+
+	MaxOpenConns        int64
+	MaxRows             int64
+	QueryTimeoutSeconds int64
+
+	IsEnabled dbtypes.Bool
+
+	LastTestedAt  dbtypes.NullTime
+	LastTestOk    dbtypes.Bool
+	LastTestError string
+
+	CreatedAt dbtypes.Time
+	UpdatedAt dbtypes.Time
+	CreatedBy uuid.NullUUID
+	UpdatedBy uuid.NullUUID
+	DeletedAt dbtypes.NullTime
+	Version   int64
+}
+
 // FederatedIdentity links an external subject to a Pivot user.
 //
 // The link is (provider, subject) and never the email address: an address can
