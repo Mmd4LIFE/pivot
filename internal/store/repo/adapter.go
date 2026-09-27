@@ -963,3 +963,107 @@ func (a *liteQuerier) LinkFederatedIdentity(ctx context.Context, p model.LinkFed
 func (a *liteQuerier) RecordFederatedLogin(ctx context.Context, p model.RecordFederatedLoginParams) (int64, error) {
 	return a.q.RecordFederatedLogin(ctx, lite.RecordFederatedLoginParams(p))
 }
+
+// --- connections ------------------------------------------------------------
+
+func (a *pgQuerier) CreateConnection(ctx context.Context, p model.CreateConnectionParams) (model.Connection, error) {
+	row, err := a.q.CreateConnection(ctx, pg.CreateConnectionParams(p))
+
+	return model.Connection(row), err
+}
+
+func (a *pgQuerier) GetConnection(ctx context.Context, p model.GetConnectionParams) (model.Connection, error) {
+	row, err := a.q.GetConnection(ctx, pg.GetConnectionParams(p))
+
+	return model.Connection(row), err
+}
+
+func (a *pgQuerier) GetConnectionBySlug(ctx context.Context, p model.GetConnectionBySlugParams) (model.Connection, error) {
+	row, err := a.q.GetConnectionBySlug(ctx, pg.GetConnectionBySlugParams(p))
+
+	return model.Connection(row), err
+}
+
+func (a *pgQuerier) ListConnections(ctx context.Context, orgID uuid.UUID) ([]model.Connection, error) {
+	rows, err := a.q.ListConnections(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.Connection, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, model.Connection(row))
+	}
+
+	return out, nil
+}
+
+func (a *pgQuerier) UpdateConnection(ctx context.Context, p model.UpdateConnectionParams) (model.Connection, error) {
+	row, err := a.q.UpdateConnection(ctx, pg.UpdateConnectionParams(p))
+
+	return model.Connection(row), err
+}
+
+func (a *pgQuerier) RecordConnectionTest(ctx context.Context, p model.RecordConnectionTestParams) (int64, error) {
+	return a.q.RecordConnectionTest(ctx, pg.RecordConnectionTestParams(p))
+}
+
+func (a *pgQuerier) SoftDeleteConnection(ctx context.Context, p model.SoftDeleteConnectionParams) (int64, error) {
+	return a.q.SoftDeleteConnection(ctx, pg.SoftDeleteConnectionParams(p))
+}
+
+func (a *pgQuerier) CountConnections(ctx context.Context, orgID uuid.UUID) (int64, error) {
+	return a.q.CountConnections(ctx, orgID)
+}
+
+// --- connections ------------------------------------------------------------
+
+func (a *liteQuerier) CreateConnection(ctx context.Context, p model.CreateConnectionParams) (model.Connection, error) {
+	row, err := a.q.CreateConnection(ctx, lite.CreateConnectionParams(p))
+
+	return model.Connection(row), err
+}
+
+func (a *liteQuerier) GetConnection(ctx context.Context, p model.GetConnectionParams) (model.Connection, error) {
+	row, err := a.q.GetConnection(ctx, lite.GetConnectionParams(p))
+
+	return model.Connection(row), err
+}
+
+func (a *liteQuerier) GetConnectionBySlug(ctx context.Context, p model.GetConnectionBySlugParams) (model.Connection, error) {
+	row, err := a.q.GetConnectionBySlug(ctx, lite.GetConnectionBySlugParams(p))
+
+	return model.Connection(row), err
+}
+
+func (a *liteQuerier) ListConnections(ctx context.Context, orgID uuid.UUID) ([]model.Connection, error) {
+	rows, err := a.q.ListConnections(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.Connection, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, model.Connection(row))
+	}
+
+	return out, nil
+}
+
+func (a *liteQuerier) UpdateConnection(ctx context.Context, p model.UpdateConnectionParams) (model.Connection, error) {
+	row, err := a.q.UpdateConnection(ctx, lite.UpdateConnectionParams(p))
+
+	return model.Connection(row), err
+}
+
+func (a *liteQuerier) RecordConnectionTest(ctx context.Context, p model.RecordConnectionTestParams) (int64, error) {
+	return a.q.RecordConnectionTest(ctx, lite.RecordConnectionTestParams(p))
+}
+
+func (a *liteQuerier) SoftDeleteConnection(ctx context.Context, p model.SoftDeleteConnectionParams) (int64, error) {
+	return a.q.SoftDeleteConnection(ctx, lite.SoftDeleteConnectionParams(p))
+}
+
+func (a *liteQuerier) CountConnections(ctx context.Context, orgID uuid.UUID) (int64, error) {
+	return a.q.CountConnections(ctx, orgID)
+}

@@ -377,6 +377,62 @@ func (t *tracingQuerier) CountRoleHolders(ctx context.Context, a1 model.CountRol
 	return t.next.CountRoleHolders(ctx, a1)
 }
 
+func (t *tracingQuerier) CreateConnection(ctx context.Context, a1 model.CreateConnectionParams) (model.Connection, error) {
+	ctx, span := observability.Start(ctx, "db.CreateConnection")
+	defer span.End()
+
+	return t.next.CreateConnection(ctx, a1)
+}
+
+func (t *tracingQuerier) GetConnection(ctx context.Context, a1 model.GetConnectionParams) (model.Connection, error) {
+	ctx, span := observability.Start(ctx, "db.GetConnection")
+	defer span.End()
+
+	return t.next.GetConnection(ctx, a1)
+}
+
+func (t *tracingQuerier) GetConnectionBySlug(ctx context.Context, a1 model.GetConnectionBySlugParams) (model.Connection, error) {
+	ctx, span := observability.Start(ctx, "db.GetConnectionBySlug")
+	defer span.End()
+
+	return t.next.GetConnectionBySlug(ctx, a1)
+}
+
+func (t *tracingQuerier) ListConnections(ctx context.Context, a1 uuid.UUID) ([]model.Connection, error) {
+	ctx, span := observability.Start(ctx, "db.ListConnections")
+	defer span.End()
+
+	return t.next.ListConnections(ctx, a1)
+}
+
+func (t *tracingQuerier) UpdateConnection(ctx context.Context, a1 model.UpdateConnectionParams) (model.Connection, error) {
+	ctx, span := observability.Start(ctx, "db.UpdateConnection")
+	defer span.End()
+
+	return t.next.UpdateConnection(ctx, a1)
+}
+
+func (t *tracingQuerier) RecordConnectionTest(ctx context.Context, a1 model.RecordConnectionTestParams) (int64, error) {
+	ctx, span := observability.Start(ctx, "db.RecordConnectionTest")
+	defer span.End()
+
+	return t.next.RecordConnectionTest(ctx, a1)
+}
+
+func (t *tracingQuerier) SoftDeleteConnection(ctx context.Context, a1 model.SoftDeleteConnectionParams) (int64, error) {
+	ctx, span := observability.Start(ctx, "db.SoftDeleteConnection")
+	defer span.End()
+
+	return t.next.SoftDeleteConnection(ctx, a1)
+}
+
+func (t *tracingQuerier) CountConnections(ctx context.Context, a1 uuid.UUID) (int64, error) {
+	ctx, span := observability.Start(ctx, "db.CountConnections")
+	defer span.End()
+
+	return t.next.CountConnections(ctx, a1)
+}
+
 func (t *tracingQuerier) CreateIdentityProvider(ctx context.Context, a1 model.CreateIdentityProviderParams) (model.IdentityProvider, error) {
 	ctx, span := observability.Start(ctx, "db.CreateIdentityProvider")
 	defer span.End()

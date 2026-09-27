@@ -60,8 +60,8 @@ At the end of every part, in this order:
 
 | | |
 |---|---|
-| **Last completed** | Phase 0, in full (31 parts) |
-| **Next up** | **Part 16 — The connector interface, and one connector behind it** |
+| **Last completed** | Part 16 — The connector interface |
+| **Next up** | **Part 17 — The conformance suite** |
 | **Current phase** | Phase 1 — Connect & Query → v0.1 |
 | **Branch** | `main` |
 | **Blockers** | None |
@@ -82,11 +82,16 @@ metrics with a reference Grafana dashboard, OpenTelemetry tracing, browser error
 back with the trace of the call that failed, `pivot doctor`, `pivot backup`/`restore`, and
 stored secrets encrypted at rest with a rotation procedure that has been walked.
 
-**What it cannot do is the whole of Phase 1**: connect to a data source, ask it a
-question, or show the answer. `internal/connectors`, `internal/query` and
-`internal/semantic` are `doc.go` stubs.
+**Pivot can now connect to an external PostgreSQL**, store its credentials encrypted,
+test it with errors somebody can act on, and read its schema. That is `internal/connectors`
+and the `connections` table; `pivot admin add-connection` is the way in until Part 26
+builds the screens. `internal/query` and `internal/semantic` are still `doc.go` stubs, so
+there is no way to *run* a question and nothing to show the answer in.
 
 **Carried in from Phase 0**, and owned by parts in this phase or named in them:
+- **The container stack now pins a release that predates nothing** — `v0.0.2-alpha` was
+  cut on 2026-09-26. `deploy/docker-compose.yml` and `deploy/.env.example` still default
+  to `0.0.1-alpha` and should move to it.
 - The Keycloak round trip is opt-in and does not run in CI. It belongs in a scheduled job:
   what it protects against is Keycloak changing, not Pivot changing.
 - `X-Forwarded-For` is not trusted, so rate limiting behind a proxy keys on the proxy.
@@ -108,7 +113,7 @@ few points high; leave margin above 80%.
 
 ```
 Phase 0  Foundations        [██████████████████████████] 31/31   COMPLETE
-Phase 1  Connect & Query    [                          ]  0/12
+Phase 1  Connect & Query    [██                        ]  1/12
 Phase 2+ ...                                            (expanded as we approach)
 ```
 
@@ -130,32 +135,54 @@ and discovering the abstraction afterwards.
 
 ---
 
-### - [ ] Part 16 — The connector interface, and one connector behind it
+### - [x] Part 16 — The connector interface, and one connector behind it ✅ 2026-09-27
 
 **Deliverable:** Pivot can connect to a PostgreSQL somebody else owns, and the shape of
 that is an interface rather than a special case.
 
-**Build:** `internal/connectors`: the `Connector` interface (connect, introspect, execute,
-cancel, capabilities), a registry, connection pooling with per-connection limits,
-credential storage through `internal/secrets`, and PostgreSQL as the reference
-implementation.
+**Build:** `internal/connectors` (the `Connector` interface, a registry, `SQLConnector`
+over database/sql, the PostgreSQL dialect), migration 00006 with the `connections` table,
+`ConnectionRepo`, and `pivot admin add-connection|test-connection|list-connections`.
 
 **Done when:**
-- A connection to an external PostgreSQL is created, tested and stored, and its password
-  is an envelope in the database rather than a string
-- `Test` returns errors somebody can act on — "the host does not resolve", "the password
-  was refused", "the database does not exist" — rather than the driver's text
-- Capabilities are declared rather than assumed: window functions, CTEs, the identifier
-  quoting rule, the placeholder syntax
-- Pooling is per connection, with a cap, and a connection that is deleted closes its pool
-  rather than leaking it
+- [x] **A connection to a real external PostgreSQL is created, tested and stored**, and
+      the stored password is `pivot.v1.4a44cfc0.…` rather than a string — checked with SQL
+      against the file, on both engines
+- [x] **All four failure modes say what to do**, each caused for real rather than mocked:
+      a refused password, a host that does not resolve, nothing listening on the port, and
+      a database that does not exist. None of them contains the password
+- [x] Capabilities are declared rather than assumed, including the identifier quoting
+      rule — which is the injection surface, and is tested with `"; DROP TABLE x; --`
+- [x] **Pooling is per connection and capped**: twenty concurrent queries through a pool
+      of two all succeed, and `Close` releases it so a deleted connection does not hold a
+      pool against somebody's warehouse until Pivot restarts
+- [x] Cancellation reaches the server and a timeout is reported as one, both verified
+      against a real `pg_sleep`
 
-**Notes:** `P1-CONN-003` is already built — `internal/secrets` encrypts with a purpose
-string, and a warehouse password is a new purpose in `internal/store/repo/secrets.go`.
-That file is deliberately the one place that lists secret columns.
+**Decisions worth keeping:**
+- **`Dialect` is not `Connector`.** Pooling, row scanning, truncation and timeouts are
+  identical for every database/sql source, so they live in `SQLConnector` once and a
+  driver supplies only the DSN, the capabilities, the catalog query and the error
+  classification. BigQuery is not database/sql-shaped, so this is a helper that implements
+  the interface rather than the interface itself
+- **A truncated result carries a flag.** A silently cut result is a wrong answer presented
+  as a right one, and the chart Phase 2 draws from it is wrong in a way nobody can see
+- **The DSN is built with `net/url`.** A generated password contains a colon, an at sign
+  or a slash about a third of the time, and concatenation turns that into a DSN naming a
+  different host
+- **`Query` still takes a string.** The package comment promised compiled query objects,
+  and Phase 3 owns the compiler that produces them. Part 20 replaces the string; inventing
+  the type now would be designing against an imaginary caller
 
-The interface is the part to get right. Everything in this phase is written against it,
-and the eighth connector is where a wrong abstraction is discovered and cannot be changed.
+**Found on the way:**
+- **`--host` and `--port` collided with the root command's persistent flags**, so
+  `--port 5433` set the *server* port to zero and the command failed validation before it
+  ran. They are `--db-host` and `--db-port`, with the reason in the code
+- **The pgx driver was not registered** in this package — it was reaching `internal/store`
+  by luck of import order. It is imported where it is used now
+- **My own error message hid its cause.** `sql.Open` failing said "could not prepare a
+  postgres connection" and nothing else, and sent me looking in the wrong place. At that
+  point nothing secret can be in the error, so it carries the driver's text
 
 **Refs:** `P1-CONN-001`, `P1-CONN-002`, `P1-CONN-003`, `P1-CONN-004`, `P1-CONN-007`,
 `P1-DB-001`
@@ -423,4 +450,4 @@ Phase 0's log is in
 
 | Date | Part | Shipped | Notes |
 |---|---|---|---|
-| | | | |
+| 2026-09-27 | 16 | `internal/connectors` (interface, registry, `SQLConnector`, PostgreSQL), migration 00006 and the `connections` table, `ConnectionRepo`, and three `pivot admin` commands | **Pivot connects to a database somebody else owns.** Created, tested and stored against a real PostgreSQL, with the password landing as `pivot.v1.4a44cfc0...` rather than a string — checked with SQL against the file on both engines, because asking the repository whether it encrypted something is asking the guard whether the door is locked. **All four failure modes were caused for real rather than mocked**: a refused password, a host that does not resolve, a closed port, a missing database. Each says what to do and none contains the password. **The interface is the decision this part exists for.** `Dialect` is not `Connector`: pooling, scanning, truncation and timeouts are identical for every database/sql source, so they live in `SQLConnector` once and a driver supplies the DSN, the capabilities, the catalog query and the error classification — with BigQuery in mind, which is not database/sql-shaped, so this is a helper implementing the interface rather than the interface itself. **A truncated result carries a flag**, because a silently cut result is a wrong answer presented as a right one and the chart Phase 2 draws from it is wrong in a way nobody can see. **The DSN is built with `net/url`**: a generated password contains a colon, an at sign or a slash about a third of the time, and concatenation turns that into a DSN naming a different host. **`Query` still takes a string** — the package comment promised compiled query objects and Phase 3 owns the compiler that makes them; inventing the type now would be designing against an imaginary caller, so Part 20 replaces it. **Three things bit me.** `--host` and `--port` collided with the root command's persistent flags, so `--port 5433` set the *server* port to zero and the command failed before it ran; they are `--db-host` and `--db-port` now. The pgx driver was not registered in this package and had been reaching it by luck of import order. And my own error message hid its cause — `sql.Open` failing said "could not prepare a postgres connection" and nothing else, which sent me looking in the wrong place for ten minutes; at that point nothing secret can be in the error, so it carries the driver's text. **The portability harness caught the new table** before I remembered to declare it, and `sqlc.yaml`'s own warning caught the SQLite type overrides I had not added — the two models had silently diverged on eleven columns. |
