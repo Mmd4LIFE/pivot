@@ -1,6 +1,7 @@
 package conformance
 
 import (
+	"math"
 	"testing"
 	"time"
 )
@@ -65,6 +66,35 @@ func TestReadingWholeNumbers(t *testing.T) {
 		t.Error("asInt64 truncated 7.5 instead of refusing it")
 	}
 
+	/*
+		Unsigned, which MySQL returns for ROW_NUMBER() and for any UNSIGNED
+		column. The suite met its first one when the second connector arrived;
+		PostgreSQL has no unsigned integers, so a reader written against it
+		alone had never seen one.
+	*/
+	for name, in := range map[string]any{
+		"uint64": uint64(7),
+		"uint32": uint32(7),
+		"uint":   uint(7),
+	} {
+		got, err := asInt64(in)
+		if err != nil || got != 7 {
+			t.Errorf("asInt64(%s) = %d, %v", name, got, err)
+		}
+	}
+
+	// And one that does not fit is refused rather than wrapped. Converting it
+	// blindly comes back negative, and a count that reads -9223372036854775808
+	// is the kind of wrong that looks like data rather than like a bug.
+	for name, in := range map[string]any{
+		"uint64": uint64(math.MaxUint64),
+		"uint":   uint(math.MaxUint64),
+	} {
+		if got, err := asInt64(in); err == nil {
+			t.Errorf("asInt64(%s max) = %d, want a refusal", name, got)
+		}
+	}
+
 	if _, err := asInt64("seven"); err == nil {
 		t.Error("asInt64 accepted \"seven\"")
 	}
@@ -98,6 +128,10 @@ func TestReadingRealNumbers(t *testing.T) {
 		t.Errorf("asFloat64(int64) = %v, %v", got, err)
 	}
 
+	if got, err := asFloat64(uint64(2)); err != nil || got != 2 {
+		t.Errorf("asFloat64(uint64) = %v, %v", got, err)
+	}
+
 	if _, err := asFloat64("one point five"); err == nil {
 		t.Error("asFloat64 accepted prose")
 	}
@@ -116,6 +150,8 @@ func TestReadingBooleans(t *testing.T) {
 		false:         false,
 		int64(1):      true,
 		int64(0):      false,
+		uint64(1):     true,
+		uint64(0):     false,
 		"t":           true,
 		"F":           false,
 		"TRUE":        true,

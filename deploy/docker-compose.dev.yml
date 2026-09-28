@@ -5,15 +5,19 @@
 # stack including a containerized Pivot lands in Part 15
 # (deploy/docker-compose.yml).
 #
-#   make dev-db        start Postgres
-#   make dev-db-stop   stop it
-#   make dev-db-reset  destroy the volume and start clean
+#   make dev-db        start Postgres and MySQL
+#   make dev-db-stop   stop them
+#   make dev-db-reset  destroy the volumes and start clean
 #
 # Then:
 #   PIVOT_DATABASE_URL="postgres://pivot:pivot@localhost:5433/pivot?sslmode=disable" ./bin/pivot serve
 #
-# Port 5433 deliberately avoids clashing with a PostgreSQL already listening on
-# the host's 5432.
+# Postgres is Pivot's own store *and* a connector test target. MySQL is only
+# ever a target: Pivot does not store itself in MySQL (ADR-0003 picked two
+# engines and stopped), so it is here for internal/connectors alone.
+#
+# Ports 5433 and 3307 deliberately avoid clashing with a PostgreSQL or MySQL
+# already listening on the host's defaults.
 
 name: pivot-dev
 
@@ -51,6 +55,41 @@ services:
       - -c
       - max_connections=200
 
+  mysql:
+    image: mysql:8.4
+    container_name: pivot-dev-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: pivot
+      MYSQL_DATABASE: pivot
+      MYSQL_USER: pivot
+      MYSQL_PASSWORD: pivot
+      # A server clock that is deliberately not UTC, and not on a whole hour.
+      # MySQL's default time_zone follows the system, so this makes every
+      # TIMESTAMP come back shifted by 5h45m unless the connector pins the
+      # session zone -- which is the "dates are off by one" bug, caused on
+      # purpose so the conformance suite has something to catch.
+      TZ: Asia/Kathmandu
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      # --silent, because the default output is noise on every poll. The ping
+      # is against the socket, so it succeeds only once the server is really
+      # accepting connections rather than merely running.
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -upivot -ppivot --silent"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    # Nothing is passed as a command. GitHub Actions service containers cannot
+    # override one, and a dev database configured differently from CI's is a
+    # failure that only reproduces in the place you cannot debug. Anything the
+    # tests need is a session variable the connector sets, not server config.
+
 volumes:
   postgres-data:
     name: pivot-dev-postgres-data
+  mysql-data:
+    name: pivot-dev-mysql-data
