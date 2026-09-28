@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Mmd4LIFE/pivot/internal/connectors"
 	"github.com/Mmd4LIFE/pivot/internal/secrets"
 	"github.com/Mmd4LIFE/pivot/internal/store"
 	"github.com/Mmd4LIFE/pivot/internal/store/repo"
@@ -311,4 +312,76 @@ func testCipher(t *testing.T) secrets.Cipher {
 	}
 
 	return ring
+}
+
+/*
+Every connector this build can open can also be stored.
+
+The one test that would have caught Part 18-a. The connections table shipped
+with `CHECK (kind IN ('postgres'))` and a comment calling the resulting
+migration-per-connector deliberate; the very next connector was added without
+one, so a MySQL connection could be configured and tested and was then refused
+by the database on the way in. The connector's own tests never reached storage,
+and the storage tests only ever named "postgres", so nothing looked.
+
+Driven off the registry rather than a list, which is the whole point: a fourth
+connector is covered by existing. If this fails, either a migration is missing
+or a kind was registered under a name the schema will not take -- and the
+failure says which kind, which is the thing that was missing before.
+*/
+func TestEveryRegisteredConnectorCanBeStored(t *testing.T) {
+	t.Parallel()
+
+	kinds := connectors.Kinds()
+	if len(kinds) < 2 {
+		t.Fatalf("the registry has %d kinds, so this proves nothing", len(kinds))
+	}
+
+	eachEngine(t, func(t *testing.T, db *store.DB) {
+		f := newConnectionFixture(t, db)
+
+		for _, kind := range kinds {
+			created, err := f.repos.Connections.Create(f.ctx, repo.CreateConnection{
+				// Slugged by kind, because they share an organization and a
+				// slug is unique within one.
+				Slug: "source-" + kind.String(),
+				Name: "A " + kind.String() + " source",
+				Kind: kind.String(),
+
+				Host: "db.internal", Port: 5432, Database: "analytics",
+				Username: "pivot", Password: connectionPassword,
+				IsEnabled: true,
+			})
+			if err != nil {
+				t.Errorf("a %s connection could not be stored: %v", kind, err)
+
+				continue
+			}
+
+			if created.Kind != kind.String() {
+				t.Errorf("stored kind = %q, want %q", created.Kind, kind)
+			}
+		}
+	})
+}
+
+// A connection with no kind at all is still refused. Dropping the enumeration
+// in 00007 loosened the constraint to what is actually true at this layer, and
+// that is not the same as removing it.
+func TestAConnectionStillNeedsAKind(t *testing.T) {
+	t.Parallel()
+
+	eachEngine(t, func(t *testing.T, db *store.DB) {
+		f := newConnectionFixture(t, db)
+
+		_, err := f.repos.Connections.Create(f.ctx, repo.CreateConnection{
+			Slug: "nameless", Name: "No kind", Kind: "",
+			Host: "db.internal", Database: "analytics", Username: "pivot",
+			IsEnabled: true,
+		})
+
+		if err == nil {
+			t.Fatal("a connection with no connector kind was stored")
+		}
+	})
 }

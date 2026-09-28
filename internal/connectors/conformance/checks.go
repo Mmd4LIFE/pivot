@@ -517,6 +517,64 @@ func checkTruncation(ctx context.Context, s Subject) error {
 	return nil
 }
 
+/*
+The connector is safe to use from several goroutines at once.
+
+[connectors.Connector] promises it -- the pool underneath it is the point --
+and everything above depends on it: one stored connection serves every person
+in an organization, concurrently, forever.
+
+Worth proving rather than assuming since cancellation grew a per-query
+connection and a watcher goroutine. A pool that hands one connection to two
+queries, a watcher that outlives what it was watching, or a driver that is
+simply not concurrent shows up here and in none of the checks above, all of
+which run one query at a time.
+*/
+func checkConcurrency(ctx context.Context, s Subject) error {
+	const goroutines = 16
+
+	failures := make(chan error, goroutines)
+
+	for range goroutines {
+		go func() {
+			// The whole fixture, because it is the one query this suite knows
+			// every subject can answer -- and reading seven columns of three
+			// rows gives cross-talk between connections somewhere to show.
+			rows, err := s.fetch(ctx)
+			if err != nil {
+				failures <- err
+
+				return
+			}
+
+			for i, want := range Rows() {
+				id, ierr := rows.int64At(i, "id")
+				if ierr != nil {
+					failures <- ierr
+
+					return
+				}
+
+				if id != want.ID {
+					failures <- fmt.Errorf("row %d came back as id %d, want %d", i, id, want.ID)
+
+					return
+				}
+			}
+
+			failures <- nil
+		}()
+	}
+
+	for range goroutines {
+		if err := <-failures; err != nil {
+			return fmt.Errorf("%d queries at once: %w", goroutines, err)
+		}
+	}
+
+	return nil
+}
+
 // --- stopping ---------------------------------------------------------------
 
 /*

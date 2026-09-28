@@ -115,9 +115,19 @@ type Fixture struct {
 	Schema string
 	Name   string
 
-	// Create, Insert and Drop are run in that order, statement by statement.
-	// Drop must tolerate a table that is not there, because a run that died
-	// before cleaning up would otherwise poison every run after it.
+	/*
+		Create, Insert and Drop are run through the connector, in that order,
+		statement by statement. Drop must tolerate a table that is not there,
+		because a run that died before cleaning up would otherwise poison
+		every run after it.
+
+		All three may be empty, for a source the connector cannot write to.
+		That is not an edge case: opening a BI source read-only is the correct
+		thing to do, and an account granted SELECT and nothing else is how a
+		careful warehouse administrator hands out access. A subject in that
+		position puts the table there by its own means before calling [Run],
+		and owns removing it -- the suite will not, because it cannot.
+	*/
 	Create []string
 	Insert []string
 	Drop   []string
@@ -236,6 +246,7 @@ func Checks() []Check {
 
 		{Property: "a_large_result_arrives_whole", Needs: NeedsSeries, Run: checkLargeResult},
 		{Property: "row_limit_truncates_with_a_signal", Needs: NeedsSeries, Run: checkTruncation},
+		{Property: "concurrent_queries_all_succeed", Needs: NeedsFixture, Run: checkConcurrency},
 
 		{Property: "cancellation_is_prompt_and_says_so", Needs: NeedsSleep, Run: checkCancellation},
 		{Property: "a_timeout_is_reported_as_one", Needs: NeedsTimeout, Run: checkTimeout},
@@ -353,8 +364,14 @@ func (s Subject) cannot(need Requirement) string {
 	return ""
 }
 
+// hasFixture reports whether the suite has a table to query.
+//
+// The name alone, because a subject whose connector cannot write supplies no
+// DDL and puts the table there itself. Requiring Create here meant a read-only
+// connector could not be conformance-tested at all, which would have excluded
+// exactly the connections most worth being careful with.
 func (s Subject) hasFixture() bool {
-	return s.Fixture.Table != "" && len(s.Fixture.Create) > 0
+	return s.Fixture.Table != ""
 }
 
 func (s Subject) name() string {

@@ -53,13 +53,20 @@ reveal it.
 The connection is tested before it is stored, and a connection that cannot be
 reached is refused -- a stored connection that has never worked is a support
 ticket waiting to happen. Pass --no-test to store it anyway, which is what a
-source behind a firewall this machine cannot cross needs.`,
+source behind a firewall this machine cannot cross needs. The configuration is
+still checked: --no-test skips reaching the database, not validating it.
+
+What a connection needs depends on the connector. A server takes --db-host,
+--database and --username; a file-backed one such as sqlite takes the path as
+--database and nothing else.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			for flag, value := range map[string]string{
-				"--slug": slug, "--name": name, "--db-host": host, "--database": database,
-				"--username": username,
-			} {
+			// Only what Pivot itself needs. What a *connection* needs is the
+			// dialect's business and is checked below by opening it: a
+			// PostgreSQL wants a host and a username, and a SQLite file has
+			// neither. Requiring them here meant a file-backed connector could
+			// not be configured at all.
+			for flag, value := range map[string]string{"--slug": slug, "--name": name} {
 				if strings.TrimSpace(value) == "" {
 					return fmt.Errorf("%s is required", flag)
 				}
@@ -103,11 +110,26 @@ source behind a firewall this machine cannot cross needs.`,
 				QueryTimeoutSeconds: queryTimeout, MaxRows: maxRows,
 			}
 
-			// Tested before it is stored, so the failure is reported now --
-			// while the person who typed the hostname is still here -- rather
-			// than to whoever opens the query editor tomorrow.
+			/*
+				Opened before it is stored, and tested unless told not to.
+
+				Open validates without dialing, so it runs even under
+				--no-test: the escape hatch is for a source this machine
+				cannot reach, not for storing a configuration the connector
+				would refuse. A row that can never be opened is a support
+				ticket with a delay on it.
+			*/
+			connector, err := connectors.Open(cfg)
+			if err != nil {
+				return err
+			}
+
+			defer func() { _ = connector.Close() }()
+
+			// Tested while the person who typed the hostname is still here,
+			// rather than reported to whoever opens the query editor tomorrow.
 			if !noTest {
-				if terr := testConfig(cmd, cfg); terr != nil {
+				if terr := connector.Test(cmd.Context()); terr != nil {
 					return fmt.Errorf(
 						"could not reach that database: %w\n\n"+
 							"Nothing was stored. Pass --no-test to store it anyway", terr)
@@ -161,10 +183,10 @@ source behind a firewall this machine cannot cross needs.`,
 	// `--port 5433` set the *server* port to zero and fail validation before
 	// the command ran -- a collision worth a clearer name rather than a
 	// clever fix.
-	f.StringVar(&host, "db-host", "", "Hostname of the database server (required)")
+	f.StringVar(&host, "db-host", "", "Hostname of the database server; not used by a file-backed connector")
 	f.IntVar(&port, "db-port", 0, "Port on the database server; zero uses the connector's default")
-	f.StringVar(&database, "database", "", "Database name (required)")
-	f.StringVar(&username, "username", "", "Username (required)")
+	f.StringVar(&database, "database", "", "Database name, or the file path for a file-backed connector")
+	f.StringVar(&username, "username", "", "Username; not used by a file-backed connector")
 	f.StringVar(&sslMode, "ssl-mode", "", "TLS mode; empty uses the connector's default")
 	f.IntVar(&maxOpenConns, "max-open-conns", 0, "Pool size; zero uses the default")
 	f.IntVar(&queryTimeout, "query-timeout", 0, "Per-query timeout in seconds; zero uses the default")
