@@ -3,6 +3,8 @@ package authz_test
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -329,12 +331,17 @@ func TestPermissionChangesTakeEffectQuickly(t *testing.T) {
 }
 
 // countingStore records how often it is consulted.
+//
+// Atomic because the cache in front of it is read concurrently, so on a cold
+// key several goroutines reach the store at once -- a stub that counted with
+// an ordinary increment would report a race of its own and bury the one the
+// test is actually looking for.
 type countingStore struct {
-	calls int
+	calls atomic.Int64
 }
 
 func (s *countingStore) RelationsOn(context.Context, []authz.Subject, authz.Object) ([]authz.Relation, error) {
-	s.calls++
+	s.calls.Add(1)
 
 	return []authz.Relation{authz.RelationAdmin}, nil
 }
@@ -362,8 +369,8 @@ func TestCacheAvoidsRepeatedLookups(t *testing.T) {
 		}
 	}
 
-	if counter.calls != 1 {
-		t.Errorf("the store was consulted %d times for 10 identical checks, want 1", counter.calls)
+	if counter.calls.Load() != 1 {
+		t.Errorf("the store was consulted %d times for 10 identical checks, want 1", counter.calls.Load())
 	}
 
 	hits, misses, _ := cache.Stats()
@@ -461,5 +468,55 @@ func TestRoleTableIsWellFormed(t *testing.T) {
 
 	if authz.RoleGrants(authz.RelationViewer, authz.PermNativeQuery) {
 		t.Error("viewer grants native_query")
+	}
+}
+
+/*
+The cache is read concurrently, which is the only way its counters were ever
+going to be read.
+
+This exists because the counters were incremented under a *read* lock for the
+whole of Phase 0 and nothing noticed: several goroutines hold a read lock at
+once by definition, so the increment was two goroutines writing one word. No
+test called Check concurrently, so the race detector never had anything to
+detect. Part 21 puts this cache on the path of every query, at which point
+"concurrent" stops being hypothetical.
+
+The assertion is the -race flag. There is nothing to check about the result.
+*/
+func TestTheCacheSurvivesConcurrentCallers(t *testing.T) {
+	t.Parallel()
+
+	cache := authz.NewCache(authz.NewResolver(&countingStore{}))
+
+	req := authz.Request{
+		Subject:    authz.User("u"),
+		Permission: authz.PermManageUsers,
+		Object:     authz.Object{Type: authz.TypeOrganization, ID: "o"},
+	}
+
+	var wg sync.WaitGroup
+
+	for range 8 {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			for range 200 {
+				if _, err := cache.Check(context.Background(), req); err != nil {
+					t.Errorf("check: %v", err)
+
+					return
+				}
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	hits, misses, _ := cache.Stats()
+	if hits+misses != 1600 {
+		t.Errorf("counted %d lookups of 1600; the counters lost writes", hits+misses)
 	}
 }

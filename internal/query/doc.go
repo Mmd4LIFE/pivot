@@ -14,6 +14,20 @@
 // policies to share an entry. Invalidation bumps a generation counter instead
 // of enumerating keys. See ADR-0006.
 //
+// [Cache] is the L1 tier. It holds decoded rows rather than Arrow batches and
+// keys on a [policy.Fingerprint]; ADR-0012 amends ADR-0006 with the reasons for
+// both. The fingerprint is part of the key rather than a check beside it, so
+// two callers with different policy sets are not refused each other's entry --
+// they cannot name it. A caller who cannot be fingerprinted is neither cached
+// nor served from cache, which costs a miss and is the only direction worth
+// failing in.
+//
+// An entry is filled by teeing rows aside as they stream, and the copy is
+// abandoned the moment it outgrows the per-entry byte budget. That is what lets
+// this coexist with the constant-memory property above: results worth caching
+// are cached, and results too large to hold are streamed exactly as they were
+// before the cache existed.
+//
 // Local compute lives here too: DuckDB handles cross-source federation,
 // Parquet acceleration, and the shared-subquery consolidation that turns a
 // twenty-card dashboard into one warehouse query. See ADR-0004.

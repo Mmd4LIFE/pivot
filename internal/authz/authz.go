@@ -94,6 +94,24 @@ type Checker interface {
 	Explain(ctx context.Context, req Request) (Explanation, error)
 }
 
+/*
+Granter resolves what a subject *is*, rather than what it may do.
+
+Separate from [Checker] because the two questions have different shapes and
+different callers. A handler asks "may they run this?" and wants one boolean.
+The result cache asks "what is their standing?" and wants the whole set, because
+two callers may share a cached result exactly when nothing about their
+authorization could make them see different rows -- and that is not a property
+any single permission can answer.
+
+Kept as its own interface so that a [Checker] which cannot answer it says so
+rather than returning nothing. An empty set is a valid answer meaning "holds no
+grants", and a caller who could not be resolved must never be mistaken for one.
+*/
+type Granter interface {
+	Grants(ctx context.Context, subject Subject, object Object) ([]Relation, error)
+}
+
 // Explanation is a Decision plus the evidence behind it.
 type Explanation struct {
 	Decision

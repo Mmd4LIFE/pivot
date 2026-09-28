@@ -654,6 +654,7 @@ type FinishQueryLogParams struct {
 	RowsReturned   int64
 	BytesEstimated int64
 	Truncated      dbtypes.Bool
+	CacheStatus    string
 	ErrorMessage   string
 	ID             uuid.UUID
 	OrgID          uuid.UUID

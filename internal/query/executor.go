@@ -12,6 +12,7 @@ import (
 
 	"github.com/Mmd4LIFE/pivot/internal/authz"
 	"github.com/Mmd4LIFE/pivot/internal/connectors"
+	"github.com/Mmd4LIFE/pivot/internal/policy"
 	"github.com/Mmd4LIFE/pivot/internal/store/model"
 	"github.com/Mmd4LIFE/pivot/internal/store/repo"
 	"github.com/Mmd4LIFE/pivot/internal/tenant"
@@ -50,6 +51,20 @@ type Executor struct {
 	checker authz.Checker
 	log     *slog.Logger
 
+	/*
+		cache is the L1 result cache, and granter is what a caller's policy set
+		is resolved from. Both may be nil, and a nil cache is not a degraded
+		mode -- it is the cache being off, which every execution then reports
+		as uncached.
+
+		They are separate fields because they fail separately. A cache with no
+		granter cannot fingerprint anybody, and rather than cache them together
+		under a blank policy set it caches nothing at all: the whole point of
+		ADR-0006's key is that callers who cannot be told apart must not share.
+	*/
+	cache   *Cache
+	granter authz.Granter
+
 	// open is [connectors.Open], swapped in tests. Unexported and with no
 	// setter outside this package: a caller that could substitute it could
 	// substitute the source, and this is the type whose whole job is that
@@ -69,6 +84,25 @@ func WithLogger(log *slog.Logger) Option {
 		if log != nil {
 			e.log = log
 		}
+	}
+}
+
+/*
+WithCache turns the result cache on.
+
+The granter is required with it, and passing a nil one leaves the cache off
+rather than running it without fingerprints. That is the fail-closed direction:
+an executor that cached without resolving the caller would serve one caller's
+rows to another, and an executor that quietly declines to cache is merely slow.
+*/
+func WithCache(cache *Cache, granter authz.Granter) Option {
+	return func(e *Executor) {
+		if cache == nil || granter == nil {
+			return
+		}
+
+		e.cache = cache
+		e.granter = granter
 	}
 }
 
@@ -152,6 +186,10 @@ type Execution struct {
 
 	// Plan is what was sent, for a caller that wants to show it.
 	Plan Plan
+
+	// CacheStatus is hit, miss or uncached -- the same value the query log
+	// records, exposed so a caller can show it without reading the log back.
+	CacheStatus string
 }
 
 /*
@@ -185,8 +223,92 @@ func (e *Executor) Execute(ctx context.Context, req Request) (*Execution, error)
 		return nil, err
 	}
 
-	// 4 and 5. Execute and stream.
-	return e.execute(ctx, scope, plan)
+	// 4. The cache sits here, between planning and execution, because it needs
+	// what planning resolved -- the connection and the row cap are both part
+	// of the key -- and because a hit must cost the source nothing.
+	key, cacheable := e.cacheKey(ctx, scope, plan)
+
+	if cacheable {
+		if cached, ok := e.cache.Get(ctx, key); ok {
+			return e.serveFromCache(ctx, scope, plan, cached)
+		}
+	} else if e.cache != nil {
+		e.cache.countUncached(ctx)
+	}
+
+	// 5 and 6. Execute and stream.
+	return e.execute(ctx, scope, plan, key, cacheable)
+}
+
+/*
+cacheKey resolves the caller's policy set and derives the key for this plan.
+
+Returns false whenever anything at all is unclear -- the cache is off, the
+fingerprint would not resolve, the key could not be built. Every one of those
+costs a cache miss and nothing else, which is the cheap side of a decision
+whose expensive side is somebody reading rows that were computed for a
+different policy set.
+
+A fingerprint that fails to resolve is logged rather than returned. The query
+is still a perfectly good query; it simply will not be cached, and turning an
+authorization-cache problem into a failed query would be a worse trade than
+running it.
+*/
+func (e *Executor) cacheKey(ctx context.Context, scope tenant.Scope, plan Plan) (string, bool) {
+	if e.cache == nil || e.granter == nil {
+		return "", false
+	}
+
+	fingerprint, err := policy.Resolve(ctx, e.granter, scope)
+	if err != nil {
+		e.log.Warn("not caching: the caller's policy set could not be resolved",
+			"connection", plan.Connection.Slug, "error", err)
+
+		return "", false
+	}
+
+	return e.cache.Key(fingerprint, scope.OrgID(), plan.Connection.ID, plan.SQL, plan.MaxRows)
+}
+
+/*
+serveFromCache answers without opening anything.
+
+The execution is logged exactly as a miss is -- a row when it starts and the
+outcome when the caller closes it -- so the query log accounts for every
+execution rather than for the ones that happened to be slow. A cache that made
+queries disappear from the log would make the log useless for the question it
+exists to answer.
+*/
+func (e *Executor) serveFromCache(
+	ctx context.Context, scope tenant.Scope, plan Plan, cached connectors.Stream,
+) (*Execution, error) {
+	started := e.now()
+
+	entry, err := e.repos.QueryLog.Start(ctx, repo.QueryStart{
+		ConnectionID: plan.Connection.ID,
+		UserID:       scope.ActorID(),
+		SQL:          plan.SQL,
+		At:           started,
+	})
+	if err != nil {
+		_ = cached.Close()
+
+		return nil, fmt.Errorf("query: record the start: %w", err)
+	}
+
+	return &Execution{
+		LogID:       entry.ID,
+		Plan:        plan,
+		CacheStatus: CacheHit,
+		Stream: &loggedStream{
+			Stream:      cached,
+			executor:    e,
+			entry:       entry,
+			started:     started,
+			cacheStatus: CacheHit,
+			ctx:         ctx,
+		},
+	}, nil
 }
 
 // parse validates the statement. Today that means rejecting an empty one; the
@@ -245,12 +367,20 @@ func (e *Executor) plan(ctx context.Context, statement string, req Request) (Pla
 		maxRows = req.MaxRows
 	}
 
+	// Resolved here rather than left for the connector, because zero and
+	// [connectors.DefaultMaxRows] are the same cap and the cache key cannot
+	// tell: a connection edited from 0 to 100000 would change every key it
+	// derives while changing nothing about any answer.
+	if maxRows <= 0 {
+		maxRows = connectors.DefaultMaxRows
+	}
+
 	return Plan{SQL: statement, Connection: conn, MaxRows: maxRows}, nil
 }
 
 // execute opens the source, records the start and hands back the stream.
 func (e *Executor) execute(
-	ctx context.Context, scope tenant.Scope, plan Plan,
+	ctx context.Context, scope tenant.Scope, plan Plan, key string, cacheable bool,
 ) (*Execution, error) {
 	cfg := configFor(plan.Connection)
 	cfg.MaxRows = plan.MaxRows
@@ -286,15 +416,24 @@ func (e *Executor) execute(
 		return nil, fmt.Errorf("query: execute on %s: %w", plan.Connection.Slug, err)
 	}
 
+	status := CacheUncached
+	if cacheable {
+		status = CacheMiss
+	}
+
 	return &Execution{
-		LogID: entry.ID,
-		Plan:  plan,
+		LogID:       entry.ID,
+		Plan:        plan,
+		CacheStatus: status,
 		Stream: &loggedStream{
-			Stream:    stream,
-			executor:  e,
-			entry:     entry,
-			started:   started,
-			connector: connector,
+			Stream:      stream,
+			executor:    e,
+			entry:       entry,
+			started:     started,
+			connector:   connector,
+			cacheStatus: status,
+			cacheKey:    key,
+			caching:     cacheable,
 			// The context the query ran under, not the caller's next one: the
 			// completing write has to happen even when the reason it is
 			// happening is that this context was canceled.
@@ -317,15 +456,17 @@ func (e *Executor) finish(
 	finished := e.now()
 
 	out := repo.QueryOutcome{
-		State:    repo.StateSucceeded,
-		At:       finished,
-		Duration: finished.Sub(started),
+		State:       repo.StateSucceeded,
+		At:          finished,
+		Duration:    finished.Sub(started),
+		CacheStatus: CacheUncached,
 	}
 
 	if s != nil {
 		out.Rows = s.rows
 		out.BytesEstimated = s.bytes
 		out.Truncated = s.Truncated()
+		out.CacheStatus = s.cacheStatus
 	}
 
 	switch {

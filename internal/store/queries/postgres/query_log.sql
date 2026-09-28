@@ -18,8 +18,9 @@ SET state = $1,
     rows_returned = $4,
     bytes_estimated = $5,
     truncated = $6,
-    error_message = $7
-WHERE id = $8 AND org_id = $9;
+    cache_status = $7,
+    error_message = $8
+WHERE id = $9 AND org_id = $10;
 
 -- name: ListQueryLog :many
 SELECT * FROM query_log

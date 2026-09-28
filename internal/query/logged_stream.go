@@ -2,6 +2,7 @@ package query
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"time"
 
@@ -30,19 +31,76 @@ type loggedStream struct {
 	rows  int64
 	bytes int64
 
+	/*
+		The tee into the cache.
+
+		Rows are copied aside as they stream past, and the copy is abandoned the
+		moment it outgrows the per-entry budget. That is what lets a cache and
+		Part 20-a's constant-memory streaming coexist: a result small enough to
+		be worth caching is held, a result too large to hold is not, and peak
+		memory is bounded by the budget rather than by the answer.
+
+		Abandoned rather than truncated, and abandoned for good -- `caching`
+		goes false and never comes back, so a result that crossed the line is
+		not partially cached and cannot be completed by a later read.
+	*/
+	caching     bool
+	cacheKey    string
+	cacheStatus string
+	pending     [][]any
+
+	// exhausted distinguishes a stream that ended from one the caller walked
+	// away from. Only the first may be cached: a partial read stored whole
+	// would be served as a complete answer, with nothing on it to say it was
+	// not.
+	exhausted bool
+
 	once sync.Once
 }
 
-// Next advances the stream and counts what it produced.
+// Next advances the stream, counts what it produced and tees it into the
+// pending cache entry.
 func (s *loggedStream) Next() bool {
 	if !s.Stream.Next() {
+		s.exhausted = s.Err() == nil
+
 		return false
 	}
 
+	row := s.Row()
+
 	s.rows++
-	s.bytes += estimate(s.Row())
+	s.bytes += estimate(row)
+
+	s.tee(row)
 
 	return true
+}
+
+/*
+tee keeps a copy of the row for the cache, while the copy is still small enough
+to be worth keeping.
+
+The copy is the point. [connectors.Stream] says a row is valid only until the
+next Next, because the driver reuses the backing array -- storing the slice
+itself would give a cached entry whose every row is the last one read.
+*/
+func (s *loggedStream) tee(row []any) {
+	if !s.caching {
+		return
+	}
+
+	if s.bytes > s.executor.cache.MaxEntryBytes() {
+		// Over budget. Drop what was accumulated and stop: holding it any
+		// longer is memory spent on an entry that will never be stored.
+		s.caching = false
+		s.cacheStatus = CacheUncached
+		s.pending = nil
+
+		return
+	}
+
+	s.pending = append(s.pending, slices.Clone(row))
 }
 
 /*
@@ -66,14 +124,52 @@ func (s *loggedStream) Close() error {
 			cause = err
 		}
 
+		s.store(cause)
 		s.executor.finish(s.ctx, s.entry, s.started, s, cause)
 
-		if cerr := s.connector.Close(); cerr != nil && err == nil {
-			err = cerr
+		// Nil on a cache hit, which opened nothing. Guarded rather than
+		// papered over with a no-op connector, because "there is no connector"
+		// is the truth about that path and a stub would hide it.
+		if s.connector != nil {
+			if cerr := s.connector.Close(); cerr != nil && err == nil {
+				err = cerr
+			}
 		}
 	})
 
 	return err
+}
+
+/*
+store puts the teed result in the cache, if it earned the right to be there.
+
+Four conditions, and each one of them is a way a cached entry could be wrong
+rather than merely useless: the result must have been cached in the first
+place, it must have ended rather than been abandoned, it must not have failed,
+and it must still fit. A result that fails any of them is dropped, because the
+cost of not caching is one slow query and the cost of caching a partial or
+failed result is a wrong answer served quickly for the next minute.
+*/
+func (s *loggedStream) store(cause error) {
+	// A hit has nothing to store and nothing to reconsider; an execution that
+	// was never eligible has already said so. Only a miss is still deciding.
+	if s.cacheStatus != CacheMiss {
+		return
+	}
+
+	if !s.caching || !s.exhausted || cause != nil {
+		s.cacheStatus = CacheUncached
+
+		return
+	}
+
+	if !s.executor.cache.Put(
+		s.ctx, s.cacheKey, s.Columns(), s.pending, s.Truncated(), s.bytes,
+	) {
+		s.cacheStatus = CacheUncached
+	}
+
+	s.pending = nil
 }
 
 /*

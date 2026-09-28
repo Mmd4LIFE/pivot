@@ -20,6 +20,7 @@ SET state = ?,
     rows_returned = ?,
     bytes_estimated = ?,
     truncated = ?,
+    cache_status = ?,
     error_message = ?
 WHERE id = ? AND org_id = ?
 `
@@ -31,6 +32,7 @@ type FinishQueryLogParams struct {
 	RowsReturned   int64
 	BytesEstimated int64
 	Truncated      dbtypes.Bool
+	CacheStatus    string
 	ErrorMessage   string
 	ID             uuid.UUID
 	OrgID          uuid.UUID
@@ -44,6 +46,7 @@ func (q *Queries) FinishQueryLog(ctx context.Context, arg FinishQueryLogParams) 
 		arg.RowsReturned,
 		arg.BytesEstimated,
 		arg.Truncated,
+		arg.CacheStatus,
 		arg.ErrorMessage,
 		arg.ID,
 		arg.OrgID,
