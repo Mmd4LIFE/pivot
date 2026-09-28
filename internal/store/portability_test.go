@@ -17,6 +17,7 @@ import (
 // this set — no more, no less.
 var expectedTables = []string{
 	"catalog_columns",
+	"catalog_foreign_keys",
 	"catalog_tables",
 	"connections",
 	"federated_identities",
@@ -77,6 +78,12 @@ var expectedColumns = map[string][]string{
 	"login_attempts": {
 		"email", "failed_count", "first_failed_at", "id", "last_failed_at",
 		"locked_until", "org_id",
+	},
+	"catalog_foreign_keys": {
+		"connection_id", "constraint_name", "created_at", "first_seen_at",
+		"from_column", "from_schema", "from_table", "id", "last_seen_at",
+		"ordinal", "org_id", "removed_at", "to_column", "to_schema",
+		"to_table", "updated_at", "version",
 	},
 	"catalog_tables": {
 		"comment", "connection_id", "created_at", "first_seen_at", "id",

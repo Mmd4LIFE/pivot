@@ -593,3 +593,24 @@ func (t *tracingQuerier) GetCatalogTable(ctx context.Context, a1 model.GetCatalo
 
 	return t.next.GetCatalogTable(ctx, a1)
 }
+
+func (t *tracingQuerier) UpsertCatalogForeignKey(ctx context.Context, a1 model.UpsertCatalogForeignKeyParams) (model.CatalogForeignKey, error) {
+	ctx, span := observability.Start(ctx, "db.UpsertCatalogForeignKey")
+	defer span.End()
+
+	return t.next.UpsertCatalogForeignKey(ctx, a1)
+}
+
+func (t *tracingQuerier) SweepCatalogForeignKeys(ctx context.Context, a1 model.SweepCatalogForeignKeysParams) (int64, error) {
+	ctx, span := observability.Start(ctx, "db.SweepCatalogForeignKeys")
+	defer span.End()
+
+	return t.next.SweepCatalogForeignKeys(ctx, a1)
+}
+
+func (t *tracingQuerier) ListCatalogForeignKeys(ctx context.Context, a1 model.ListCatalogForeignKeysParams) ([]model.CatalogForeignKey, error) {
+	ctx, span := observability.Start(ctx, "db.ListCatalogForeignKeys")
+	defer span.End()
+
+	return t.next.ListCatalogForeignKeys(ctx, a1)
+}

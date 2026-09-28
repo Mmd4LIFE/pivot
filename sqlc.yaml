@@ -233,6 +233,23 @@ sql:
           - column: identity_providers.deleted_at
             go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.NullTime
 
+          # -- catalog_foreign_keys ---------------------------------------------
+          - column: catalog_foreign_keys.id
+            go_type: github.com/google/uuid.UUID
+          - column: catalog_foreign_keys.org_id
+            go_type: github.com/google/uuid.UUID
+          - column: catalog_foreign_keys.connection_id
+            go_type: github.com/google/uuid.UUID
+          - column: catalog_foreign_keys.first_seen_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
+          - column: catalog_foreign_keys.last_seen_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
+          - column: catalog_foreign_keys.removed_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.NullTime
+          - column: catalog_foreign_keys.created_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
+          - column: catalog_foreign_keys.updated_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
           # -- catalog_tables ----------------------------------------------------
           - column: catalog_tables.id
             go_type: github.com/google/uuid.UUID

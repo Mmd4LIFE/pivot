@@ -606,3 +606,32 @@ type GetCatalogTableParams struct {
 	SchemaName   string
 	TableName    string
 }
+
+type UpsertCatalogForeignKeyParams struct {
+	ID             uuid.UUID
+	OrgID          uuid.UUID
+	ConnectionID   uuid.UUID
+	ConstraintName string
+	FromSchema     string
+	FromTable      string
+	FromColumn     string
+	ToSchema       string
+	ToTable        string
+	ToColumn       string
+	Ordinal        int64
+	FirstSeenAt    dbtypes.Time
+	LastSeenAt     dbtypes.Time
+}
+
+type SweepCatalogForeignKeysParams struct {
+	RemovedAt    dbtypes.NullTime
+	UpdatedAt    dbtypes.Time
+	ConnectionID uuid.UUID
+	OrgID        uuid.UUID
+	LastSeenAt   dbtypes.Time
+}
+
+type ListCatalogForeignKeysParams struct {
+	ConnectionID uuid.UUID
+	OrgID        uuid.UUID
+}

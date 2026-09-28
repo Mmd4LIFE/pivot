@@ -3,6 +3,7 @@ package catalog_test
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -97,12 +98,16 @@ type fakeStore struct {
 
 	recordedTables  int
 	recordedColumns int
+	recordedKeys    int
+
+	foreignKeys map[string]model.CatalogForeignKey
 }
 
 func newFakeStore() *fakeStore {
 	return &fakeStore{
-		tables:  map[string]model.CatalogTable{},
-		columns: map[uuid.UUID]map[string]model.CatalogColumn{},
+		tables:      map[string]model.CatalogTable{},
+		columns:     map[uuid.UUID]map[string]model.CatalogColumn{},
+		foreignKeys: map[string]model.CatalogForeignKey{},
 	}
 }
 
@@ -208,6 +213,56 @@ func (f *fakeStore) MarkGone(
 	}
 
 	return tables, columns, nil
+}
+
+// Relationships, stored the same way: one row per column of each key.
+func (f *fakeStore) ForeignKeys(context.Context, uuid.UUID) ([]model.CatalogForeignKey, error) {
+	out := make([]model.CatalogForeignKey, 0, len(f.foreignKeys))
+	for _, k := range f.foreignKeys {
+		out = append(out, k)
+	}
+
+	return out, nil
+}
+
+func (f *fakeStore) RecordForeignKey(
+	_ context.Context, in repo.SeenForeignKey, at time.Time,
+) (model.CatalogForeignKey, error) {
+	f.recordedKeys++
+
+	key := fmt.Sprintf("%s.%s.%s.%d", in.FromSchema, in.FromTable, in.Constraint, in.Ordinal)
+
+	stored := f.foreignKeys[key]
+	if stored.ID == uuid.Nil {
+		stored.ID = uuid.New()
+	}
+
+	stored.ConstraintName = in.Constraint
+	stored.FromSchema, stored.FromTable, stored.FromColumn = in.FromSchema, in.FromTable, in.FromColumn
+	stored.ToSchema, stored.ToTable, stored.ToColumn = in.ToSchema, in.ToTable, in.ToColumn
+	stored.Ordinal = in.Ordinal
+	stored.LastSeenAt = dbTime(at)
+	stored.RemovedAt = model.CatalogForeignKey{}.RemovedAt
+
+	f.foreignKeys[key] = stored
+
+	return stored, nil
+}
+
+func (f *fakeStore) MarkForeignKeysGone(
+	_ context.Context, _ uuid.UUID, syncedAt time.Time,
+) (int64, error) {
+	var gone int64
+
+	for key, k := range f.foreignKeys {
+		if !k.RemovedAt.Valid && k.LastSeenAt.Before(syncedAt) {
+			k.RemovedAt = nullTime(syncedAt)
+			f.foreignKeys[key] = k
+			gone++
+		}
+	}
+
+	return gone, nil
 }
 
 // --- the tests ---------------------------------------------------------------

@@ -516,3 +516,26 @@ func (mysqlDialect) NormalizeType(sourceType string) datatype.Type {
 		return datatype.Type{}, false
 	})
 }
+
+/*
+ForeignKeyQuery lists relationships from key_column_usage.
+
+MySQL is the easy one: it puts the referenced schema, table and column on the
+same row as the local column, already paired. There is no cross product to
+avoid, because there is no second table to join to.
+*/
+func (mysqlDialect) ForeignKeyQuery() string {
+	return `
+SELECT kcu.constraint_name,
+       kcu.table_schema,
+       kcu.table_name,
+       kcu.column_name,
+       kcu.referenced_table_schema,
+       kcu.referenced_table_name,
+       kcu.referenced_column_name,
+       kcu.ordinal_position
+FROM information_schema.key_column_usage kcu
+WHERE kcu.referenced_table_name IS NOT NULL
+  AND kcu.table_schema NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys')
+ORDER BY kcu.table_schema, kcu.table_name, kcu.constraint_name, kcu.ordinal_position`
+}

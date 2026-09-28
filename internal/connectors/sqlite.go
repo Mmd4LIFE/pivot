@@ -314,3 +314,41 @@ func (sqliteDialect) NormalizeType(sourceType string) datatype.Type {
 		return datatype.Type{}, false
 	})
 }
+
+/*
+ForeignKeyQuery lists relationships from pragma_foreign_key_list.
+
+SQLite pairs the columns for us: each row of the pragma carries `from` and `to`
+together, with `seq` giving the position within a composite key. `id`
+distinguishes two keys on one table, and is the only name SQLite has for a
+constraint -- it does not store the declared name, so the constraint name is
+synthesized from the table and that id.
+
+A synthesized name is stable for as long as the table is: SQLite numbers the
+keys in declaration order. It changes if somebody rewrites the table with the
+keys in a different order, which is a schema change that deserves to be
+reported anyway.
+
+`to` is NULL when a key references the target's primary key implicitly --
+`REFERENCES parent` with no column list. COALESCE onto the local column name
+would be a guess; the pragma's own `to` is left NULL and such a row is dropped
+by the WHERE, because a relationship whose target column is unknown is one
+nothing can join on.
+*/
+func (sqliteDialect) ForeignKeyQuery() string {
+	return `
+SELECT m.name || '_fk_' || f."id" AS constraint_name,
+       'main'                     AS from_schema,
+       m.name                     AS from_table,
+       f."from"                   AS from_column,
+       'main'                     AS to_schema,
+       f."table"                  AS to_table,
+       f."to"                     AS to_column,
+       f.seq + 1                  AS ordinal
+FROM sqlite_master m
+JOIN pragma_foreign_key_list(m.name) f
+WHERE m.type = 'table'
+  AND m.name NOT LIKE 'sqlite_%'
+  AND f."to" IS NOT NULL
+ORDER BY m.name, f."id", f.seq`
+}

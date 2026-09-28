@@ -1207,3 +1207,51 @@ func (a *liteQuerier) GetCatalogTable(ctx context.Context, p model.GetCatalogTab
 
 	return model.CatalogTable(row), err
 }
+
+func (a *pgQuerier) UpsertCatalogForeignKey(ctx context.Context, p model.UpsertCatalogForeignKeyParams) (model.CatalogForeignKey, error) {
+	row, err := a.q.UpsertCatalogForeignKey(ctx, pg.UpsertCatalogForeignKeyParams(p))
+
+	return model.CatalogForeignKey(row), err
+}
+
+func (a *pgQuerier) SweepCatalogForeignKeys(ctx context.Context, p model.SweepCatalogForeignKeysParams) (int64, error) {
+	return a.q.SweepCatalogForeignKeys(ctx, pg.SweepCatalogForeignKeysParams(p))
+}
+
+func (a *pgQuerier) ListCatalogForeignKeys(ctx context.Context, p model.ListCatalogForeignKeysParams) ([]model.CatalogForeignKey, error) {
+	rows, err := a.q.ListCatalogForeignKeys(ctx, pg.ListCatalogForeignKeysParams(p))
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.CatalogForeignKey, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, model.CatalogForeignKey(row))
+	}
+
+	return out, nil
+}
+
+func (a *liteQuerier) UpsertCatalogForeignKey(ctx context.Context, p model.UpsertCatalogForeignKeyParams) (model.CatalogForeignKey, error) {
+	row, err := a.q.UpsertCatalogForeignKey(ctx, lite.UpsertCatalogForeignKeyParams(p))
+
+	return model.CatalogForeignKey(row), err
+}
+
+func (a *liteQuerier) SweepCatalogForeignKeys(ctx context.Context, p model.SweepCatalogForeignKeysParams) (int64, error) {
+	return a.q.SweepCatalogForeignKeys(ctx, lite.SweepCatalogForeignKeysParams(p))
+}
+
+func (a *liteQuerier) ListCatalogForeignKeys(ctx context.Context, p model.ListCatalogForeignKeysParams) ([]model.CatalogForeignKey, error) {
+	rows, err := a.q.ListCatalogForeignKeys(ctx, lite.ListCatalogForeignKeysParams(p))
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.CatalogForeignKey, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, model.CatalogForeignKey(row))
+	}
+
+	return out, nil
+}

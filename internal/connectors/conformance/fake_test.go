@@ -99,6 +99,24 @@ func (f *fake) NormalizeType(sourceType string) datatype.Type {
 
 func (f *fake) Close() error { return nil }
 
+// ForeignKeys: the fake declares one composite relationship, so a subject
+// built on it exercises the grouping rather than the trivial single-column
+// case.
+func (f *fake) ForeignKeys(context.Context) ([]connectors.ForeignKey, error) {
+	return []connectors.ForeignKey{
+		{
+			Name: "fixture_parent_fk", FromSchema: "main", FromTable: "fixture",
+			FromColumn: "id", ToSchema: "main", ToTable: "parent",
+			ToColumn: "id", Ordinal: 1,
+		},
+		{
+			Name: "fixture_parent_fk", FromSchema: "main", FromTable: "fixture",
+			FromColumn: "name", ToSchema: "main", ToTable: "parent",
+			ToColumn: "name", Ordinal: 2,
+		},
+	}, nil
+}
+
 func (f *fake) Introspect(context.Context) ([]connectors.Table, error) {
 	if f.defect == defectUncataloged {
 		return nil, nil
