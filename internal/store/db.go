@@ -67,6 +67,31 @@ func (db *DB) IsSQLite() bool { return db.engine == EngineSQLite }
 // IsPostgres reports whether the backend is PostgreSQL.
 func (db *DB) IsPostgres() bool { return db.engine == EnginePostgres }
 
+/*
+OpenSibling opens a second pool onto the same database.
+
+For the background job runner, which cannot share this one. On SQLite the
+store's pool is a single connection by design -- ADR-0003 scopes SQLite to
+small deployments and serializing is the honest answer there -- and a job
+runner polling on that connection would sit between every request and the
+database.
+
+Two pools onto one SQLite file is safe because [sqliteDSN] already sets WAL and
+a five-second busy timeout: readers proceed during a write, and a writer that
+finds the lock held waits rather than failing.
+
+The caller owns closing it, and sets its own pool limits: what the runner needs
+is not what request handling needs.
+*/
+func (db *DB) OpenSibling() (*sql.DB, error) {
+	sibling, err := sql.Open(driverName(db.engine), db.dsn)
+	if err != nil {
+		return nil, fmt.Errorf("open a second %s pool: %w", db.engine, err)
+	}
+
+	return sibling, nil
+}
+
 // Open resolves the configured URL, connects, applies pool settings, and
 // verifies the connection with a ping.
 //

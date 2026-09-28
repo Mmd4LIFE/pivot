@@ -8,12 +8,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/riverqueue/river"
 	"github.com/spf13/cobra"
 
 	"github.com/Mmd4LIFE/pivot/internal/api"
 	"github.com/Mmd4LIFE/pivot/internal/auth"
 	"github.com/Mmd4LIFE/pivot/internal/authz"
+	"github.com/Mmd4LIFE/pivot/internal/catalog"
 	"github.com/Mmd4LIFE/pivot/internal/config"
+	"github.com/Mmd4LIFE/pivot/internal/jobs"
 	"github.com/Mmd4LIFE/pivot/internal/logging"
 	"github.com/Mmd4LIFE/pivot/internal/observability"
 	"github.com/Mmd4LIFE/pivot/internal/oidc"
@@ -113,6 +116,14 @@ readiness change before the drain begins, so no request is dropped.`,
 
 			if cfg.Database.AutoMigrate {
 				if err := store.Migrate(cmd.Context(), db, log); err != nil {
+					return err
+				}
+
+				// River's own tables, which are not in Pivot's migrations.
+				// Auto-migrating one schema and not the other would leave the
+				// job runner unable to start on a database Pivot had just
+				// declared ready.
+				if _, err := jobs.Migrate(cmd.Context(), db); err != nil {
 					return err
 				}
 			} else if err := warnIfBehind(cmd, db, log); err != nil {
@@ -217,6 +228,18 @@ readiness change before the drain begins, so no request is dropped.`,
 				)
 			}
 
+			/*
+				Background work.
+
+				Started after the server is built and before it runs, so a
+				process that fails to construct one never claims leadership.
+				River elects a leader across every process sharing the metadata
+				database and only the leader schedules, which is what keeps two
+				Pivots from both syncing the same connection.
+			*/
+			runner := startJobs(ctx, db, repos, log)
+			defer stopJobs(runner, log)
+
 			return srv.Run(ctx)
 		},
 	}
@@ -309,4 +332,87 @@ func warnIfBehind(cmd *cobra.Command, db *store.DB, log *slog.Logger) error {
 	}
 
 	return nil
+}
+
+/*
+startJobs builds and starts the background job runner.
+
+Separate from the command body because it is the one piece of startup with a
+shutdown of its own -- and because a reader looking for "what runs on a timer"
+should find it in one place rather than threaded through two hundred lines of
+wiring.
+*/
+func startJobs(
+	ctx context.Context, db *store.DB, repos *repo.Repositories, log *slog.Logger,
+) *jobs.Runner {
+	workers := river.NewWorkers()
+	river.AddWorker(workers, &catalog.SweepWorker{Repos: repos, Log: log})
+	river.AddWorker(workers, &catalog.SyncWorker{Repos: repos, Log: log})
+
+	runner, err := jobs.New(db, jobs.Options{
+		Workers: workers,
+		Periodic: []*river.PeriodicJob{
+			river.NewPeriodicJob(
+				river.PeriodicInterval(catalog.DefaultInterval),
+				func() (river.JobArgs, *river.InsertOpts) { return catalog.SweepArgs{}, nil },
+				// Not on start. A restart loop would otherwise sweep every
+				// warehouse in the organization on every crash.
+				&river.PeriodicJobOpts{RunOnStart: false},
+			),
+		},
+		Logger: log,
+	})
+	if err != nil {
+		return warnNoJobs(log, err)
+	}
+
+	if err := runner.Start(ctx); err != nil {
+		return warnNoJobs(log, err)
+	}
+
+	log.Info("background jobs started",
+		slog.String("catalog_sync_interval", catalog.DefaultInterval.String()))
+
+	return runner
+}
+
+/*
+warnNoJobs reports that background work will not happen, and serves anyway.
+
+Not fatal, deliberately, and this is the second time that lesson has been
+learned here: the first-run banner once made `pivot serve` refuse to start when
+the schema was behind, and the test that caught it is the same one that caught
+this. An instance that will not serve because a *background* feature could not
+initialize is worse than one that serves without it -- most obviously when the
+cause is that nobody has run `pivot migrate up` yet, which is the case a
+warning fixes and a refusal does not.
+
+Loud, though. Silent background work that is not happening is the failure mode
+the whole part exists to prevent.
+*/
+func warnNoJobs(log *slog.Logger, err error) *jobs.Runner {
+	log.Warn("background jobs are not running; nothing will be scheduled",
+		logging.Err(err),
+		slog.String("hint", "run `pivot migrate up`, then restart"),
+	)
+
+	return nil
+}
+
+// stopJobs drains the runner, giving running jobs a bounded chance to finish.
+//
+// A background context: the one that brought us here is already canceled by
+// the signal that started the shutdown, and a drain given a dead context
+// drains nothing.
+func stopJobs(runner *jobs.Runner, log *slog.Logger) {
+	if runner == nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), jobs.DefaultStopTimeout)
+	defer cancel()
+
+	if err := runner.Stop(ctx); err != nil {
+		log.Warn("the background job runner did not stop cleanly", logging.Err(err))
+	}
 }

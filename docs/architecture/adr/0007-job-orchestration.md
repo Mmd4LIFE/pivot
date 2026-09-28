@@ -2,6 +2,12 @@
 
 **Status:** Accepted
 **Date:** 2026-09-19
+**Amended by:** [ADR-0011](0011-background-jobs-on-both-engines.md)
+
+> **Amended 2026-09-29.** This ADR justified River on the grounds that it "uses the Postgres
+> we already require", which ADR-0003 does not. ADR-0011 records that River publishes a
+> SQLite driver, that it was measured working on both engines, and that background work is
+> therefore not Postgres-only. Everything else here stands.
 
 ## Context
 

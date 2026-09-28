@@ -14,6 +14,7 @@ Decisions that are hard to reverse and that someone will ask about later.
 | [0008](0008-ai-architecture.md) | Separate Python AI service; NL → semantic query | Accepted | 2026-09-19 |
 | [0009](0009-authorization.md) | OpenFGA, enforced at the query compiler | Accepted | 2026-09-19 |
 | [0010](0010-duckdb-is-an-opt-in-build.md) | DuckDB is an opt-in build, not the default binary | Accepted | 2026-09-28 |
+| [0011](0011-background-jobs-on-both-engines.md) | River runs on SQLite too; background work is not Postgres-only | Accepted | 2026-09-29 |
 
 ## Conventions
 

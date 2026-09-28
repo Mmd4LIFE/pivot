@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/Mmd4LIFE/pivot/internal/jobs"
 	"github.com/Mmd4LIFE/pivot/internal/logging"
 	"github.com/Mmd4LIFE/pivot/internal/store"
 )
@@ -85,6 +86,24 @@ func newMigrateUpCmd(env Env, flags *globalFlags) *cobra.Command {
 			after, err := store.CurrentVersion(cmd.Context(), db)
 			if err != nil {
 				return err
+			}
+
+			/*
+				River's tables, which are not Pivot's schema.
+
+				It owns five `river_*` tables, versions them itself and changes
+				them on its own release cadence -- so they are applied by its
+				migrator rather than hand-ported into two dialects and re-done
+				on every upgrade. Applied here rather than at startup for the
+				same reason Pivot's are: changing schema stays an explicit act.
+			*/
+			applied, err := jobs.Migrate(cmd.Context(), db)
+			if err != nil {
+				return err
+			}
+
+			if applied > 0 {
+				fmt.Fprintf(env.Stdout, "Applied %d background-job migrations.\n", applied)
 			}
 
 			if before == after {
