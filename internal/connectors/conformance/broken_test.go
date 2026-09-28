@@ -78,6 +78,9 @@ var defects = map[string]struct {
 		defectGuessesTypes,
 		[]string{"columns_carry_a_canonical_type", "an_unmapped_type_says_so"},
 	},
+	"a stream stops early and says nothing": {
+		defectStreamStopsEarly, []string{"a_stream_matches_the_materialized_read"},
+	},
 }
 
 /*

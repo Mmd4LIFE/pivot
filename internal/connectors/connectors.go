@@ -223,9 +223,79 @@ type Connector interface {
 	*/
 	ForeignKeys(ctx context.Context) ([]ForeignKey, error)
 
+	/*
+		Stream runs SQL and returns the rows one at a time.
+
+		The reading half of the interface. [Connector.Query] materializes the
+		whole answer, which is right for a catalog query returning forty rows
+		and wrong for a question returning ten million: the result is held
+		twice, once by the driver and once by Pivot, and the second copy is
+		what makes an export the size of a warehouse table impossible.
+
+		The caller closes the stream. An abandoned one holds a pooled
+		connection against somebody else's database, and abandoning one is the
+		common case rather than the exception -- it is what a closed browser
+		tab looks like from here.
+	*/
+	Stream(ctx context.Context, sql string, args ...any) (Stream, error)
+
 	// Close releases the pool. A connector that is not closed when its
 	// connection is deleted is a pool held against somebody's warehouse
 	// forever.
+	Close() error
+}
+
+/*
+Stream is a result being read rather than a result that has been read.
+
+Shaped after database/sql.Rows because that is the shape every caller here
+already knows, and because the alternative -- a channel of rows -- makes
+cancellation and errors somebody else's problem twice over: a producer
+goroutine that outlives its consumer is a leak, and one that dies silently is a
+truncated answer nothing reports.
+
+	stream, err := c.Stream(ctx, sql)
+	if err != nil { ... }
+	defer stream.Close()
+
+	for stream.Next() {
+		row := stream.Row()
+		...
+	}
+
+	if err := stream.Err(); err != nil { ... }
+
+Err must be checked after the loop. A stream that ends because the source
+failed and one that ends because the rows ran out look identical from Next,
+which is the oldest trap in this shape and the reason rowserrcheck is in this
+repository's linters.
+*/
+type Stream interface {
+	// Columns describes the result, and is valid before the first Next.
+	Columns() []Column
+
+	// Next advances to the next row, returning false at the end or on error.
+	Next() bool
+
+	/*
+		Row is the current row.
+
+		Valid until the next call to Next, and not after: the slice may be
+		reused. A caller keeping a row keeps a copy, which is the contract
+		that lets a stream run in constant memory.
+	*/
+	Row() []any
+
+	// Err reports what stopped the stream, or nil if the rows simply ran out.
+	Err() error
+
+	// Truncated says the stream stopped at the connection's row cap rather
+	// than at the end of the answer. Meaningful only once Next has returned
+	// false.
+	Truncated() bool
+
+	// Close releases the connection. Safe to call more than once, because it
+	// is called from a defer and from the end of a loop in the same code.
 	Close() error
 }
 

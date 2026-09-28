@@ -388,6 +388,138 @@ func checkUnmappedTypesSaySo(_ context.Context, s Subject) error {
 	return nil
 }
 
+/*
+A stream yields the same rows as a materialized read, in the same order.
+
+The two paths have to agree or the product has two answers to one question --
+and the materializing one is a loop over the streaming one precisely so they
+cannot drift. This is what proves that arrangement actually holds for a real
+driver rather than for the one implementation somebody read.
+
+Ordering is part of it. A stream that returns the right rows in the wrong order
+has broken every query with an ORDER BY, which is most of them, and a row count
+alone cannot see it.
+*/
+func checkStreamMatchesQuery(ctx context.Context, s Subject) error {
+	query := fmt.Sprintf("SELECT %s FROM %s ORDER BY id",
+		strings.Join(Columns(), ", "), s.Fixture.Table)
+
+	materialized, err := s.Connector.Query(ctx, query)
+	if err != nil {
+		return fmt.Errorf("the materializing read: %w", err)
+	}
+
+	stream, err := s.Connector.Stream(ctx, query)
+	if err != nil {
+		return fmt.Errorf("opening a stream: %w", err)
+	}
+
+	defer func() { _ = stream.Close() }()
+
+	if len(stream.Columns()) != len(materialized.Columns) {
+		return fmt.Errorf("the stream describes %d columns and the query %d",
+			len(stream.Columns()), len(materialized.Columns))
+	}
+
+	for i, col := range stream.Columns() {
+		if col.Name != materialized.Columns[i].Name {
+			return fmt.Errorf("column %d is %q streamed and %q materialized",
+				i, col.Name, materialized.Columns[i].Name)
+		}
+
+		if col.Type.Kind != materialized.Columns[i].Type.Kind {
+			return fmt.Errorf("column %q is %q streamed and %q materialized",
+				col.Name, col.Type.Kind, materialized.Columns[i].Type.Kind)
+		}
+	}
+
+	seen := 0
+
+	for stream.Next() {
+		if seen >= len(materialized.Rows) {
+			return fmt.Errorf("the stream yielded more than %d rows", len(materialized.Rows))
+		}
+
+		row := stream.Row()
+		want := materialized.Rows[seen]
+
+		if len(row) != len(want) {
+			return fmt.Errorf("row %d has %d cells streamed and %d materialized",
+				seen, len(row), len(want))
+		}
+
+		for i := range row {
+			if fmt.Sprint(row[i]) != fmt.Sprint(want[i]) {
+				return fmt.Errorf("row %d, column %q is %v streamed and %v materialized",
+					seen, materialized.Columns[i].Name, row[i], want[i])
+			}
+		}
+
+		seen++
+	}
+
+	if err := stream.Err(); err != nil {
+		return fmt.Errorf("the stream failed after %d rows: %w", seen, err)
+	}
+
+	if seen != len(materialized.Rows) {
+		return fmt.Errorf("the stream yielded %d rows and the query %d",
+			seen, len(materialized.Rows))
+	}
+
+	return nil
+}
+
+/*
+A stream abandoned part way lets go of the source.
+
+The common case, not the exceptional one: it is what a closed browser tab looks
+like from here. A connector that only releases its connection when a stream is
+read to the end holds one against somebody else's database for every question
+whose answer nobody waited for -- and on a pool of five, five abandoned streams
+is an outage.
+
+Proven by abandoning one and then using the connector, on a pool of one: if the
+stream still held the connection, the query below would wait for the timeout
+rather than answer.
+*/
+func checkAbandoningAStreamReleasesIt(ctx context.Context, s Subject) error {
+	// The fixture select rather than a narrower one: it is the single query
+	// every subject in this suite is known to answer.
+	query := fmt.Sprintf("SELECT %s FROM %s ORDER BY id",
+		strings.Join(Columns(), ", "), s.Fixture.Table)
+
+	stream, err := s.Connector.Stream(ctx, query)
+	if err != nil {
+		return fmt.Errorf("opening a stream: %w", err)
+	}
+
+	// One row, then walk away.
+	if !stream.Next() {
+		if serr := stream.Err(); serr != nil {
+			return fmt.Errorf("the stream failed before its first row: %w", serr)
+		}
+
+		return errors.New("the fixture stream yielded nothing")
+	}
+
+	if cerr := stream.Close(); cerr != nil {
+		return fmt.Errorf("closing an abandoned stream: %w", cerr)
+	}
+
+	// Closing twice is what a defer plus an explicit close does, and it must
+	// not be an error.
+	if cerr := stream.Close(); cerr != nil {
+		return fmt.Errorf("closing a stream twice: %w", cerr)
+	}
+
+	if _, err = s.Connector.Query(ctx, query); err != nil {
+		return fmt.Errorf("the connector was unusable after a stream was abandoned: %w", err)
+	}
+
+	return nil
+}
+
 // --- declarations the compiler will trust -----------------------------------
 
 /*

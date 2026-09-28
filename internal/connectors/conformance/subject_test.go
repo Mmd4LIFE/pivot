@@ -177,6 +177,17 @@ func (s stub) Capabilities() connectors.Capabilities { return connectors.Capabil
 func (s stub) Test(context.Context) error            { return s.err }
 func (s stub) Close() error                          { return nil }
 
+func (s stub) Stream(
+	ctx context.Context, query string, args ...any,
+) (connectors.Stream, error) {
+	result, err := s.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+
+	return newSliceStream(result), nil
+}
+
 func (s stub) ForeignKeys(context.Context) ([]connectors.ForeignKey, error) {
 	return nil, connectors.ErrNoForeignKeys
 }

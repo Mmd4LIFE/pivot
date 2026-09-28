@@ -249,6 +249,8 @@ func Checks() []Check {
 		{Property: "a_large_result_arrives_whole", Needs: NeedsSeries, Run: checkLargeResult},
 		{Property: "row_limit_truncates_with_a_signal", Needs: NeedsSeries, Run: checkTruncation},
 		{Property: "concurrent_queries_all_succeed", Needs: NeedsFixture, Run: checkConcurrency},
+		{Property: "a_stream_matches_the_materialized_read", Needs: NeedsFixture, Run: checkStreamMatchesQuery},
+		{Property: "an_abandoned_stream_releases_the_source", Needs: NeedsFixture, Run: checkAbandoningAStreamReleasesIt},
 
 		{Property: "cancellation_is_prompt_and_says_so", Needs: NeedsSleep, Run: checkCancellation},
 		{Property: "a_timeout_is_reported_as_one", Needs: NeedsTimeout, Run: checkTimeout},
