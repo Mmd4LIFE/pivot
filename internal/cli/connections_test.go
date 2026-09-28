@@ -365,3 +365,108 @@ func TestConnectionCommandsAreRegistered(t *testing.T) {
 		}
 	}
 }
+
+/*
+A file-backed connection needs no host, no port and no credentials.
+
+The command used to require --db-host and --username of its own accord, which
+made a SQLite connection impossible to configure: it has neither. What a
+connection needs is the connector's business now, and this is the test that
+says so -- it passes only a path.
+*/
+func TestAFileBackedConnectionNeedsOnlyAPath(t *testing.T) {
+	t.Parallel()
+
+	dir, env := withOrg(t)
+	source := filepath.Join(dir, "warehouse.db")
+
+	// A real SQLite file, so the connection can be tested rather than stored
+	// with --no-test. That is the point: a file-backed source is one this
+	// machine can always reach.
+	seedSource(t, source)
+
+	stdout, _, err := run(t, env, "admin", "add-connection",
+		"--kind", "sqlite", "--slug", "files", "--name", "Local files",
+		"--database", source)
+
+	if err != nil {
+		t.Fatalf("add-connection for a file: %v", err)
+	}
+
+	if !strings.Contains(stdout, "Connected") {
+		t.Errorf("stdout = %q, want it to confirm it reached the file", stdout)
+	}
+
+	listing, _, lerr := run(t, env, "admin", "list-connections")
+	if lerr != nil {
+		t.Fatalf("list: %v", lerr)
+	}
+
+	if !strings.Contains(listing, "sqlite") {
+		t.Errorf("the connection is not listed:\n%s", listing)
+	}
+}
+
+// And the fields it cannot use are refused by the connector rather than
+// ignored by the command.
+func TestAFileBackedConnectionRefusesCredentials(t *testing.T) {
+	t.Parallel()
+
+	dir, env := withOrg(t)
+	source := filepath.Join(dir, "warehouse.db")
+	seedSource(t, source)
+
+	_, _, err := run(t, env, "admin", "add-connection",
+		"--kind", "sqlite", "--slug", "files", "--name", "Local files",
+		"--database", source, "--username", "pivot")
+
+	if err == nil {
+		t.Fatal("a username was accepted for a file-backed connection")
+	}
+
+	if !strings.Contains(err.Error(), "username") {
+		t.Errorf("error = %v, want it to name the unusable field", err)
+	}
+}
+
+/*
+--no-test skips reaching the source, not validating the configuration.
+
+The escape hatch is for a database behind a firewall this machine cannot
+cross. A configuration the connector would refuse outright is a different
+thing, and storing one only moves the failure to whoever opens the query
+editor tomorrow.
+*/
+func TestNoTestStillValidatesTheConfiguration(t *testing.T) {
+	t.Parallel()
+
+	_, env := withOrg(t)
+
+	_, _, err := run(t, env, "admin", "add-connection", "--no-test",
+		"--kind", "sqlite", "--slug", "files", "--name", "Local files")
+
+	if err == nil {
+		t.Fatal("a SQLite connection with no path was stored")
+	}
+
+	if !strings.Contains(err.Error(), "path to a database file") {
+		t.Errorf("error = %v, want the connector's own complaint", err)
+	}
+}
+
+// seedSource writes a small SQLite database for a connection to point at.
+func seedSource(t *testing.T, path string) {
+	t.Helper()
+
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatalf("create the source: %v", err)
+	}
+
+	defer func() { _ = db.Close() }()
+
+	if _, err = db.ExecContext(t.Context(),
+		"CREATE TABLE orders (id INTEGER NOT NULL PRIMARY KEY)"); err != nil {
+		t.Fatalf("seed the source: %v", err)
+	}
+}

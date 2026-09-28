@@ -11,10 +11,13 @@
 -- unique per organization and not globally: two tenants may both call theirs
 -- "warehouse".
 --
--- `kind` says which connector drives it. The CHECK constraint lists only what
--- is implemented, which means adding a connector is a migration -- deliberate,
--- because a row naming a connector that does not exist is a connection nobody
--- can open and nobody can explain.
+-- `kind` says which connector drives it. The CHECK constraint below lists only
+-- what is implemented, which means adding a connector is a migration --
+-- deliberate, because a row naming a connector that does not exist is a
+-- connection nobody can open and nobody can explain.
+--
+-- (That did not survive contact with the second connector. 00007 drops the
+-- enumeration and says why.)
 --
 -- host/port/database/username are separate columns rather than one DSN string.
 -- A DSN is convenient to store and impossible to validate, to redact, to show

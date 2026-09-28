@@ -49,6 +49,10 @@ const (
 	// KindMySQL is MySQL 8.0 and later. MariaDB will get its own Kind for the
 	// same reason: the wire protocol is shared and the dialects are not.
 	KindMySQL Kind = "mysql"
+
+	// KindSQLite is a SQLite file, opened read-only. The first source with no
+	// server, and so the first whose Config is a path rather than an address.
+	KindSQLite Kind = "sqlite"
 )
 
 func (k Kind) String() string { return string(k) }

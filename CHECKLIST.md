@@ -60,8 +60,8 @@ At the end of every part, in this order:
 
 | | |
 |---|---|
-| **Last completed** | Part 18-a — MySQL, the second connector |
-| **Next up** | **Part 18-b — SQLite and DuckDB, and resource governance** |
+| **Last completed** | Part 18-b — SQLite, and resource governance |
+| **Next up** | **Part 18-c — DuckDB, and the CGo bill** |
 | **Current phase** | Phase 1 — Connect & Query → v0.1 |
 | **Branch** | `main` |
 | **Blockers** | None |
@@ -95,11 +95,21 @@ timeouts, error classification, identifier quoting, and every declared capabilit
 demonstrated rather than believed. It is a library, not a runner: a connector supplies one
 file and calls `conformance.Run`.
 
-**PostgreSQL and MySQL both pass all sixteen, in CI, against real containers.** MySQL was
-the first test of whether the abstraction was right rather than merely comfortable, and it
-cost one change to the suite (unsigned integers) and one to the interface
-([`Canceler`](internal/connectors/sqlbase.go), because MySQL's driver hangs up without
-telling the server to stop). Both are written down where they happened.
+**PostgreSQL, MySQL and SQLite all pass all seventeen** — in CI, against real databases.
+Each new connector has cost the abstraction exactly one change, which is the shape you want:
+MySQL wanted unsigned integers in the readers and [`Canceler`](internal/connectors/sqlbase.go)
+in the interface; SQLite wanted a subject to be allowed to build its own fixture, because a
+connector opened read-only cannot. The seventeenth property is concurrency, added when
+cancellation grew a per-query connection worth proving safe.
+
+**SQLite's suite needs no container and no environment variable**, so it runs on a bare
+`go test ./...`. The conformance suite is now exercised against a real database on every
+run rather than only when somebody remembers to start one.
+
+**Per-connection limits are proven rather than declared.** Row cap, query timeout and pool
+size, checked against every connector the run can reach — and the pool check asserts
+`WaitCount`, so it fails if the cap never actually bound instead of passing on a fast
+machine where nothing overlapped.
 
 **Carried in from Phase 0**, and owned by parts in this phase or named in them:
 - **The container stack pins a superseded release.** `v0.0.2-alpha` was cut on
@@ -114,6 +124,10 @@ telling the server to stop). Both are written down where they happened.
   that an account with wide grants gets; the test account gets 1044 instead, because MySQL
   will not tell an unprivileged user whether a database exists. Causing it needs a
   privileged connection the suite deliberately does not hold.
+- **A file-backed connection can name any path the Pivot process can read.** Harmless from
+  the CLI — whoever runs `pivot admin` can read the file anyway — and an escalation from a
+  browser, where an organization administrator could point SQLite at Pivot's own store.
+  Part 26 owns the allowlist and says so in its Done when.
 
 **Environment.** Go 1.27.1 locally with a `toolchain go1.26.8` directive — the floor in
 `go.mod` is for contributors, the toolchain line is what builds, and CI derives its Go
@@ -128,7 +142,7 @@ few points high; leave margin above 80%.
 
 ```
 Phase 0  Foundations        [██████████████████████████] 31/31   COMPLETE
-Phase 1  Connect & Query    [██████                    ]  3/13
+Phase 1  Connect & Query    [████████                  ]  4/14
 Phase 2+ ...                                            (expanded as we approach)
 ```
 
@@ -265,28 +279,64 @@ to watch for.
 
 ---
 
-### - [ ] Part 18-b — SQLite and DuckDB, and resource governance
+### - [x] Part 18-b — SQLite, the file-backed connector, and resource governance ✅ 2026-09-28
 
-**Deliverable:** a third and fourth connector, one of them reading a file — and no query
-can take the instance down.
+> **Split again** on 2026-09-28. DuckDB is not another connector, it is a build decision:
+> CGo, a per-platform release matrix, and the first real use of the `nocgo` tag — which is
+> named in `.golangci.yml` and implemented nowhere. Bundling that with SQLite would have
+> meant doing neither properly, so it is Part 18-c.
+>
+> SQLite alone already satisfies "a connector that reads a file", which is what the
+> original Done-when was reaching for.
 
-**Build:** The SQLite and DuckDB connectors against the conformance suite, plus
-per-connection resource governance: max rows, statement timeout, concurrency.
+**Deliverable:** a third connector, reading a file rather than a socket — and the
+per-connection limits proven to hold on every connector rather than declared once.
+
+**Build:** The SQLite dialect in `internal/connectors`, its `conformance.Subject`, and
+whatever the interface turns out to be missing for a source with no host, no port and no
+credentials.
 
 **Done when:**
-- Both connectors pass the conformance suite unmodified, or the suite changed for a
-  reason that is written down
+- SQLite passes the conformance suite, and any change the suite needed is written down
 - A query that returns more rows than the limit is **truncated with a signal**, not
-  silently cut
-- A query that runs longer than its timeout is cancelled *at the source*, verified per
+  silently cut — on all three connectors
+- A query that runs longer than its timeout is stopped *at the source*, verified per
   connector rather than assumed from a context deadline
-- The DuckDB connector reads a file, which is what makes the sample dataset possible
+- **A SQLite connection is read-only.** A BI source is something Pivot reads; a connector
+  that can write to the file it was pointed at is a bug waiting for a stray statement
+- The pool limit holds under concurrency, on every connector, proven rather than declared
 
-**Notes:** DuckDB is the one with a build cost. ADR-0001 named CGo cross-compilation as a
-negative and ADR-0004 set up a `nocgo` fallback build; this is the part that pays that bill,
-so decide early whether DuckDB is behind a build tag or the release matrix grows.
+**Notes:** The interesting part is that `Config` was designed for a network source — host,
+port, username, password, TLS. SQLite has none of them. Whatever that costs is the third
+real test of the Part 16 interface, after MySQL's placeholders and its cancellation.
 
 **Refs:** `P1-DB-003`, `P1-CONN-010`, `P1-QE-005`
+
+---
+
+### - [ ] Part 18-c — DuckDB, and the CGo bill
+
+**Deliverable:** embedded analytical compute, and an honest answer to what it costs the
+single-binary story.
+
+**Build:** The DuckDB connector, the `nocgo` build tag that ADR-0004 promised, the release
+matrix that CGo forces, and the per-query memory cap NFR §1.3 requires.
+
+**Done when:**
+- DuckDB passes the conformance suite, and reads a Parquet or CSV file directly — which is
+  what makes the Part 27 sample dataset possible
+- **The `nocgo` build produces a working binary** without DuckDB, and says so when somebody
+  asks for a DuckDB connection rather than failing obscurely. The tag is named in
+  `.golangci.yml` today and used by no file
+- The release workflow builds every platform it claims to support, and the binary size
+  change is recorded rather than discovered
+- A query over its memory budget is killed rather than allowed to take the host down
+
+**Notes:** ADR-0004 accepted CGo with its eyes open and listed the mitigations. This is the
+part that finds out whether they were right, and its "Revisit if" clause — *CGo build
+complexity outweighs the benefit* — is a live option rather than a formality.
+
+**Refs:** `P1-DB-003`, ADR-0004
 
 ---
 
@@ -449,6 +499,11 @@ instance settings, SMTP configuration with a test send.
 **Done when:**
 - A connection can be created, tested and permissioned from the browser, and its
   credentials never come back out of the API
+- **A file-backed connection cannot name an arbitrary path.** From the CLI this is not an
+  escalation — anyone who can run `pivot admin` can already read the file. From a browser
+  it is: an organization administrator could point a SQLite connection at Pivot's own store
+  and read every other tenant's rows. The form needs an allowlist, and the connector needs
+  to be told about it
 - Users and groups can be managed without the CLI — the CLI stays for the cases where
   nobody can log in
 - The SMTP test send actually sends, and its failure says which part failed
@@ -501,6 +556,7 @@ Phase 0's log is in
 
 | Date | Part | Shipped | Notes |
 |---|---|---|---|
+| 2026-09-28 | 18-b | The SQLite connector (read-only), migration 00007 dropping the connector-kind enumeration, a `concurrent_queries_all_succeed` conformance property, and per-connector governance tests | **Split again**: DuckDB is not a fourth connector, it is a build decision — CGo, a per-platform release matrix, and the first real use of the `nocgo` tag, which is named in `.golangci.yml` and used by no file. It is Part 18-c. SQLite alone already satisfies \"a connector that reads a file\". **SQLite passes all seventeen properties.** It is the first source with no host, no port and no credentials, and `Config` was built around all five — which cost less than expected, because `Validate` was always the dialect's job. **Two deliberate suite changes.** A subject may now supply no DDL: a connector opened read-only cannot build its own fixture, and that is not an edge case — read-only is the *correct* way to open a BI source, and an account granted SELECT and nothing else is how a careful warehouse administrator hands out access. And a seventeenth property, `concurrent_queries_all_succeed`, because 18-a gave every query its own connection and a watcher goroutine, and a pool that hands one connection to two queries shows up nowhere else in a suite that runs one query at a time. **SQLite is opened read-only, always.** `mode=ro` is set *after* anything `Options` supplied, so a configuration cannot turn it off — tested by trying. Proven by causing INSERT, UPDATE, DELETE, DROP and CREATE to fail *and* by reading the file back through a separate handle, because an error that arrived after the write would satisfy the first half and none of the intent. The fields SQLite cannot use are **refused rather than ignored**: a connection carrying a username and password looks authenticated in every listing, and a SQLite file is protected by its filesystem permissions and nothing else. **The CLI was overreaching.** It required `--db-host` and `--username` of its own accord, which made a file-backed connector impossible to configure; what a connection needs is the dialect's business now. And `--no-test` used to skip validation entirely, so it would store a configuration the connector would refuse — it now skips *dialing*, not checking. **The real find was a bug shipped in 18-a.** The connections table carried `CHECK (kind IN ('postgres'))`, and its own comment called the resulting migration-per-connector deliberate. The very next connector was added without one, so **a MySQL connection could be configured, tested, and then refused by the database on the way in** — the connector tests never reached storage and the storage tests only ever named \"postgres\", so nothing looked. 00007 drops the enumeration on both engines (SQLite needs a full table rebuild; it cannot alter a CHECK). The deeper reason to drop rather than widen it: which connectors exist is a property of the **binary**, not the data — 18-c puts DuckDB behind a build tag, so two Pivots from one commit will disagree about which kinds are valid and no schema can be right for both. **The guard that would have caught it** is `TestEveryRegisteredConnectorCanBeStored`, driven off the registry so a fourth connector is covered by existing. Verified in both directions: with 00007 removed it fails on both engines and names the kind. **Governance is proven rather than declared.** The pool test from Part 16 asserted `MaxOpenConnections` — the setting, which says only that it was applied. It now asserts `WaitCount > 0`, which is the number of times a goroutine actually queued for a connection: 14 waits out of 16 queries, on all three connectors. Without that a pool test passes on a fast machine where nothing ever overlapped. **SQLite cancellation is proven from the pool**, not from a second connection — an embedded database has no second place to look, so the check is that a query issued immediately afterwards on a one-connection pool returns in milliseconds rather than queueing behind a recursive CTE counting to six hundred million. |
 | 2026-09-28 | 18-a | The MySQL connector, `Canceler` in the connector interface, unsigned integers in the conformance readers, a dev MySQL container and a CI service for it | **Part 18 was split into 18-a and 18-b**: two connectors plus resource governance is more than one session. **MySQL passes all sixteen conformance properties**, and the \"adding a connector means writing one file\" claim held — `mysql_conformance_test.go` is the whole integration, written before anything in the suite was touched. **The suite needed exactly one change**, and the connector caught it rather than the other way round: MySQL's `ROW_NUMBER()` returns `uint64`, which the readers had never seen because PostgreSQL has no unsigned integers. Added with a ceiling check — a `uint64` above `MaxInt64` is refused rather than wrapped, because a row count that reads `-9223372036854775808` looks like data rather than like a bug. **The interface needed exactly one change, and it was the interesting one.** Measured first: `go-sql-driver` cancels by hanging up, so a canceled `SELECT SLEEP(20)` returned to the client in 301ms and was *still running on the server two seconds later* — it would have held a thread for the full twenty. So `Canceler` is now an optional interface a dialect implements, and MySQL's sends `KILL QUERY`. Three details that matter: it is **KILL QUERY, not KILL CONNECTION**, so the pooled connection survives instead of being thrown away on every cancel; the kill goes over a **separate one-connection pool**, because a kill that queues behind the queries it is trying to kill is a deadlock and the moment it matters most is exactly when the query pool is empty; and the watcher's teardown **waits for the goroutine**, because a query finishing at the same moment its context ends would otherwise race its own `KILL` onto whatever the pool hands out next. Proven from a *second connection* watching `information_schema.processlist`, not from the client returning promptly — the client returned promptly before any of this existed. **Timestamps are pinned on both halves at once.** The driver parses what the server sends using `Loc`, and the server converts `TIMESTAMP` into the session's `time_zone`; setting one without the other shifts every zoned value silently. So the connector pins both to UTC and **refuses** an option that would move one of them. The dev and CI MySQL both run on **Asia/Kathmandu (+05:45)** on purpose — not UTC, not a whole hour — so a connector that inherited the server's zone would be wrong on every row and the test that proves the pinning could actually fail. **MySQL will not say whether a database exists**: an unprivileged account gets 1044 access-denied rather than 1049, because answering would be an information leak. The message carries both possibilities instead of picking one and sending half the people who hit it in the wrong direction. **The biggest find was in CI, not in MySQL.** The step named \"The Postgres half actually ran\" grepped `test.log` for `SKIP.*PIVOT_TEST_POSTGRES_URL` — and `go test` without `-v` prints nothing at all for a skipped test, so it was searching a log containing neither word. **It had never been able to fail, and had been green since Phase 0**, guarding seven packages that opt in on that variable. Fixed with `-v` plus a grep for the variable names, and verified in both directions before being trusted: 15 hits with the variables unset, 0 with them set. The dev compose passes **no command line** to MySQL, because a GitHub Actions service container cannot be given one and a dev database configured differently from CI's produces failures that only reproduce where you cannot debug them — so `cte_max_recursion_depth` (MySQL has no `generate_series`; the suite's rows come from a recursive CTE, and 1000 is the default ceiling) is set per-session through `Options`. |
 | 2026-09-27 | 17 | `internal/connectors/conformance` — sixteen named properties, a breakable reference connector that proves each one can fail, and `postgres_conformance_test.go` as the worked example | **The suite is a library, not a runner.** A connector supplies a `Subject` — its fixture DDL, a sleep and a series expression, two statements it rejects, an identifier that needs quoting — and calls `conformance.Run`. Nothing in the package names a connector, so adding one is writing one file. **PostgreSQL passes all sixteen against the containerized database, in CI** (`ci.yml` sets `PIVOT_TEST_POSTGRES_URL` and fails the build if a Postgres test skips, so this cannot quietly stop running). **The part that makes the rest worth anything is `broken_test.go`**: seventeen deliberate defects — a NULL arriving as `\"\"`, unicode normalized on the way out, a zone applied to a naive timestamp, a result cut at the cap without the flag, a row repeated mid-stream so the count still comes out right, errors returned unclassified, a capability declared and not delivered — each wired into a working connector one at a time, each asserted to fail *its own named property*. A suite that passes is worth exactly the confidence that it would have failed, and that cannot come from reading it. **The fake's dialect is deliberately nothing like PostgreSQL** (`series 40`, `sleep 3`): if the suite only passed against something Postgres-shaped it would be a regression test in a conformance suite's clothes, and this is how that gets caught. **Capabilities are demonstrated, not believed** — declaring `CTEs` means a CTE runs, and declaring `LateralJoins` without supplying a query to prove it is a *failure*, because the compiler reading that field in Phase 3 will emit SQL the source rejects in front of whoever built the dashboard. **The fixture runs on Asia/Tehran**, +03:30: row 1 is stored at 23:30Z and comes back as March **16** at 03:00 local — verified by hand — so a connector confusing zoned for naive lands on the wrong *day*, and the half-hour offset also catches anything assuming whole hours. **Quoting is checked through a real round trip**, aliasing a column to `a \"quoted\" name` with the dialect's own `QuoteIdentifier`: a rule that fails to escape the inner quote is a syntax error, which is the injection this catches. **`Check.Failure` was extracted so the promise — a failure opens with the property, not the assertion — is one tested function rather than a convention.** The readers are permissive about the Go type a driver returns and strict about the value; Part 19 is where normalization becomes a contract. Coverage 88.9% here and 91.3% on `internal/connectors`. **The repo's own gate turned out to be lying locally**: `make coverage-gate` built its profile without `PIVOT_TEST_POSTGRES_URL`, so it reported `FAIL 54.0%` for a package CI measures at 91.3% — every opt-in Postgres test skipped. A local guard that disagrees with CI in either direction is one people learn to ignore, so the target now depends on `dev-db` and sets the URL, exactly as `test-all` and CI do. **Lint caught three things I would not have**: `catalogued` (misspell wants US spelling), `text, _ := asString(v)` in four places (errcheck's check-blank), and two `%v`s that should have been `%w`. |
 | 2026-09-27 | 16 | `internal/connectors` (interface, registry, `SQLConnector`, PostgreSQL), migration 00006 and the `connections` table, `ConnectionRepo`, and three `pivot admin` commands | **Pivot connects to a database somebody else owns.** Created, tested and stored against a real PostgreSQL, with the password landing as `pivot.v1.4a44cfc0...` rather than a string — checked with SQL against the file on both engines, because asking the repository whether it encrypted something is asking the guard whether the door is locked. **All four failure modes were caused for real rather than mocked**: a refused password, a host that does not resolve, a closed port, a missing database. Each says what to do and none contains the password. **The interface is the decision this part exists for.** `Dialect` is not `Connector`: pooling, scanning, truncation and timeouts are identical for every database/sql source, so they live in `SQLConnector` once and a driver supplies the DSN, the capabilities, the catalog query and the error classification — with BigQuery in mind, which is not database/sql-shaped, so this is a helper implementing the interface rather than the interface itself. **A truncated result carries a flag**, because a silently cut result is a wrong answer presented as a right one and the chart Phase 2 draws from it is wrong in a way nobody can see. **The DSN is built with `net/url`**: a generated password contains a colon, an at sign or a slash about a third of the time, and concatenation turns that into a DSN naming a different host. **`Query` still takes a string** — the package comment promised compiled query objects and Phase 3 owns the compiler that makes them; inventing the type now would be designing against an imaginary caller, so Part 20 replaces it. **Three things bit me.** `--host` and `--port` collided with the root command's persistent flags, so `--port 5433` set the *server* port to zero and the command failed before it ran; they are `--db-host` and `--db-port` now. The pgx driver was not registered in this package and had been reaching it by luck of import order. And my own error message hid its cause — `sql.Open` failing said "could not prepare a postgres connection" and nothing else, which sent me looking in the wrong place for ten minutes; at that point nothing secret can be in the error, so it carries the driver's text. **The portability harness caught the new table** before I remembered to declare it, and `sqlc.yaml`'s own warning caught the SQLite type overrides I had not added — the two models had silently diverged on eleven columns. |
