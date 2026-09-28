@@ -326,69 +326,41 @@ func (c *SQLConnector) Introspect(ctx context.Context) ([]Table, error) {
 	return tables, nil
 }
 
-// Query runs SQL and returns the rows.
+/*
+Query runs SQL and returns the whole result.
+
+A loop over [SQLConnector.Stream], rather than a second implementation. The two
+would otherwise drift on exactly the things that matter and are easy to get
+subtly different -- what a truncated result is, whether a byte slice was copied
+-- and the drift would show up as one code path being right.
+
+Right for a catalog query and wrong for a large answer, which is what Stream is
+for: this holds the entire result in memory on top of whatever the driver is
+already holding.
+*/
 func (c *SQLConnector) Query(ctx context.Context, query string, args ...any) (*Result, error) {
-	ctx, cancel := context.WithTimeout(ctx, c.timeout())
-	defer cancel()
-
-	conn, release, err := c.borrow(ctx)
+	stream, err := c.Stream(ctx, query, args...)
 	if err != nil {
-		return nil, c.classify(ctx, err)
+		return nil, err
 	}
 
-	defer release()
+	defer func() { _ = stream.Close() }()
 
-	rows, err := conn.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, c.classify(ctx, err)
-	}
+	result := &Result{Columns: stream.Columns()}
 
-	defer func() { _ = rows.Close() }()
-
-	types, err := rows.ColumnTypes()
-	if err != nil {
-		return nil, c.classify(ctx, err)
-	}
-
-	result := &Result{Columns: make([]Column, 0, len(types))}
-
-	for i, t := range types {
-		nullable, known := t.Nullable()
-
-		result.Columns = append(result.Columns, Column{
-			Name:       t.Name(),
-			SourceType: t.DatabaseTypeName(),
-			Type:       c.dialect.NormalizeType(t.DatabaseTypeName()),
-			// A driver that will not say is reported as nullable, because
-			// assuming NOT NULL and being wrong is a panic on a nil scan.
-			Nullable: nullable || !known,
-			Position: i + 1,
-		})
-	}
-
-	limit := c.maxRows()
-
-	for rows.Next() {
-		if int64(len(result.Rows)) >= limit {
-			// Stopped *and* flagged. A result that is silently cut is a wrong
-			// answer presented as a right one, and the chart drawn from it is
-			// wrong in a way nobody can see.
-			result.Truncated = true
-
-			break
-		}
-
-		row, serr := scanRow(rows, len(types))
-		if serr != nil {
-			return nil, c.classify(ctx, serr)
-		}
+	for stream.Next() {
+		// Copied, because Row is only valid until the next call to Next.
+		row := make([]any, len(stream.Row()))
+		copy(row, stream.Row())
 
 		result.Rows = append(result.Rows, row)
 	}
 
-	if rerr := rows.Err(); rerr != nil {
-		return nil, c.classify(ctx, rerr)
+	if serr := stream.Err(); serr != nil {
+		return nil, serr
 	}
+
+	result.Truncated = stream.Truncated()
 
 	return result, nil
 }
@@ -548,33 +520,6 @@ func (c *SQLConnector) watchCancel(
 // rejects `_ = f()` across this repository, which is the right default; a call
 // to this is the exception made visible rather than hidden behind a nolint.
 func ignore(error) {}
-
-// scanRow reads one row into a slice of any.
-//
-// Through *any rather than typed destinations, because the column types are
-// not known until runtime. Byte slices are copied to string: the driver may
-// reuse the buffer on the next call to Next, which turns a retained []byte
-// into a value that changes underneath its owner.
-func scanRow(rows *sql.Rows, n int) ([]any, error) {
-	cells := make([]any, n)
-	targets := make([]any, n)
-
-	for i := range cells {
-		targets[i] = &cells[i]
-	}
-
-	if err := rows.Scan(targets...); err != nil {
-		return nil, err
-	}
-
-	for i, cell := range cells {
-		if raw, ok := cell.([]byte); ok {
-			cells[i] = string(raw)
-		}
-	}
-
-	return cells, nil
-}
 
 func (c *SQLConnector) timeout() time.Duration {
 	if c.cfg.QueryTimeoutSeconds > 0 {

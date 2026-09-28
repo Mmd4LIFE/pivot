@@ -303,6 +303,27 @@ func (sqliteDialect) NormalizeType(sourceType string) datatype.Type {
 			// column can hold anything, and saying otherwise would be a guess.
 			return datatype.Type{Kind: datatype.Unknown}, true
 
+		/*
+			SQLite's widths are not the standard's, and the shared table's are
+			PostgreSQL's.
+
+			INTEGER in SQLite is a *variable* width storage class holding up to
+			eight bytes, not the four `integer` means in PostgreSQL. REAL is
+			always an eight-byte IEEE double; SQLite has no four-byte float at
+			all.
+
+			Left at the shared table's 32 bits, a SQLite id above two billion
+			would be handed to a consumer expecting an int32 -- and the Arrow
+			conversion in internal/query refuses a value that does not fit
+			rather than truncating it, so the failure is loud. Which is how
+			this was found.
+		*/
+		case "integer", "int":
+			return datatype.Type{Kind: datatype.Integer, Bits: 64}, true
+
+		case "real", "float", "double":
+			return datatype.Type{Kind: datatype.Float, Bits: 64}, true
+
 		case "numeric":
 			// SQLite's NUMERIC affinity is not the exact decimal the name
 			// implies -- it stores whatever fits and falls back to a float.

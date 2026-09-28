@@ -52,6 +52,7 @@ const (
 	defectWrongTimeoutReason
 	defectRawErrors
 	defectGuessesTypes
+	defectStreamStopsEarly
 )
 
 // fakeTimeout is short, so the timeout check costs milliseconds here.
@@ -98,6 +99,30 @@ func (f *fake) NormalizeType(sourceType string) datatype.Type {
 }
 
 func (f *fake) Close() error { return nil }
+
+// Stream answers the same statements Query does, over the result it would
+// have returned.
+func (f *fake) Stream(
+	ctx context.Context, query string, args ...any,
+) (connectors.Stream, error) {
+	result, err := f.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+
+	stream := newSliceStream(result)
+
+	if f.defect == defectStreamStopsEarly {
+		// Ends after one row and says nothing, which is the streaming
+		// equivalent of a silently truncated result.
+		stream.result = &connectors.Result{
+			Columns: result.Columns,
+			Rows:    result.Rows[:min(1, len(result.Rows))],
+		}
+	}
+
+	return stream, nil
+}
 
 // ForeignKeys: the fake declares one composite relationship, so a subject
 // built on it exercises the grouping rather than the trivial single-column

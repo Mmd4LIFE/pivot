@@ -60,14 +60,14 @@ At the end of every part, in this order:
 
 | | |
 |---|---|
-| **Last completed** | Part 19-d — The job runner, and a sync that runs itself |
-| **Next up** | **Part 20 — The execution pipeline** |
+| **Last completed** | Part 20-a — Results that stream |
+| **Next up** | **Part 20-b — The pipeline, and the query log** |
 | **Current phase** | Phase 1 — Connect & Query → v0.1 |
 | **Branch** | `main` |
 | **Blockers** | None |
 | **Repo** | https://github.com/Mmd4LIFE/pivot |
 
-**Where the code stands.** One binary, 30 MB, no runtime dependencies, serving an API and
+**Where the code stands.** One binary, 46 MB, no runtime dependencies, serving an API and
 a React application from one process against SQLite or PostgreSQL.
 
 A person can download it, run it with no arguments, open a browser, become the
@@ -143,6 +143,13 @@ a leader so two Pivots never sync the same connection — proven by running two,
 engines. `pivot admin jobs [--failed]` is how a failure gets found, because the real failure
 mode of a job system is that it stops and nothing says so.
 
+**A result larger than memory can be read.** `Connector.Stream` yields rows one at a time
+and `internal/query` turns them into Arrow record batches at the edge, which is where
+ADR-0004 says the one row-oriented conversion belongs. Measured rather than asserted:
+**20,000 rows peak at 3.1 MB and 200,000 rows peak at 3.1 MB** — ten times the result, the
+same memory. `Query` is now a loop over `Stream`, so the materializing and streaming paths
+cannot drift about what a truncated result is.
+
 **DuckDB exists and is not in the shipped binary.**
 [ADR-0010](docs/architecture/adr/0010-duckdb-is-an-opt-in-build.md) measured what ADR-0004's
 CGo clause actually costs — the binary goes 42.5 MB → 101.8 MB, stops being statically
@@ -193,7 +200,7 @@ few points high; leave margin above 80%.
 
 ```
 Phase 0  Foundations        [██████████████████████████] 31/31   COMPLETE
-Phase 1  Connect & Query    [█████████████████         ]  9/17
+Phase 1  Connect & Query    [███████████████████       ] 10/18
 Phase 2+ ...                                            (expanded as we approach)
 ```
 
@@ -529,25 +536,67 @@ scheduled job".
 
 ---
 
-### - [ ] Part 20 — The execution pipeline
+### - [x] Part 20-a — Results that stream ✅ 2026-09-29
 
-**Deliverable:** a query goes in, rows stream out, and it can be stopped.
+> **Split from Part 20** on 2026-09-29. Part 20 is a streaming result format, a pipeline,
+> authorization and a query log. The notes call it the hardest infrastructure problem in the
+> phase *and* say everything after depends on the shape — which is an argument for doing the
+> shape on its own, not for doing four things at once.
+>
+> Streaming is the shape. Every connector returns a fully materialized `[][]any` today, and
+> a pipeline built on that would have to be rewritten rather than extended.
 
-**Build:** `internal/query`: parse → authorize → plan → execute → stream, Arrow-native
-result streaming, cancellation propagated to the source, and the query log.
+**Deliverable:** a result larger than memory can be read, one batch at a time, and stopped
+part way.
+
+**Build:** A streaming read on the connector interface, Arrow record batches at the edge,
+and the memory proof.
 
 **Done when:**
-- A large result streams rather than being assembled in memory — demonstrated against a
-  result bigger than the server's budget
-- Cancellation reaches the source database, verified per connector
+- **A result bigger than the server's memory budget streams**, demonstrated by measuring
+  peak allocation rather than asserting it — a test that would pass against a materializing
+  implementation proves nothing
+- Every connector streams, checked by the conformance suite rather than once
+- **Stopping part way stops the source**, and does not leak the connection: an abandoned
+  stream is the common case, because somebody closed a browser tab
+- The existing materializing call still works, because the catalog and every current caller
+  use it and rewriting them is not this part
+
+**Notes:** ADR-0004 makes Arrow the internal contract so Phase 2's charts and Phase 6's
+flows do not each invent a result format, and says row-oriented conversion happens **once, at
+the edge**. The connectors are that edge: `database/sql` is row-oriented and nothing changes
+that.
+
+> **The cost estimate was wrong, in the cheap direction.** The probe measured **+6.1 MB**,
+> and what shipped is **+0.01 MB** — 46.14 MB to 46.15 MB, still statically linked and still
+> cross-compiling to all six targets. The probe imported `arrow/ipc`, which drags in
+> flatbuffers and four compression codecs; the conversion needs only `arrow`, `arrow/array`
+> and `arrow/memory`. Part 24's Parquet and Arrow Flight export is what will actually pay
+> the 6 MB, and it will be paying it for something.
+
+**Refs:** `P1-QE-001`, `P1-QE-002`
+
+---
+
+### - [ ] Part 20-b — The pipeline, and the query log
+
+**Deliverable:** a query goes in through one door, and what happened to it is on record.
+
+**Build:** `internal/query`: parse → authorize → plan → execute → stream, and the query log.
+
+**Done when:**
 - Every execution is logged with user, SQL, duration, rows, bytes, cache status and error
-- Authorization happens **before** execution, in the pipeline, not in the handler
+- Authorization happens **before** execution, in the pipeline, not in the handler — and a
+  test proves a handler cannot reach a connector another way
+- Cancellation reaches the source database *through the pipeline*, not only when a test
+  calls the connector directly
 
-**Notes:** This is the hardest infrastructure problem in the phase and everything after it
-depends on the shape. Arrow is chosen so that Phase 2's charts and Phase 6's flows do not
-each invent a result format.
+**Notes:** The single-door property is the one to protect. ADR-0009 makes the compiler the
+only place row-level security is injected, and that is worth nothing if a handler can open a
+connector itself. Phase 3 replaces the string this takes with a compiled query; the pipeline
+is what makes that a one-line change rather than an audit.
 
-**Refs:** `P1-QE-001`, `P1-QE-002`, `P1-QE-003`, `P1-QE-007`
+**Refs:** `P1-QE-003`, `P1-QE-007`
 
 ---
 
@@ -728,6 +777,7 @@ Phase 0's log is in
 
 | Date | Part | Shipped | Notes |
 |---|---|---|---|
+| 2026-09-29 | 20-a | `Connector.Stream` on the interface and all four connectors, `internal/query` turning rows into Arrow record batches, two streaming conformance properties, and the memory measurement | **Split from Part 20**: a streaming format, a pipeline, authorization and a query log is four things, and the notes calling it \"the hardest infrastructure problem in the phase\" *and* saying everything after depends on the shape is an argument for doing the shape alone. **The measurement is the deliverable.** The Done-when insisted peak allocation be measured rather than asserted, because a test that reads ten million rows and checks it did not crash passes against a materializing implementation on a big enough machine. Result: **20,000 rows peak at 3.1 MB; 200,000 rows peak at 3.1 MB.** Ten times the rows, the same memory. **`Query` is now a loop over `Stream`** rather than a second implementation — the two would otherwise drift on exactly the things that are easy to get subtly different (what truncation means, whether a byte slice was copied) and the drift shows up as one path being right. **Two conformance properties**, so every connector is checked rather than one: a stream matches the materialized read column for column and row for row, and an **abandoned** stream releases the source. The second is the common case, not the exceptional one — it is what a closed browser tab looks like from here, and a connector that only releases on a full read holds a connection for every question nobody waited for. A twentieth defect proves the first can fail. **The conversion found a real bug in Part 19-a's type mapping.** SQLite's `INTEGER` is a variable-width storage class holding up to eight bytes and its `REAL` is always an eight-byte double, but the shared table's widths are PostgreSQL's — four and four. A SQLite id above two billion was mapping to an Arrow int32. It surfaced *loudly* only because the conversion **refuses** a value that will not fit rather than truncating it; a mapping that quietly truncated would have produced an id wrong by four billion with nothing to notice. Regression test included. **Every column is nullable in the Arrow schema** whatever the source claimed: an outer join, a view, or a driver that declines to say all produce a NULL in a column declared NOT NULL, and Arrow is within its rights to panic on that — inside a streaming export being the worst place to find out. **Decimal is rendered as text on purpose.** Arrow's decimal types need a precision and scale the catalog does not carry yet, and a decimal guessed into a float with the wrong scale loses exactly the digits `datatype.Decimal` exists to protect. **The cost estimate was wrong in the cheap direction**: the probe said +6.1 MB, what shipped is **+0.01 MB**, because the probe imported `arrow/ipc` (flatbuffers and four compression codecs) and the conversion needs none of it. Still statically linked, still cross-compiling to six targets. Lint caught four things worth having: `arrow.Record` is deprecated in favour of `RecordBatch`, `scanRow` was dead once `Query` became a loop, and two bounds checks gosec could not see from the call site. |
 | 2026-09-29 | 19-d | `internal/jobs` (River on both engines), the catalog sweep and sync as scheduled work, `pivot admin jobs`, and [ADR-0011](docs/architecture/adr/0011-background-jobs-on-both-engines.md) | **The decision was the deliverable, and measuring changed the answer.** Two accepted ADRs contradicted each other: ADR-0007 justified River because \"it uses the Postgres we already require\", and ADR-0003 says Postgres is *not* required — SQLite is the zero-config default. Taken at face value a SQLite instance gets no catalog syncs, no alerts and no flows, which is not a degraded install but a different product sharing a name. **I expected to write a small portable runner.** The measurement said otherwise: River publishes a `riversqlite` driver that takes a plain `*sql.DB` — no CGo, no new driver, works with the `modernc.org/sqlite` already in the binary — and a spike ran an inserted job *and* a periodic one to completion on both engines before any code was written. It costs **+0.18 MB** (42.76 → 42.94), against DuckDB's +59 MB in ADR-0010. So ADR-0007 stands and ADR-0011 supplies the answer it was missing. **Leader election is the whole of \"two Pivots do not both sync\"**, and it is proven by running two runners against one database and asserting the work happens exactly once — on both engines. **The runner opens its own pool.** On SQLite the store's pool is one connection by design, so a job runner polling on it would sit between every request and the database; `riversqlite`'s own docs independently ask for `SetMaxOpenConns(1)`. Safe only because the store already opens SQLite with WAL and a five-second busy timeout — stated in the ADR because it would not be safe without them. **Two bugs the tests caught, both mine.** `serve` started the runner but nothing created River's tables under auto-migrate; and the failure made `serve` **refuse to start** — regressing exactly the behaviour the test `TestServeWarnsAboutPendingMigrationsRatherThanRefusing` guards, and for the second time in this project (the first-run banner did it in Phase 0). A background feature that cannot initialize now warns loudly and serves anyway. **And one finding that was not a finding**: a rolling-upgrade test failed on Postgres and passed on SQLite, which looked like an engine difference and was test pollution — the Postgres tests share one database and a discarded job from an earlier test was still sitting there. The queue is cleared per test now. Worth recording because I nearly wrote it up as a River behaviour. Two smaller measurements went into the code: River **refuses to insert** a kind the client has no worker for, so a typo fails at the call site; and a process that *fetches* a kind it lacks fails that attempt and leaves the job retryable rather than discarding it — so a rolling upgrade loses nothing. **CI then failed the coverage gate**, which is the Environment note about CI counting fewer statements biting for real: `internal/jobs` read 83.9% locally and under 80% there. The fix was not a nudge — `pivot admin jobs`, the command whose entire purpose is making a silent failure visible, **had no test at all**, which is worse than not having the command: somebody would look, see nothing, and conclude everything was fine. It is now tested against a job that really failed, caused by a worker returning an error rather than a row inserted saying \"discarded\". `jobs` went to 91.9% by covering two error paths that are genuinely reachable — an impossible worker count, and migrating a read-only database — and the other eight remain uncovered because contriving them would be worse than the number. |
 | 2026-09-29 | 19-c | Foreign key discovery on all four connectors, migration 00009 and `catalog_foreign_keys` on both engines, relationship reconciliation in the sync | **Split one last time**, and this one was a reclassification rather than a trim: the job runner is not a catalog feature. It is infrastructure Part 22, Phase 6 and Phase 8 all need, and it carries a decision ADR-0007 left open — River requires PostgreSQL and ADR-0003 supports SQLite, and those cannot both be true without a written answer. Shipping that as a footnote to \"the catalog knows how tables relate\" would have buried the decision in the wrong part. It is 19-d. **The probe came first again, and found the bug this part exists to avoid.** Every source exposes a foreign key as two column lists, and the standard `information_schema` query — the one in every blog post on the subject — **crosses them instead of pairing them**. Measured on a real PostgreSQL with a two-column key: four rows back instead of two, `tenant_id` paired with `code` and `code` with `tenant_id`. A relationship built from that joins on columns that were never related, and it **returns rows**, so nothing looks broken. PostgreSQL now reads from `pg_catalog` with `unnest(conkey, confkey) WITH ORDINALITY`, which walks the two arrays together; DuckDB indexes its parallel lists by position for the same reason; MySQL and SQLite pair them already. **The fixture is composite on purpose** — a single-column test would have passed against the broken query. **`ErrNoForeignKeys` is not an empty result.** \"This warehouse declares no relationships\" and \"this connector cannot tell you\" lead somebody to do completely different things, and conflating them would have had the sync **sweep every stored relationship the first time a source went quiet** — a schema's structure deleted because a connector lacks a feature. Tested by wrapping a working connector in one that refuses. **Identity includes the table, not just the constraint name**, because MySQL allows two tables to carry the same name and keying on the name alone merges two relationships into one wrong row — checked in the grouping and again in the schema's unique constraint. **A change is reported per relationship, not per column**: two lines saying a column of a composite key appeared is noise that buries the one line worth reading. **Targets are stored as names rather than references into `catalog_tables`**, so a relationship pointing at a table this connection cannot see is kept rather than dropped for tidiness — a schema granted piecemeal is the ordinary reason. Whether the target is cataloged is a join away and never stale; a stored flag would go wrong the moment the catalog changed. SQLite does not keep constraint *names* at all, so its are synthesized from the table and the pragma's key index — stable while the table is, and a rewrite that reorders the keys is a schema change worth reporting anyway. |
 | 2026-09-28 | 19-b | Migration 00008 and the catalog tables on both engines, `CatalogRepo`, `internal/catalog` — the sync that reconciles rather than replaces — and `pivot admin sync-catalog` | **Split twice more.** Foreign keys went to 19-c because they need a query per dialect and a second pair of tables, and the part of this worth getting right is the diff. **Scheduling went with them for a harder reason: there is no job system.** ADR-0007 chose River and nothing has needed it yet, so \"a scheduled sync\" means building a job runner first — and 19-c has to decide what a SQLite instance gets, since River needs PostgreSQL and ADR-0003 supports both. Putting a `time.Ticker` in this package to tick the box would have been the wrong answer twice. **The design turns on one word: reconcile.** The obvious implementation deletes everything for a connection and inserts what it just read, and that is wrong three ways — it destroys `first_seen_at`, the descriptions and the identity every Phase 3 model will point at; it cannot answer \"what changed since yesterday\", which is the only reason to sync on a timer; and a source that answers with half its tables because a permission was revoked takes the other half of the catalog with it. So a sync **upserts what it sees, sweeps what it did not, and reports the difference**. Two statements per object and one at the end, no temporary table, no transaction held across a slow source. **Nothing is deleted.** A table that vanishes gets `removed_at` and keeps everything, and comes back unmarked if the source reports it again — reported as an addition, because that is what it is downstream, while the row keeps its original `first_seen_at`. A removal is reported **once**: re-reporting every long-dead table forever is how change detection becomes something people filter out of their alerts. **The report names things rather than counting them.** The sweep returns row counts; the snapshot turns them back into names, and the two are cross-checked — a disagreement is the signature of a concurrent sync on one connection, which is worth saying rather than hiding. **Only type and nullability count as a change.** A comment or a position moving is nothing any consumer can be wrong about, and reporting it would bury the two that are: a column whose type changed is a chart about to render nonsense, and one that became nullable is an aggregate about to skip rows. Both spellings are compared, because either can move alone — `varchar(50)` to `varchar(100)` changes the source and not the kind. **The source is released before Pivot writes**, proven by looking at the pool from *inside* the write: a fake store asserts on every record that the connector has nothing checked out — 8 writes, 0 held. Interleaving would hold a pooled connection against somebody's warehouse for as long as Pivot's own store takes. **The diff is tested against a fake store and the storage against real SQL**, deliberately: the diffing deserves exhaustive cases and a database per case would buy no confidence, while \"the upsert keeps the row's id and its `first_seen_at`\" is a claim only real SQL can settle — and it is checked on both engines. **The portability harness caught the new tables** before I declared them, for the second time in this phase, and `sqlc.yaml` needed 17 per-column SQLite overrides or the two models diverged on every timestamp. Two query shapes had to change for portability: PostgreSQL parameter *reuse* (`$8, $8`) becomes two separate SQLite parameters, and a redundant `org_id` in a subquery made sqlc emit `OrgID_2` — both removed rather than worked around. |
