@@ -53,6 +53,10 @@ const (
 	// KindSQLite is a SQLite file, opened read-only. The first source with no
 	// server, and so the first whose Config is a path rather than an address.
 	KindSQLite Kind = "sqlite"
+
+	// KindDuckDB is an embedded DuckDB. It is behind the `duckdb` build tag
+	// and is not in the default binary -- see ADR-0010 and [Absent].
+	KindDuckDB Kind = "duckdb"
 )
 
 func (k Kind) String() string { return string(k) }
@@ -353,6 +357,25 @@ func Register(kind Kind, factory Factory) {
 	registry[kind] = factory
 }
 
+/*
+absent records connectors this build was compiled without.
+
+A kind can be missing for two very different reasons: nobody has written it, or
+it exists and this binary does not contain it. Telling somebody "no connector
+for \"duckdb\"" when the answer is "not in this build, and here is the build
+that has it" wastes an afternoon.
+
+Written only from init functions, like the registry above, and for the same
+reason needs no lock.
+*/
+var absent = map[Kind]string{}
+
+// RegisterAbsent records that this build does not contain a connector, and
+// what to do about it. Called from the stub half of a build-tagged driver.
+func RegisterAbsent(kind Kind, reason string) {
+	absent[kind] = reason
+}
+
 // Kinds lists what this build can connect to, sorted.
 func Kinds() []Kind {
 	out := make([]Kind, 0, len(registry))
@@ -379,6 +402,13 @@ func Kinds() []Kind {
 func Open(cfg Config) (Connector, error) {
 	factory, ok := registry[cfg.Kind]
 	if !ok {
+		// Compiled out is not the same as nonexistent, and the difference is
+		// the whole of what somebody needs to hear.
+		if reason, known := absent[cfg.Kind]; known {
+			return nil, Errorf(ReasonUnknown, nil, reason,
+				"this build of Pivot was compiled without the %s connector", cfg.Kind)
+		}
+
 		return nil, Errorf(ReasonUnknown, nil,
 			"this build supports "+kindList(),
 			"no connector for %q", cfg.Kind)

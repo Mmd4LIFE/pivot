@@ -297,6 +297,23 @@ dev-go:
 # far less headroom. Serialized, the whole suite is about 30 seconds.
 TEST_FLAGS := -race -count=1 -p 1
 
+.PHONY: test-duckdb
+test-duckdb: $(TOOLS_DIR)/golangci-lint ## Build, lint and test the DuckDB variant (needs CGo)
+	# ADR-0010: DuckDB is an opt-in build. The default binary is pure Go and
+	# statically linked, and adding DuckDB costs 59MB, the static linkage and
+	# cross-compilation for every target. This target is what keeps the tagged
+	# half from rotting -- nothing else compiles it.
+	#
+	# No -race: the race detector needs CGo too, and layering it over a 300MB
+	# prebuilt C++ library buys nothing this suite is looking for.
+	CGO_ENABLED=1 go build -tags duckdb -o $(BIN_DIR)/pivot-duckdb ./cmd/pivot
+	CGO_ENABLED=1 go test -tags duckdb -count=1 -p 1 ./internal/connectors/...
+	# Linted under the tag as well. .golangci.yml pins its own build tags, so a
+	# single run never sees both halves of a tagged pair: without this line
+	# duckdb.go would be the one file in the repository nothing checks.
+	$(TOOLS_DIR)/golangci-lint run --build-tags duckdb ./internal/connectors/...
+	@echo "duckdb build: $$(du -h $(BIN_DIR)/pivot-duckdb | cut -f1)"
+
 .PHONY: test
 test: ## Run all tests with race detection (SQLite only; Postgres and MySQL tests skip)
 	go test $(TEST_FLAGS) $(PKG)

@@ -13,6 +13,7 @@ Decisions that are hard to reverse and that someone will ask about later.
 | [0007](0007-job-orchestration.md) | River for jobs; Temporal optional at scale | Accepted | 2026-09-19 |
 | [0008](0008-ai-architecture.md) | Separate Python AI service; NL → semantic query | Accepted | 2026-09-19 |
 | [0009](0009-authorization.md) | OpenFGA, enforced at the query compiler | Accepted | 2026-09-19 |
+| [0010](0010-duckdb-is-an-opt-in-build.md) | DuckDB is an opt-in build, not the default binary | Accepted | 2026-09-28 |
 
 ## Conventions
 
@@ -20,6 +21,12 @@ Decisions that are hard to reverse and that someone will ask about later.
 - **ADRs are immutable once accepted.** A changed decision gets a new ADR that supersedes
   the old one; the old one is marked `Superseded by ADR-NNNN` and otherwise left alone.
 - **Status values:** `Proposed`, `Accepted`, `Superseded by ADR-NNNN`, `Deprecated`.
+- **An ADR that changes part of an earlier one amends rather than supersedes it.** The
+  earlier ADR keeps its status and gains an `Amended by:` line plus a short note saying what
+  changed; its reasoning is left intact. Superseding is for a decision reversed outright.
+  Without this, a reader arriving at the old ADR follows advice the project no longer takes
+  — which is the failure this directory exists to prevent. ADR-0004 and
+  [ADR-0010](0010-duckdb-is-an-opt-in-build.md) are the worked example.
 - Every ADR must state its **negative consequences**. A decision with no downsides was not
   a decision.
 - Every ADR must state **when to revisit it**, in observable terms.

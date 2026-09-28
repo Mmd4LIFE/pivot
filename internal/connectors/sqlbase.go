@@ -501,6 +501,26 @@ func (c *SQLConnector) classify(ctx context.Context, err error) error {
 	}
 
 	if specific := c.dialect.Classify(err); specific != nil {
+		/*
+			A source that reports its own cancellation cannot know why it was
+			canceled, because only the context knows. The difference is the
+			operator's: a timeout means raise the limit or make the query
+			cheaper, and a cancellation means somebody walked away -- and
+			reporting one as the other sends whoever is on call in the wrong
+			direction.
+
+			DuckDB is what surfaced this. It reports the same interrupt for
+			both, so a query killed by its own deadline came back as
+			"canceled". PostgreSQL's 57014 and MySQL's 1317 have exactly the
+			same ambiguity; they passed only because their drivers happened to
+			surface the context error instead.
+		*/
+		if specific.Reason == ReasonCanceled && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return Errorf(ReasonTimeout, err,
+				"raise the connection's query timeout, or make the query cheaper",
+				"the query ran longer than %s", c.timeout())
+		}
+
 		return specific
 	}
 
