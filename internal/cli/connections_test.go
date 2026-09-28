@@ -465,9 +465,18 @@ func seedSource(t *testing.T, path string) {
 
 	defer func() { _ = db.Close() }()
 
-	if _, err = db.ExecContext(t.Context(),
-		"CREATE TABLE orders (id INTEGER NOT NULL PRIMARY KEY)"); err != nil {
-		t.Fatalf("seed the source: %v", err)
+	// A relationship as well as a table, so a sync has something of every
+	// kind to report.
+	for _, statement := range []string{
+		"CREATE TABLE customers (id INTEGER NOT NULL PRIMARY KEY)",
+		`CREATE TABLE orders (
+			id          INTEGER NOT NULL PRIMARY KEY,
+			customer_id INTEGER NOT NULL REFERENCES customers (id)
+		)`,
+	} {
+		if _, err = db.ExecContext(t.Context(), statement); err != nil {
+			t.Fatalf("seed the source: %v", err)
+		}
 	}
 }
 
@@ -499,7 +508,12 @@ func TestSyncCatalogReportsWhatChanged(t *testing.T) {
 		t.Fatalf("first sync: %v", err)
 	}
 
-	for _, want := range []string{"1 tables", "added main.orders", "added main.orders.id"} {
+	for _, want := range []string{
+		"2 tables", "1 relationships",
+		"added main.orders", "added main.orders.id",
+		// The relationship, named by its constraint.
+		"added main.orders (orders_fk_0)",
+	} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("the first sync does not mention %q:\n%s", want, stdout)
 		}

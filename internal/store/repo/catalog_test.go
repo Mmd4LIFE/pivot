@@ -379,3 +379,157 @@ func TestDeletingAConnectionRemovesItsCatalog(t *testing.T) {
 		}
 	})
 }
+
+/*
+A relationship is stored a column at a time, and keeps its order.
+
+The shape the whole feature turns on: a composite key is two rows sharing a
+constraint name, distinguished by ordinal. Read back out of order, a join built
+from them matches on columns that were never related.
+*/
+func TestACompositeRelationshipKeepsItsOrder(t *testing.T) {
+	t.Parallel()
+
+	eachEngine(t, func(t *testing.T, db *store.DB) {
+		f, connID := catalogFixture(t, db)
+
+		for ordinal, pair := range map[int64][2]string{
+			1: {"tenant_id", "tenant_id"},
+			2: {"code", "code"},
+		} {
+			if _, err := f.repos.Catalog.RecordForeignKey(f.ctx, repo.SeenForeignKey{
+				ConnectionID: connID, Constraint: "stores_regions_fk",
+				FromSchema: "public", FromTable: "stores", FromColumn: pair[0],
+				ToSchema: "public", ToTable: "regions", ToColumn: pair[1],
+				Ordinal: ordinal,
+			}, firstSync); err != nil {
+				t.Fatalf("record ordinal %d: %v", ordinal, err)
+			}
+		}
+
+		keys, err := f.repos.Catalog.ForeignKeys(f.ctx, connID)
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+
+		if len(keys) != 2 {
+			t.Fatalf("%d key columns, want 2", len(keys))
+		}
+
+		// Ordered by the query, not by insertion.
+		if keys[0].Ordinal != 1 || keys[1].Ordinal != 2 {
+			t.Fatalf("ordinals came back %d, %d", keys[0].Ordinal, keys[1].Ordinal)
+		}
+
+		if keys[0].FromColumn != "tenant_id" || keys[1].FromColumn != "code" {
+			t.Errorf("columns came back %s, %s", keys[0].FromColumn, keys[1].FromColumn)
+		}
+	})
+}
+
+// Two tables may carry constraints of the same name -- MySQL allows it -- and
+// the identity has to keep them apart or they collapse into one row.
+func TestSameNamedConstraintsOnDifferentTablesAreDistinct(t *testing.T) {
+	t.Parallel()
+
+	eachEngine(t, func(t *testing.T, db *store.DB) {
+		f, connID := catalogFixture(t, db)
+
+		for _, table := range []string{"stores", "depots"} {
+			if _, err := f.repos.Catalog.RecordForeignKey(f.ctx, repo.SeenForeignKey{
+				ConnectionID: connID, Constraint: "region_fk",
+				FromSchema: "public", FromTable: table, FromColumn: "region_id",
+				ToSchema: "public", ToTable: "regions", ToColumn: "id",
+				Ordinal: 1,
+			}, firstSync); err != nil {
+				t.Fatalf("record for %s: %v", table, err)
+			}
+		}
+
+		keys, err := f.repos.Catalog.ForeignKeys(f.ctx, connID)
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+
+		if len(keys) != 2 {
+			t.Fatalf("%d rows, want 2 -- two tables' constraints were merged", len(keys))
+		}
+	})
+}
+
+// Relationships sweep like everything else: marked gone, kept, idempotent.
+func TestRelationshipsAreSweptAndKept(t *testing.T) {
+	t.Parallel()
+
+	eachEngine(t, func(t *testing.T, db *store.DB) {
+		f, connID := catalogFixture(t, db)
+
+		if _, err := f.repos.Catalog.RecordForeignKey(f.ctx, repo.SeenForeignKey{
+			ConnectionID: connID, Constraint: "stores_regions_fk",
+			FromSchema: "public", FromTable: "stores", FromColumn: "region_id",
+			ToSchema: "public", ToTable: "regions", ToColumn: "id", Ordinal: 1,
+		}, firstSync); err != nil {
+			t.Fatalf("record: %v", err)
+		}
+
+		gone, err := f.repos.Catalog.MarkForeignKeysGone(f.ctx, connID, secondSync)
+		if err != nil {
+			t.Fatalf("sweep: %v", err)
+		}
+
+		if gone != 1 {
+			t.Errorf("the sweep marked %d key columns gone, want 1", gone)
+		}
+
+		keys, err := f.repos.Catalog.ForeignKeys(f.ctx, connID)
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+
+		if len(keys) != 1 || !keys[0].RemovedAt.Valid {
+			t.Error("the relationship was deleted rather than marked gone")
+		}
+
+		// Idempotent.
+		again, err := f.repos.Catalog.MarkForeignKeysGone(f.ctx, connID, secondSync.Add(time.Hour))
+		if err != nil {
+			t.Fatalf("second sweep: %v", err)
+		}
+
+		if again != 0 {
+			t.Errorf("the second sweep re-marked %d rows", again)
+		}
+	})
+}
+
+// And they are scoped to the organization, like everything else.
+func TestRelationshipsAreScopedToTheOrganization(t *testing.T) {
+	t.Parallel()
+
+	eachEngine(t, func(t *testing.T, db *store.DB) {
+		f, connID := catalogFixture(t, db)
+
+		if _, err := f.repos.Catalog.RecordForeignKey(f.ctx, repo.SeenForeignKey{
+			ConnectionID: connID, Constraint: "stores_regions_fk",
+			FromSchema: "public", FromTable: "stores", FromColumn: "region_id",
+			ToSchema: "public", ToTable: "regions", ToColumn: "id", Ordinal: 1,
+		}, firstSync); err != nil {
+			t.Fatalf("record: %v", err)
+		}
+
+		theirs, err := f.repos.Catalog.ForeignKeys(f.otherCtx, connID)
+		if err != nil {
+			t.Fatalf("list as the other org: %v", err)
+		}
+
+		if len(theirs) != 0 {
+			t.Errorf("another organization sees %d of our relationships", len(theirs))
+		}
+
+		if gone, serr := f.repos.Catalog.MarkForeignKeysGone(f.otherCtx, connID, secondSync); serr != nil {
+			t.Fatalf("sweep as the other org: %v", serr)
+		} else if gone != 0 {
+			t.Errorf("another organization's sweep marked %d of ours gone", gone)
+		}
+	})
+}

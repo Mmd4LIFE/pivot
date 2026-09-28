@@ -113,6 +113,9 @@ type Querier interface {
 	ListCatalogColumns(context.Context, model.ListCatalogColumnsParams) ([]model.CatalogColumn, error)
 	ListCatalogColumnsForTable(context.Context, model.ListCatalogColumnsForTableParams) ([]model.CatalogColumn, error)
 	GetCatalogTable(context.Context, model.GetCatalogTableParams) (model.CatalogTable, error)
+	UpsertCatalogForeignKey(context.Context, model.UpsertCatalogForeignKeyParams) (model.CatalogForeignKey, error)
+	SweepCatalogForeignKeys(context.Context, model.SweepCatalogForeignKeysParams) (int64, error)
+	ListCatalogForeignKeys(context.Context, model.ListCatalogForeignKeysParams) ([]model.CatalogForeignKey, error)
 	CountConnections(context.Context, uuid.UUID) (int64, error)
 
 	// Identity providers and the federated identities they issue.

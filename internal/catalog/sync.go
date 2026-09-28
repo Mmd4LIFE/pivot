@@ -60,6 +60,10 @@ type Change struct {
 	// Column is empty for a change to the table itself.
 	Column string
 
+	// Constraint names a relationship, for a change to one. Table then names
+	// the table the key is declared on.
+	Constraint string
+
 	// Detail says what moved, for a log or an alert. Empty for an addition or
 	// a removal, where the kind is the whole story.
 	Detail string
@@ -68,7 +72,11 @@ type Change struct {
 // String renders a change for a log line or a CLI.
 func (c Change) String() string {
 	where := c.Schema + "." + c.Table
-	if c.Column != "" {
+
+	switch {
+	case c.Constraint != "":
+		where += " (" + c.Constraint + ")"
+	case c.Column != "":
 		where += "." + c.Column
 	}
 
@@ -81,10 +89,18 @@ func (c Change) String() string {
 
 // Report is what a sync found.
 type Report struct {
-	// TablesSeen and ColumnsSeen are what the source reported, whether or not
-	// anything about them moved.
-	TablesSeen  int
-	ColumnsSeen int
+	// TablesSeen, ColumnsSeen and RelationshipsSeen are what the source
+	// reported, whether or not anything about them moved.
+	TablesSeen        int
+	ColumnsSeen       int
+	RelationshipsSeen int
+
+	// ForeignKeysUnavailable says the source could not report relationships at
+	// all -- which is a different fact from having none, and one Phase 3's
+	// join inference has to be able to tell apart. Nothing was swept in that
+	// case, because sweeping on the strength of not having asked would mark
+	// every relationship dropped.
+	ForeignKeysUnavailable bool
 
 	// Changes is everything that differs from what Pivot knew, in the order
 	// found: tables before their columns.
@@ -112,9 +128,14 @@ func (r Report) Unchanged() bool { return len(r.Changes) == 0 }
 
 // Summary is one line for a log.
 func (r Report) Summary() string {
+	relationships := fmt.Sprintf("%d relationships", r.RelationshipsSeen)
+	if r.ForeignKeysUnavailable {
+		relationships = "relationships not reported by this source"
+	}
+
 	return fmt.Sprintf(
-		"%d tables, %d columns, %d added, %d changed, %d removed in %s",
-		r.TablesSeen, r.ColumnsSeen,
+		"%d tables, %d columns, %s, %d added, %d changed, %d removed in %s",
+		r.TablesSeen, r.ColumnsSeen, relationships,
 		r.Count(Added), r.Count(Changed), r.Count(Removed),
 		r.FinishedAt.Sub(r.StartedAt).Round(time.Millisecond))
 }
@@ -128,6 +149,10 @@ type Store interface {
 	RecordTable(ctx context.Context, in repo.SeenTable, at time.Time) (model.CatalogTable, error)
 	RecordColumn(ctx context.Context, in repo.SeenColumn, at time.Time) (model.CatalogColumn, error)
 	MarkGone(ctx context.Context, connectionID uuid.UUID, syncedAt time.Time) (int64, int64, error)
+
+	ForeignKeys(ctx context.Context, connectionID uuid.UUID) ([]model.CatalogForeignKey, error)
+	RecordForeignKey(ctx context.Context, in repo.SeenForeignKey, at time.Time) (model.CatalogForeignKey, error)
+	MarkForeignKeysGone(ctx context.Context, connectionID uuid.UUID, syncedAt time.Time) (int64, error)
 }
 
 // Syncer reconciles one connection's catalog.
@@ -187,6 +212,10 @@ func (s *Syncer) Sync(
 		if rerr := s.reconcile(ctx, connectionID, table, previous, &report, started); rerr != nil {
 			return Report{}, rerr
 		}
+	}
+
+	if rerr := s.reconcileRelationships(ctx, connectionID, source, &report, started); rerr != nil {
+		return Report{}, rerr
 	}
 
 	// Everything not touched above. The counts come back from the database

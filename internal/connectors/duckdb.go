@@ -300,3 +300,33 @@ func (duckdbDialect) NormalizeType(sourceType string) datatype.Type {
 		return datatype.Type{}, false
 	})
 }
+
+/*
+ForeignKeyQuery lists relationships from duckdb_constraints().
+
+DuckDB hands back two parallel lists per constraint -- constraint_column_names
+and referenced_column_names -- so this walks them by index rather than joining
+them, for the same reason PostgreSQL's does: crossing the lists would pair
+every local column with every referenced one.
+
+DuckDB's lists are one-based and `range` excludes its upper bound, hence the
++ 1. referenced_table carries no schema, so the target is assumed to be in the
+same schema as the table declaring the key, which is the only place DuckDB
+allows it.
+*/
+func (duckdbDialect) ForeignKeyQuery() string {
+	return `
+SELECT c.constraint_name,
+       c.schema_name                       AS from_schema,
+       c.table_name                        AS from_table,
+       c.constraint_column_names[i]        AS from_column,
+       c.schema_name                       AS to_schema,
+       c.referenced_table                  AS to_table,
+       c.referenced_column_names[i]        AS to_column,
+       CAST(i AS INTEGER)                  AS ordinal
+FROM duckdb_constraints() c,
+     range(1, len(c.constraint_column_names) + 1) AS t(i)
+WHERE c.constraint_type = 'FOREIGN KEY'
+  AND c.schema_name NOT IN ('information_schema', 'pg_catalog')
+ORDER BY c.schema_name, c.table_name, c.constraint_name, i`
+}

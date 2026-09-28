@@ -92,6 +92,7 @@ type Querier interface {
 	LinkFederatedIdentity(ctx context.Context, arg LinkFederatedIdentityParams) (FederatedIdentity, error)
 	ListCatalogColumns(ctx context.Context, arg ListCatalogColumnsParams) ([]CatalogColumn, error)
 	ListCatalogColumnsForTable(ctx context.Context, arg ListCatalogColumnsForTableParams) ([]CatalogColumn, error)
+	ListCatalogForeignKeys(ctx context.Context, arg ListCatalogForeignKeysParams) ([]CatalogForeignKey, error)
 	ListCatalogTables(ctx context.Context, arg ListCatalogTablesParams) ([]CatalogTable, error)
 	ListChildGroups(ctx context.Context, arg ListChildGroupsParams) ([]Group, error)
 	ListConnections(ctx context.Context, orgID uuid.UUID) ([]Connection, error)
@@ -162,6 +163,7 @@ type Querier interface {
 	SoftDeleteOrganization(ctx context.Context, arg SoftDeleteOrganizationParams) (int64, error)
 	SoftDeleteUser(ctx context.Context, arg SoftDeleteUserParams) (int64, error)
 	SweepCatalogColumns(ctx context.Context, arg SweepCatalogColumnsParams) (int64, error)
+	SweepCatalogForeignKeys(ctx context.Context, arg SweepCatalogForeignKeysParams) (int64, error)
 	SweepCatalogTables(ctx context.Context, arg SweepCatalogTablesParams) (int64, error)
 	// Sliding idle expiry. The absolute cap is never touched, so an active session
 	// still ends when it reaches it.
@@ -180,6 +182,14 @@ type Querier interface {
 	// user" call can never rewrite a credential by accident.
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) (int64, error)
 	UpsertCatalogColumn(ctx context.Context, arg UpsertCatalogColumnParams) (CatalogColumn, error)
+	// Declared relationships between tables.
+	//
+	// Placeholders are positional in both dialects and must appear in the same
+	// order, and none is used twice - SQLite's `?` is positional and a repeat is a
+	// second parameter, which would make the two generated structs different sizes.
+	// Query files are ASCII: sqlc's SQLite generator miscounts byte offsets on
+	// multibyte characters and corrupts generation.
+	UpsertCatalogForeignKey(ctx context.Context, arg UpsertCatalogForeignKeyParams) (CatalogForeignKey, error)
 	// The catalog: what Pivot has seen in a connected database.
 	//
 	// Placeholders are positional in both dialects and must appear in the same

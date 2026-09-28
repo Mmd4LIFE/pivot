@@ -211,6 +211,18 @@ type Connector interface {
 	*/
 	NormalizeType(sourceType string) datatype.Type
 
+	/*
+		ForeignKeys lists the relationships the source declares, one row per
+		column of each key.
+
+		Returns [ErrNoForeignKeys] for a source that cannot report them, which
+		is a different answer from an empty slice: "this warehouse declares no
+		relationships" and "this connector cannot tell you" lead somebody to
+		do completely different things, and Phase 3's join inference has to be
+		able to say which it is looking at.
+	*/
+	ForeignKeys(ctx context.Context) ([]ForeignKey, error)
+
 	// Close releases the pool. A connector that is not closed when its
 	// connection is deleted is a pool held against somebody's warehouse
 	// forever.
@@ -251,6 +263,103 @@ type Column struct {
 	Nullable bool
 	Position int
 	Comment  string
+}
+
+/*
+ForeignKey is one column pair of one declared relationship.
+
+A row per column rather than a row per constraint, with [ForeignKey.Ordinal]
+giving the order. A composite key is several of these sharing a Name, and
+reassembling them is the caller's job -- see [GroupForeignKeys].
+
+That shape is deliberate. The alternative is a constraint carrying two ordered
+lists, which no relational store holds without an array type or a JSON blob,
+and which every consumer then has to unpack. The risk it trades against is the
+one worth naming: a composite key whose two column lists get *crossed* rather
+than paired produces a join on the wrong columns, which returns rows -- the
+wrong ones -- rather than failing.
+
+To and From carry names rather than catalog ids on purpose. A relationship can
+point at a table this connection cannot see, which is ordinary when a schema is
+granted piecemeal, and a foreign key that could not be stored because its
+target was invisible is information thrown away for tidiness.
+*/
+type ForeignKey struct {
+	// Name is the constraint's name at the source. Columns of one composite
+	// key share it.
+	Name string
+
+	FromSchema string
+	FromTable  string
+	FromColumn string
+
+	ToSchema string
+	ToTable  string
+	ToColumn string
+
+	// Ordinal is this column's position within the key, counting from one.
+	Ordinal int
+}
+
+// Relationship is a foreign key with its columns reassembled in order.
+type Relationship struct {
+	Name string
+
+	FromSchema string
+	FromTable  string
+
+	ToSchema string
+	ToTable  string
+
+	// From and To are the paired column lists, in key order and the same
+	// length.
+	From []string
+	To   []string
+}
+
+/*
+GroupForeignKeys reassembles column pairs into relationships.
+
+Grouped by constraint name *and* by the table it is on, because a name is
+unique per table in some sources and per schema in others -- MySQL allows two
+tables to carry constraints of the same name, and grouping on the name alone
+would silently merge two relationships into one wrong one.
+*/
+func GroupForeignKeys(keys []ForeignKey) []Relationship {
+	type group struct {
+		name   string
+		schema string
+		table  string
+	}
+
+	order := make([]group, 0, len(keys))
+	byGroup := map[group]*Relationship{}
+
+	for _, key := range keys {
+		id := group{name: key.Name, schema: key.FromSchema, table: key.FromTable}
+
+		rel, seen := byGroup[id]
+		if !seen {
+			rel = &Relationship{
+				Name:       key.Name,
+				FromSchema: key.FromSchema, FromTable: key.FromTable,
+				ToSchema: key.ToSchema, ToTable: key.ToTable,
+			}
+			byGroup[id] = rel
+
+			order = append(order, id)
+		}
+
+		rel.From = append(rel.From, key.FromColumn)
+		rel.To = append(rel.To, key.ToColumn)
+	}
+
+	out := make([]Relationship, 0, len(order))
+	for _, id := range order {
+		out = append(out, *byGroup[id])
+	}
+
+	return out
 }
 
 // Result is the outcome of a query.
@@ -351,6 +460,13 @@ func Errorf(reason Reason, cause error, hint, format string, args ...any) *Error
 		Err:     cause,
 	}
 }
+
+// ErrNoForeignKeys means a source cannot report its relationships at all.
+//
+// Distinct from an empty result, which means it has none. A caller that
+// conflates the two tells somebody their schema has no relationships when the
+// truth is that nobody has looked.
+var ErrNoForeignKeys = errors.New("connectors: this source does not report foreign keys")
 
 // --- registry ---------------------------------------------------------------
 

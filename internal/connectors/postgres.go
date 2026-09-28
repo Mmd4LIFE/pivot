@@ -320,3 +320,40 @@ func (postgresDialect) NormalizeType(sourceType string) datatype.Type {
 		return datatype.Type{}, false
 	})
 }
+
+/*
+ForeignKeyQuery lists relationships from pg_catalog rather than information_schema.
+
+The standard query -- joining table_constraints to key_column_usage and
+constraint_column_usage -- is wrong, and wrong in the worst way: it *crosses*
+the two column lists instead of pairing them. A two-column key comes back as
+four rows, each local column paired with each referenced one, and a
+relationship built from it joins on columns that were never related. It
+returns rows, so nothing looks broken.
+
+Measured on a real PostgreSQL before this was written. pg_catalog carries the
+two lists as parallel arrays, and `unnest(conkey, confkey) WITH ORDINALITY`
+walks them together -- which is the whole fix.
+*/
+func (postgresDialect) ForeignKeyQuery() string {
+	return `
+SELECT c.conname                AS constraint_name,
+       child_ns.nspname         AS from_schema,
+       child.relname            AS from_table,
+       child_col.attname        AS from_column,
+       parent_ns.nspname        AS to_schema,
+       parent.relname           AS to_table,
+       parent_col.attname       AS to_column,
+       pair.ord::int            AS ordinal
+FROM pg_constraint c
+JOIN pg_class child            ON child.oid = c.conrelid
+JOIN pg_namespace child_ns     ON child_ns.oid = child.relnamespace
+JOIN pg_class parent           ON parent.oid = c.confrelid
+JOIN pg_namespace parent_ns    ON parent_ns.oid = parent.relnamespace
+JOIN LATERAL unnest(c.conkey, c.confkey) WITH ORDINALITY AS pair(local, ref, ord) ON TRUE
+JOIN pg_attribute child_col    ON child_col.attrelid = c.conrelid AND child_col.attnum = pair.local
+JOIN pg_attribute parent_col   ON parent_col.attrelid = c.confrelid AND parent_col.attnum = pair.ref
+WHERE c.contype = 'f'
+  AND child_ns.nspname NOT IN ('pg_catalog', 'information_schema')
+ORDER BY child_ns.nspname, child.relname, c.conname, pair.ord`
+}

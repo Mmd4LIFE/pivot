@@ -332,3 +332,38 @@ type CatalogColumn struct {
 	UpdatedAt dbtypes.Time
 	Version   int64
 }
+
+/*
+CatalogForeignKey is one column of one declared relationship.
+
+A row per column with Ordinal giving the order, rather than a constraint
+carrying two lists: no relational store holds ordered pairs without an array
+type or a blob, and the ordering is the part that matters. Reading a source's
+two column lists by joining rather than by position crosses them, and a join
+built from that matches on columns never related to each other.
+*/
+type CatalogForeignKey struct {
+	ID           uuid.UUID
+	OrgID        uuid.UUID
+	ConnectionID uuid.UUID
+
+	ConstraintName string
+
+	FromSchema string
+	FromTable  string
+	FromColumn string
+
+	ToSchema string
+	ToTable  string
+	ToColumn string
+
+	Ordinal int64
+
+	FirstSeenAt dbtypes.Time
+	LastSeenAt  dbtypes.Time
+	RemovedAt   dbtypes.NullTime
+
+	CreatedAt dbtypes.Time
+	UpdatedAt dbtypes.Time
+	Version   int64
+}

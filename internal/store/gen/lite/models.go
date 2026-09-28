@@ -29,6 +29,26 @@ type CatalogColumn struct {
 	Version       int64
 }
 
+type CatalogForeignKey struct {
+	ID             uuid.UUID
+	OrgID          uuid.UUID
+	ConnectionID   uuid.UUID
+	ConstraintName string
+	FromSchema     string
+	FromTable      string
+	FromColumn     string
+	ToSchema       string
+	ToTable        string
+	ToColumn       string
+	Ordinal        int64
+	FirstSeenAt    dbtypes.Time
+	LastSeenAt     dbtypes.Time
+	RemovedAt      dbtypes.NullTime
+	CreatedAt      dbtypes.Time
+	UpdatedAt      dbtypes.Time
+	Version        int64
+}
+
 type CatalogTable struct {
 	ID           uuid.UUID
 	OrgID        uuid.UUID

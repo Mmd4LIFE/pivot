@@ -81,6 +81,28 @@ type Dialect interface {
 		[datatype.Normalize], which knows the spellings everybody shares.
 	*/
 	NormalizeType(sourceType string) datatype.Type
+
+	/*
+		ForeignKeyQuery returns SQL listing every declared relationship, one row
+		per column of each key, in this column order:
+
+			constraint name, from schema, from table, from column,
+			to schema, to table, to column, ordinal
+
+		Ordered by constraint and then ordinal, so a composite key's columns
+		arrive together and in key order.
+
+		The ordinal is not decoration. Every one of these sources exposes a
+		foreign key as two column lists, and the obvious join pairs every column
+		of one with every column of the other -- which for a two-column key
+		yields four rows instead of two, and a relationship that joins on the
+		wrong columns. Measured, not imagined: the standard information_schema
+		query does exactly that on PostgreSQL.
+
+		An empty string means the source cannot report relationships, and
+		[SQLConnector.ForeignKeys] answers [ErrNoForeignKeys].
+	*/
+	ForeignKeyQuery() string
 }
 
 /*
@@ -369,6 +391,59 @@ func (c *SQLConnector) Query(ctx context.Context, query string, args ...any) (*R
 	}
 
 	return result, nil
+}
+
+/*
+ForeignKeys lists the relationships the source declares.
+
+Read through the same borrowed connection as everything else, so a slow catalog
+on a large schema is cancellable and does not outlive its context.
+*/
+func (c *SQLConnector) ForeignKeys(ctx context.Context) ([]ForeignKey, error) {
+	query := c.dialect.ForeignKeyQuery()
+	if query == "" {
+		return nil, ErrNoForeignKeys
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, c.timeout())
+	defer cancel()
+
+	conn, release, err := c.borrow(ctx)
+	if err != nil {
+		return nil, c.classify(ctx, err)
+	}
+
+	defer release()
+
+	rows, err := conn.QueryContext(ctx, query)
+	if err != nil {
+		return nil, c.classify(ctx, err)
+	}
+
+	defer func() { _ = rows.Close() }()
+
+	var keys []ForeignKey
+
+	for rows.Next() {
+		var key ForeignKey
+
+		if serr := rows.Scan(
+			&key.Name,
+			&key.FromSchema, &key.FromTable, &key.FromColumn,
+			&key.ToSchema, &key.ToTable, &key.ToColumn,
+			&key.Ordinal,
+		); serr != nil {
+			return nil, c.classify(ctx, serr)
+		}
+
+		keys = append(keys, key)
+	}
+
+	if rerr := rows.Err(); rerr != nil {
+		return nil, c.classify(ctx, rerr)
+	}
+
+	return keys, nil
 }
 
 // Close releases the pools.

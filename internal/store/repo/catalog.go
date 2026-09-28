@@ -163,6 +163,98 @@ func (r *CatalogRepo) MarkGone(
 	return tables, columns, nil
 }
 
+// SeenForeignKey is one column of a relationship a sync found.
+type SeenForeignKey struct {
+	ConnectionID uuid.UUID
+	Constraint   string
+
+	FromSchema string
+	FromTable  string
+	FromColumn string
+
+	ToSchema string
+	ToTable  string
+	ToColumn string
+
+	Ordinal int64
+}
+
+// RecordForeignKey stores one column of a relationship, at the sync's
+// timestamp.
+func (r *CatalogRepo) RecordForeignKey(
+	ctx context.Context, in SeenForeignKey, at time.Time,
+) (model.CatalogForeignKey, error) {
+	s, err := r.scope(ctx)
+	if err != nil {
+		return model.CatalogForeignKey{}, err
+	}
+
+	stamp := dbtypes.NewTime(at)
+
+	key, err := r.q.UpsertCatalogForeignKey(ctx, model.UpsertCatalogForeignKeyParams{
+		ID:             newID(),
+		OrgID:          s.OrgID(),
+		ConnectionID:   in.ConnectionID,
+		ConstraintName: in.Constraint,
+		FromSchema:     in.FromSchema,
+		FromTable:      in.FromTable,
+		FromColumn:     in.FromColumn,
+		ToSchema:       in.ToSchema,
+		ToTable:        in.ToTable,
+		ToColumn:       in.ToColumn,
+		Ordinal:        in.Ordinal,
+		FirstSeenAt:    stamp,
+		LastSeenAt:     stamp,
+	})
+	if err != nil {
+		return model.CatalogForeignKey{}, translate(err)
+	}
+
+	return key, nil
+}
+
+// MarkForeignKeysGone flags relationships this sync did not see.
+//
+// Separate from [CatalogRepo.MarkGone] because a source can report its tables
+// and refuse its constraints -- [connectors.ErrNoForeignKeys] -- and sweeping
+// relationships in that case would mark every one of them dropped on the
+// strength of not having asked.
+func (r *CatalogRepo) MarkForeignKeysGone(
+	ctx context.Context, connectionID uuid.UUID, syncedAt time.Time,
+) (int64, error) {
+	s, err := r.scope(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	gone, err := r.q.SweepCatalogForeignKeys(ctx, model.SweepCatalogForeignKeysParams{
+		RemovedAt:    dbtypes.NewNullTime(syncedAt),
+		UpdatedAt:    dbtypes.NewTime(syncedAt),
+		ConnectionID: connectionID,
+		OrgID:        s.OrgID(),
+		LastSeenAt:   dbtypes.NewTime(syncedAt),
+	})
+
+	return gone, translate(err)
+}
+
+// ForeignKeys returns every relationship cataloged for a connection, in key
+// order.
+func (r *CatalogRepo) ForeignKeys(
+	ctx context.Context, connectionID uuid.UUID,
+) ([]model.CatalogForeignKey, error) {
+	s, err := r.scope(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	keys, err := r.q.ListCatalogForeignKeys(ctx, model.ListCatalogForeignKeysParams{
+		ConnectionID: connectionID, OrgID: s.OrgID(),
+	})
+
+	return keys, translate(err)
+}
+
 // Tables returns every table cataloged for a connection, including the ones
 // marked gone -- a caller wanting only the living ones filters on RemovedAt,
 // and a caller asking "what happened to it" needs the rest.
