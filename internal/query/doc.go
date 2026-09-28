@@ -18,5 +18,17 @@
 // Parquet acceleration, and the shared-subquery consolidation that turns a
 // twenty-card dashboard into one warehouse query. See ADR-0004.
 //
-// Built across Parts 22-23; extended in Phase 3.
+// [Executor] is the single door. Every execution goes through the same five
+// stages -- parse, authorize, plan, execute, stream -- and authorization
+// happens in stage two, before a connector is opened. ADR-0009 makes the
+// semantic compiler the only place row-level security is injected, which is a
+// guarantee only as good as the promise that nothing else can reach a source;
+// the tests in single_door_test.go are what make that promise checkable.
+//
+// Every execution is written to the query log in two phases: a row when it
+// starts and the outcome when it ends. A query that is still running is
+// therefore visible, and a process that dies mid-query leaves the last thing
+// Pivot knew rather than nothing at all.
+//
+// Built across Parts 20-23; extended in Phase 3.
 package query

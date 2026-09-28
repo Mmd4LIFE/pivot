@@ -116,6 +116,14 @@ type Querier interface {
 	UpsertCatalogForeignKey(context.Context, model.UpsertCatalogForeignKeyParams) (model.CatalogForeignKey, error)
 	SweepCatalogForeignKeys(context.Context, model.SweepCatalogForeignKeysParams) (int64, error)
 	ListCatalogForeignKeys(context.Context, model.ListCatalogForeignKeysParams) ([]model.CatalogForeignKey, error)
+
+	// The query log: what was run, by whom, and what happened. Two phases,
+	// so a row exists while the query is still running.
+	StartQueryLog(context.Context, model.StartQueryLogParams) (model.QueryLogEntry, error)
+	FinishQueryLog(context.Context, model.FinishQueryLogParams) (int64, error)
+	ListQueryLog(context.Context, model.ListQueryLogParams) ([]model.QueryLogEntry, error)
+	ListRunningQueries(context.Context, uuid.UUID) ([]model.QueryLogEntry, error)
+	GetQueryLogEntry(context.Context, model.GetQueryLogEntryParams) (model.QueryLogEntry, error)
 	CountConnections(context.Context, uuid.UUID) (int64, error)
 
 	// Identity providers and the federated identities they issue.

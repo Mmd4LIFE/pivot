@@ -614,3 +614,38 @@ func (t *tracingQuerier) ListCatalogForeignKeys(ctx context.Context, a1 model.Li
 
 	return t.next.ListCatalogForeignKeys(ctx, a1)
 }
+
+func (t *tracingQuerier) StartQueryLog(ctx context.Context, a1 model.StartQueryLogParams) (model.QueryLogEntry, error) {
+	ctx, span := observability.Start(ctx, "db.StartQueryLog")
+	defer span.End()
+
+	return t.next.StartQueryLog(ctx, a1)
+}
+
+func (t *tracingQuerier) FinishQueryLog(ctx context.Context, a1 model.FinishQueryLogParams) (int64, error) {
+	ctx, span := observability.Start(ctx, "db.FinishQueryLog")
+	defer span.End()
+
+	return t.next.FinishQueryLog(ctx, a1)
+}
+
+func (t *tracingQuerier) ListQueryLog(ctx context.Context, a1 model.ListQueryLogParams) ([]model.QueryLogEntry, error) {
+	ctx, span := observability.Start(ctx, "db.ListQueryLog")
+	defer span.End()
+
+	return t.next.ListQueryLog(ctx, a1)
+}
+
+func (t *tracingQuerier) ListRunningQueries(ctx context.Context, a1 uuid.UUID) ([]model.QueryLogEntry, error) {
+	ctx, span := observability.Start(ctx, "db.ListRunningQueries")
+	defer span.End()
+
+	return t.next.ListRunningQueries(ctx, a1)
+}
+
+func (t *tracingQuerier) GetQueryLogEntry(ctx context.Context, a1 model.GetQueryLogEntryParams) (model.QueryLogEntry, error) {
+	ctx, span := observability.Start(ctx, "db.GetQueryLogEntry")
+	defer span.End()
+
+	return t.next.GetQueryLogEntry(ctx, a1)
+}

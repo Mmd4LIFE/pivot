@@ -32,6 +32,7 @@ sql:
         rename:
           avatar_url: AvatarURL
           ip: IP
+          sql_text: SQLText
         overrides:
           - db_type: uuid
             go_type: github.com/google/uuid.UUID
@@ -63,6 +64,7 @@ sql:
         rename:
           avatar_url: AvatarURL
           ip: IP
+          sql_text: SQLText
         # One entry per column, because every one of these is TEXT or INTEGER
         # and there is no db_type to key on. A TEXT override would turn every
         # string column in the schema into a UUID.
@@ -233,6 +235,21 @@ sql:
           - column: identity_providers.deleted_at
             go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.NullTime
 
+          # -- query_log ---------------------------------------------------------
+          - column: query_log.id
+            go_type: github.com/google/uuid.UUID
+          - column: query_log.org_id
+            go_type: github.com/google/uuid.UUID
+          - column: query_log.connection_id
+            go_type: github.com/google/uuid.UUID
+          - column: query_log.user_id
+            go_type: github.com/google/uuid.NullUUID
+          - column: query_log.started_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
+          - column: query_log.finished_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.NullTime
+          - column: query_log.truncated
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Bool
           # -- catalog_foreign_keys ---------------------------------------------
           - column: catalog_foreign_keys.id
             go_type: github.com/google/uuid.UUID
