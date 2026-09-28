@@ -367,3 +367,40 @@ type CatalogForeignKey struct {
 	UpdatedAt dbtypes.Time
 	Version   int64
 }
+
+/*
+QueryLogEntry is one execution: what was run, by whom, and what happened.
+
+Written when the query starts and completed when it finishes, so a row exists
+while it is still running. That is what makes "what is running right now"
+answerable, and it means a process that dies mid-query leaves the last thing
+Pivot knew rather than nothing.
+
+UserID is absent for work with no person behind it -- a scheduled refresh runs
+as Pivot. Recording a fabricated user would make the log's audit value worse
+than leaving the truth missing.
+*/
+type QueryLogEntry struct {
+	ID           uuid.UUID
+	OrgID        uuid.UUID
+	ConnectionID uuid.UUID
+	UserID       uuid.NullUUID
+
+	SQLText string
+	State   string
+
+	StartedAt  dbtypes.Time
+	FinishedAt dbtypes.NullTime
+	DurationMs int64
+
+	RowsReturned int64
+
+	// BytesEstimated is the result's size in Pivot's memory, not on the wire:
+	// the driver has decoded the rows before anything here can count them.
+	BytesEstimated int64
+
+	Truncated   dbtypes.Bool
+	CacheStatus string
+
+	ErrorMessage string
+}

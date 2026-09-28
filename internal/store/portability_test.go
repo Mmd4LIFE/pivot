@@ -26,6 +26,7 @@ var expectedTables = []string{
 	"identity_providers",
 	"login_attempts",
 	"organizations",
+	"query_log",
 	"role_assignments",
 	"sessions",
 	"user_attributes",
@@ -84,6 +85,11 @@ var expectedColumns = map[string][]string{
 		"from_column", "from_schema", "from_table", "id", "last_seen_at",
 		"ordinal", "org_id", "removed_at", "to_column", "to_schema",
 		"to_table", "updated_at", "version",
+	},
+	"query_log": {
+		"bytes_estimated", "cache_status", "connection_id", "duration_ms",
+		"error_message", "finished_at", "id", "org_id", "rows_returned",
+		"sql_text", "started_at", "state", "truncated", "user_id",
 	},
 	"catalog_tables": {
 		"comment", "connection_id", "created_at", "first_seen_at", "id",

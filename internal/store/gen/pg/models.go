@@ -174,6 +174,23 @@ type Organization struct {
 	Version   int64
 }
 
+type QueryLog struct {
+	ID             uuid.UUID
+	OrgID          uuid.UUID
+	ConnectionID   uuid.UUID
+	UserID         uuid.NullUUID
+	SQLText        string
+	State          string
+	StartedAt      dbtypes.Time
+	FinishedAt     dbtypes.NullTime
+	DurationMs     int64
+	RowsReturned   int64
+	BytesEstimated int64
+	Truncated      dbtypes.Bool
+	CacheStatus    string
+	ErrorMessage   string
+}
+
 type RoleAssignment struct {
 	ID              uuid.UUID
 	OrgID           uuid.UUID

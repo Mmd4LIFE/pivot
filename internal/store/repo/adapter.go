@@ -1255,3 +1255,91 @@ func (a *liteQuerier) ListCatalogForeignKeys(ctx context.Context, p model.ListCa
 
 	return out, nil
 }
+
+func (a *pgQuerier) StartQueryLog(ctx context.Context, p model.StartQueryLogParams) (model.QueryLogEntry, error) {
+	row, err := a.q.StartQueryLog(ctx, pg.StartQueryLogParams(p))
+
+	return model.QueryLogEntry(row), err
+}
+
+func (a *pgQuerier) FinishQueryLog(ctx context.Context, p model.FinishQueryLogParams) (int64, error) {
+	return a.q.FinishQueryLog(ctx, pg.FinishQueryLogParams(p))
+}
+
+func (a *pgQuerier) ListQueryLog(ctx context.Context, p model.ListQueryLogParams) ([]model.QueryLogEntry, error) {
+	rows, err := a.q.ListQueryLog(ctx, pg.ListQueryLogParams(p))
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.QueryLogEntry, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, model.QueryLogEntry(row))
+	}
+
+	return out, nil
+}
+
+func (a *pgQuerier) ListRunningQueries(ctx context.Context, orgID uuid.UUID) ([]model.QueryLogEntry, error) {
+	rows, err := a.q.ListRunningQueries(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.QueryLogEntry, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, model.QueryLogEntry(row))
+	}
+
+	return out, nil
+}
+
+func (a *pgQuerier) GetQueryLogEntry(ctx context.Context, p model.GetQueryLogEntryParams) (model.QueryLogEntry, error) {
+	row, err := a.q.GetQueryLogEntry(ctx, pg.GetQueryLogEntryParams(p))
+
+	return model.QueryLogEntry(row), err
+}
+
+func (a *liteQuerier) StartQueryLog(ctx context.Context, p model.StartQueryLogParams) (model.QueryLogEntry, error) {
+	row, err := a.q.StartQueryLog(ctx, lite.StartQueryLogParams(p))
+
+	return model.QueryLogEntry(row), err
+}
+
+func (a *liteQuerier) FinishQueryLog(ctx context.Context, p model.FinishQueryLogParams) (int64, error) {
+	return a.q.FinishQueryLog(ctx, lite.FinishQueryLogParams(p))
+}
+
+func (a *liteQuerier) ListQueryLog(ctx context.Context, p model.ListQueryLogParams) ([]model.QueryLogEntry, error) {
+	rows, err := a.q.ListQueryLog(ctx, lite.ListQueryLogParams(p))
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.QueryLogEntry, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, model.QueryLogEntry(row))
+	}
+
+	return out, nil
+}
+
+func (a *liteQuerier) ListRunningQueries(ctx context.Context, orgID uuid.UUID) ([]model.QueryLogEntry, error) {
+	rows, err := a.q.ListRunningQueries(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.QueryLogEntry, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, model.QueryLogEntry(row))
+	}
+
+	return out, nil
+}
+
+func (a *liteQuerier) GetQueryLogEntry(ctx context.Context, p model.GetQueryLogEntryParams) (model.QueryLogEntry, error) {
+	row, err := a.q.GetQueryLogEntry(ctx, lite.GetQueryLogEntryParams(p))
+
+	return model.QueryLogEntry(row), err
+}

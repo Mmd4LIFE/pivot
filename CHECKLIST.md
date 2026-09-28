@@ -60,8 +60,8 @@ At the end of every part, in this order:
 
 | | |
 |---|---|
-| **Last completed** | Part 20-a — Results that stream |
-| **Next up** | **Part 20-b — The pipeline, and the query log** |
+| **Last completed** | Part 20-b — The pipeline, and the query log |
+| **Next up** | **Part 21 — The result cache** |
 | **Current phase** | Phase 1 — Connect & Query → v0.1 |
 | **Branch** | `main` |
 | **Blockers** | None |
@@ -85,8 +85,9 @@ stored secrets encrypted at rest with a rotation procedure that has been walked.
 **Pivot can now connect to an external PostgreSQL**, store its credentials encrypted,
 test it with errors somebody can act on, and read its schema. That is `internal/connectors`
 and the `connections` table; `pivot admin add-connection` is the way in until Part 26
-builds the screens. `internal/query` and `internal/semantic` are still `doc.go` stubs, so
-there is no way to *run* a question and nothing to show the answer in.
+builds the screens. `internal/semantic` is still a `doc.go` stub and nothing in the product
+shows an answer yet — Part 23 builds the editor — but a question can now be *run*, through
+one door and on the record.
 
 **There is now a bar every connector has to clear.**
 `internal/connectors/conformance` is sixteen named properties — NULL against empty, unicode
@@ -150,6 +151,17 @@ ADR-0004 says the one row-oriented conversion belongs. Measured rather than asse
 same memory. `Query` is now a loop over `Stream`, so the materializing and streaming paths
 cannot drift about what a truncated result is.
 
+**And there is exactly one way in.** [`query.Executor`](internal/query/executor.go) runs
+parse → authorize → plan → execute → stream, and authorization is stage two: a denied caller
+never causes a connector to be opened, which is checked by counting opens rather than by
+reading the code. Two structural tests parse the repository and fail if anything under
+`internal/api` names the connector package, or if any package outside a short declared list
+does. Every execution is written to `query_log` in two phases — a row when it starts, the
+outcome when it ends — so a running query is visible, a process that dies mid-query leaves
+evidence, and a cancellation is recorded even though the context that would have carried the
+write is the thing that was canceled. Cancellation is verified from the source's own
+`pg_stat_activity` while the pipeline is still hanging, not after the query ended on its own.
+
 **DuckDB exists and is not in the shipped binary.**
 [ADR-0010](docs/architecture/adr/0010-duckdb-is-an-opt-in-build.md) measured what ADR-0004's
 CGo clause actually costs — the binary goes 42.5 MB → 101.8 MB, stops being statically
@@ -159,6 +171,15 @@ tagged variant; asking a default build for a DuckDB connection explains that it 
 out and what to do instead.
 
 **Carried in from Phase 0**, and owned by parts in this phase or named in them:
+- **`query_log` is a subset of what `docs/architecture/data-model.md` specifies**, and
+  deliberately. Part 20-b built the columns its Done-when names. Missing: `semantic_query`
+  and `source_type`/`source_id`, which have nothing to put in them until Phase 3 compiles a
+  query; `bytes_scanned` and `estimated_cost`, which need the source to report them and no
+  connector does yet; and `trace_id`, which is one column and one line but is only read by
+  Part 22's monitor, so it belongs with the thing that reads it. The table is also **not
+  partitioned**, where the data model calls for monthly range partitions and a retention
+  policy — partitioning an existing table means a rewrite, so this gets more expensive the
+  longer it waits. Phase 9 owns retention; the note is here so it is a decision.
 - **The container stack pins a superseded release.** `v0.0.2-alpha` was cut on
   2026-09-26 and is the first tag containing the setup wizard, but
   `deploy/docker-compose.yml` and `deploy/.env.example` still default to `0.0.1-alpha`.
@@ -200,7 +221,7 @@ few points high; leave margin above 80%.
 
 ```
 Phase 0  Foundations        [██████████████████████████] 31/31   COMPLETE
-Phase 1  Connect & Query    [███████████████████       ] 10/18
+Phase 1  Connect & Query    [█████████████████████     ] 11/18
 Phase 2+ ...                                            (expanded as we approach)
 ```
 
@@ -578,7 +599,7 @@ that.
 
 ---
 
-### - [ ] Part 20-b — The pipeline, and the query log
+### - [x] Part 20-b — The pipeline, and the query log ✅ 2026-09-28
 
 **Deliverable:** a query goes in through one door, and what happened to it is on record.
 
@@ -614,6 +635,10 @@ whether it is working.
 - A cached result is returned without touching the source, and the query log says so
 - p95 for a cached query is under 200 ms, measured
 
+**Already in place from 20-b:** the query log carries a `cache_status` column, defaulting to
+`uncached`, and [query.Executor] is the only path to a source — so the cache goes in the
+pipeline between authorize and execute, and nothing can route around it.
+
 **Notes:** **`P1-QE-009` is the one to be careful about.** Getting the key wrong means user
 A sees user B's rows — a data breach delivered by a performance optimization. The key is
 derived from the compiled query *plus* the resolved policy set, so identical policies share
@@ -638,6 +663,16 @@ timeouts, and the query monitor: running queries, kill, per-user usage.
 - One user cannot exhaust a connection's capacity for everybody else
 - An administrator can see a running query and kill it, and the kill reaches the source
 - The limits are visible in the product rather than only in a config file
+- **A kill issued on one instance reaches a query running on another.** 20-b's cancellation
+  travels down a `context.Context`, which exists only in the process that started the query;
+  two Pivots behind a load balancer means the administrator is usually not on that one
+
+**Notes:** "See what is running" is already answered — 20-b writes a log row when a query
+starts, not when it ends, so `ListRunningQueries` is a query against the log rather than
+in-memory state that a restart loses. What is missing is the killing half across processes:
+the connectors have `Canceler` (Part 18-a) and the pipeline has the context, and neither
+crosses a process boundary. A row in state `running` whose process is gone is also how this
+part learns to distinguish "still running" from "abandoned", which nothing does yet.
 
 **Refs:** `P1-QE-006`, `P1-QE-010`, `P1-ADM-003`
 
@@ -777,6 +812,7 @@ Phase 0's log is in
 
 | Date | Part | Shipped | Notes |
 |---|---|---|---|
+| 2026-09-28 | 20-b | `query.Executor` — parse → authorize → plan → execute → stream — migration 00010 and the `query_log` table on both engines, `QueryLogRepo`, and two structural tests that make the single door a property | **The single door is the deliverable, and a test that reads the code would not have been one.** So the denial check counts *opens*: a denied caller causes zero connectors to be opened and leaves zero log entries, which is the claim ADR-0009 actually needs — a connector opened before the answer is a connection taken from somebody's warehouse and, on a warehouse that bills by the second, money. **Transitive dependency checks are worthless here** and it is worth saying why: once the HTTP layer has a query endpoint it will depend on `internal/query`, which depends on `internal/connectors`, so every import-graph check passes by construction. What is provable is textual — no file under `internal/api` names the connector package, and the set of packages that do is a declared list of three, each with its reason. Verified in both directions by planting an import in `internal/api`: both tests fail and name the package. **The permission is `native_query`, not `query`** — it has been in the model since Phase 0, documented as separate because row-level security is injected by the semantic compiler and raw SQL never passes through it. A system scope is let through, because the graph has no subject to ask about and the decision was made when the job was scheduled; the log records the absent user rather than inventing one. **The log is written in two phases**, a row when the query starts and the outcome when it ends. A single insert at the end is simpler and loses both things the log is for: a running query is invisible until it finishes, and a query that kills the process is never recorded at all. An abandoned row in state `running` is itself the evidence — which is also how Part 22 gets "what is running now" as a query against the log rather than in-memory state a restart loses. **The completing write is detached from the query's context** (`context.WithoutCancel`), because the most interesting outcome to record is a cancellation and that means the context which would have carried the write is already dead. Checked: a canceled query's row reads `canceled`, with a finish time. **The cancellation test's ordering *is* the test, and the first version of it was wrong.** It checked `pg_stat_activity` after waiting for the goroutine — and with a defect planted (the statement detached from the cancellable context) it still passed that check, because `pg_sleep(30)` ends on its own and by then the source is idle; it failed thirty seconds later on the log state instead. Moved the check before the wait, it fails in ten seconds saying "PostgreSQL is still running the query after the pipeline canceled it", which is the sentence somebody needs. **A query that cannot be logged does not run.** If the starting write fails the request is refused, because a query Pivot cannot account for is the one an operator most needs accounted for. A *finishing* write that fails is logged and swallowed — the query already succeeded or failed on its own terms, and replacing a real answer with a bookkeeping one would be worse. **sqlc diverged on `LIMIT`**: `int32` for PostgreSQL, `int64` for SQLite, so the two params structs would not have converted. Fixed with the `::bigint` cast the other list queries already carry, and the generated models were compared field by field before anything consumed them. **`SqlText` against `SQLText`** was the other portability tax: staticcheck wants the initialism, and the whole-struct conversions in `repo/adapter.go` need the name sqlc emits. `sqlc.yaml` already had a `rename:` block for exactly this (`avatar_url`, `ip`), so the fix was one line per engine rather than a `nolint`. **Bytes is an estimate and the column says so** — `bytes_estimated` is what a row costs in Pivot's memory after the driver decoded it, which is not what crossed the wire; an exact figure would cost a second pass over data the streaming path exists to avoid holding. `cache_status` is written as `uncached` now so Part 21 sets a column rather than adding one. **Part 22 gained a Done-when this part uncovered:** cancellation here rides a `context.Context`, which exists only in the process that started the query, so an administrator on the other instance behind a load balancer cannot reach it. Binary +0.05 MB. |
 | 2026-09-29 | 20-a | `Connector.Stream` on the interface and all four connectors, `internal/query` turning rows into Arrow record batches, two streaming conformance properties, and the memory measurement | **Split from Part 20**: a streaming format, a pipeline, authorization and a query log is four things, and the notes calling it \"the hardest infrastructure problem in the phase\" *and* saying everything after depends on the shape is an argument for doing the shape alone. **The measurement is the deliverable.** The Done-when insisted peak allocation be measured rather than asserted, because a test that reads ten million rows and checks it did not crash passes against a materializing implementation on a big enough machine. Result: **20,000 rows peak at 3.1 MB; 200,000 rows peak at 3.1 MB.** Ten times the rows, the same memory. **`Query` is now a loop over `Stream`** rather than a second implementation — the two would otherwise drift on exactly the things that are easy to get subtly different (what truncation means, whether a byte slice was copied) and the drift shows up as one path being right. **Two conformance properties**, so every connector is checked rather than one: a stream matches the materialized read column for column and row for row, and an **abandoned** stream releases the source. The second is the common case, not the exceptional one — it is what a closed browser tab looks like from here, and a connector that only releases on a full read holds a connection for every question nobody waited for. A twentieth defect proves the first can fail. **The conversion found a real bug in Part 19-a's type mapping.** SQLite's `INTEGER` is a variable-width storage class holding up to eight bytes and its `REAL` is always an eight-byte double, but the shared table's widths are PostgreSQL's — four and four. A SQLite id above two billion was mapping to an Arrow int32. It surfaced *loudly* only because the conversion **refuses** a value that will not fit rather than truncating it; a mapping that quietly truncated would have produced an id wrong by four billion with nothing to notice. Regression test included. **Every column is nullable in the Arrow schema** whatever the source claimed: an outer join, a view, or a driver that declines to say all produce a NULL in a column declared NOT NULL, and Arrow is within its rights to panic on that — inside a streaming export being the worst place to find out. **Decimal is rendered as text on purpose.** Arrow's decimal types need a precision and scale the catalog does not carry yet, and a decimal guessed into a float with the wrong scale loses exactly the digits `datatype.Decimal` exists to protect. **The cost estimate was wrong in the cheap direction**: the probe said +6.1 MB, what shipped is **+0.01 MB**, because the probe imported `arrow/ipc` (flatbuffers and four compression codecs) and the conversion needs none of it. Still statically linked, still cross-compiling to six targets. Lint caught four things worth having: `arrow.Record` is deprecated in favour of `RecordBatch`, `scanRow` was dead once `Query` became a loop, and two bounds checks gosec could not see from the call site. |
 | 2026-09-29 | 19-d | `internal/jobs` (River on both engines), the catalog sweep and sync as scheduled work, `pivot admin jobs`, and [ADR-0011](docs/architecture/adr/0011-background-jobs-on-both-engines.md) | **The decision was the deliverable, and measuring changed the answer.** Two accepted ADRs contradicted each other: ADR-0007 justified River because \"it uses the Postgres we already require\", and ADR-0003 says Postgres is *not* required — SQLite is the zero-config default. Taken at face value a SQLite instance gets no catalog syncs, no alerts and no flows, which is not a degraded install but a different product sharing a name. **I expected to write a small portable runner.** The measurement said otherwise: River publishes a `riversqlite` driver that takes a plain `*sql.DB` — no CGo, no new driver, works with the `modernc.org/sqlite` already in the binary — and a spike ran an inserted job *and* a periodic one to completion on both engines before any code was written. It costs **+0.18 MB** (42.76 → 42.94), against DuckDB's +59 MB in ADR-0010. So ADR-0007 stands and ADR-0011 supplies the answer it was missing. **Leader election is the whole of \"two Pivots do not both sync\"**, and it is proven by running two runners against one database and asserting the work happens exactly once — on both engines. **The runner opens its own pool.** On SQLite the store's pool is one connection by design, so a job runner polling on it would sit between every request and the database; `riversqlite`'s own docs independently ask for `SetMaxOpenConns(1)`. Safe only because the store already opens SQLite with WAL and a five-second busy timeout — stated in the ADR because it would not be safe without them. **Two bugs the tests caught, both mine.** `serve` started the runner but nothing created River's tables under auto-migrate; and the failure made `serve` **refuse to start** — regressing exactly the behaviour the test `TestServeWarnsAboutPendingMigrationsRatherThanRefusing` guards, and for the second time in this project (the first-run banner did it in Phase 0). A background feature that cannot initialize now warns loudly and serves anyway. **And one finding that was not a finding**: a rolling-upgrade test failed on Postgres and passed on SQLite, which looked like an engine difference and was test pollution — the Postgres tests share one database and a discarded job from an earlier test was still sitting there. The queue is cleared per test now. Worth recording because I nearly wrote it up as a River behaviour. Two smaller measurements went into the code: River **refuses to insert** a kind the client has no worker for, so a typo fails at the call site; and a process that *fetches* a kind it lacks fails that attempt and leaves the job retryable rather than discarding it — so a rolling upgrade loses nothing. **CI then failed the coverage gate**, which is the Environment note about CI counting fewer statements biting for real: `internal/jobs` read 83.9% locally and under 80% there. The fix was not a nudge — `pivot admin jobs`, the command whose entire purpose is making a silent failure visible, **had no test at all**, which is worse than not having the command: somebody would look, see nothing, and conclude everything was fine. It is now tested against a job that really failed, caused by a worker returning an error rather than a row inserted saying \"discarded\". `jobs` went to 91.9% by covering two error paths that are genuinely reachable — an impossible worker count, and migrating a read-only database — and the other eight remain uncovered because contriving them would be worse than the number. |
 | 2026-09-29 | 19-c | Foreign key discovery on all four connectors, migration 00009 and `catalog_foreign_keys` on both engines, relationship reconciliation in the sync | **Split one last time**, and this one was a reclassification rather than a trim: the job runner is not a catalog feature. It is infrastructure Part 22, Phase 6 and Phase 8 all need, and it carries a decision ADR-0007 left open — River requires PostgreSQL and ADR-0003 supports SQLite, and those cannot both be true without a written answer. Shipping that as a footnote to \"the catalog knows how tables relate\" would have buried the decision in the wrong part. It is 19-d. **The probe came first again, and found the bug this part exists to avoid.** Every source exposes a foreign key as two column lists, and the standard `information_schema` query — the one in every blog post on the subject — **crosses them instead of pairing them**. Measured on a real PostgreSQL with a two-column key: four rows back instead of two, `tenant_id` paired with `code` and `code` with `tenant_id`. A relationship built from that joins on columns that were never related, and it **returns rows**, so nothing looks broken. PostgreSQL now reads from `pg_catalog` with `unnest(conkey, confkey) WITH ORDINALITY`, which walks the two arrays together; DuckDB indexes its parallel lists by position for the same reason; MySQL and SQLite pair them already. **The fixture is composite on purpose** — a single-column test would have passed against the broken query. **`ErrNoForeignKeys` is not an empty result.** \"This warehouse declares no relationships\" and \"this connector cannot tell you\" lead somebody to do completely different things, and conflating them would have had the sync **sweep every stored relationship the first time a source went quiet** — a schema's structure deleted because a connector lacks a feature. Tested by wrapping a working connector in one that refuses. **Identity includes the table, not just the constraint name**, because MySQL allows two tables to carry the same name and keying on the name alone merges two relationships into one wrong row — checked in the grouping and again in the schema's unique constraint. **A change is reported per relationship, not per column**: two lines saying a column of a composite key appeared is noise that buries the one line worth reading. **Targets are stored as names rather than references into `catalog_tables`**, so a relationship pointing at a table this connection cannot see is kept rather than dropped for tidiness — a schema granted piecemeal is the ordinary reason. Whether the target is cataloged is a join away and never stale; a stored flag would go wrong the moment the catalog changed. SQLite does not keep constraint *names* at all, so its are synthesized from the table and the pragma's key index — stable while the table is, and a rewrite that reorders the keys is a schema change worth reporting anyway. |

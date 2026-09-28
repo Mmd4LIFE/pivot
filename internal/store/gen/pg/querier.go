@@ -62,6 +62,7 @@ type Querier interface {
 	// Replacing an IdP's attributes must not disturb manually assigned ones, so
 	// deletion is scoped by source.
 	DeleteUserAttributesBySource(ctx context.Context, arg DeleteUserAttributesBySourceParams) (int64, error)
+	FinishQueryLog(ctx context.Context, arg FinishQueryLogParams) (int64, error)
 	GetCatalogTable(ctx context.Context, arg GetCatalogTableParams) (CatalogTable, error)
 	GetConnection(ctx context.Context, arg GetConnectionParams) (Connection, error)
 	GetConnectionBySlug(ctx context.Context, arg GetConnectionBySlugParams) (Connection, error)
@@ -81,6 +82,7 @@ type Querier interface {
 	GetLoginAttempt(ctx context.Context, arg GetLoginAttemptParams) (LoginAttempt, error)
 	GetOrganization(ctx context.Context, id uuid.UUID) (Organization, error)
 	GetOrganizationBySlug(ctx context.Context, slug string) (Organization, error)
+	GetQueryLogEntry(ctx context.Context, arg GetQueryLogEntryParams) (QueryLog, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash string) (Session, error)
 	GetUser(ctx context.Context, arg GetUserParams) (User, error)
 	GetUserAttribute(ctx context.Context, arg GetUserAttributeParams) (UserAttribute, error)
@@ -123,6 +125,8 @@ type Querier interface {
 	// is identical on both engines.
 	ListObjectGrants(ctx context.Context, arg ListObjectGrantsParams) ([]RoleAssignment, error)
 	ListOrganizations(ctx context.Context, arg ListOrganizationsParams) ([]Organization, error)
+	ListQueryLog(ctx context.Context, arg ListQueryLogParams) ([]QueryLog, error)
+	ListRunningQueries(ctx context.Context, orgID uuid.UUID) ([]QueryLog, error)
 	ListSubjectGrants(ctx context.Context, arg ListSubjectGrantsParams) ([]RoleAssignment, error)
 	ListUserAttributes(ctx context.Context, arg ListUserAttributesParams) ([]UserAttribute, error)
 	ListUserGroups(ctx context.Context, arg ListUserGroupsParams) ([]Group, error)
@@ -162,6 +166,13 @@ type Querier interface {
 	SoftDeleteIdentityProvider(ctx context.Context, arg SoftDeleteIdentityProviderParams) (int64, error)
 	SoftDeleteOrganization(ctx context.Context, arg SoftDeleteOrganizationParams) (int64, error)
 	SoftDeleteUser(ctx context.Context, arg SoftDeleteUserParams) (int64, error)
+	// The query log.
+	//
+	// Placeholders are positional in both dialects and must appear in the same
+	// order, and none is used twice - SQLite's `?` is positional and a repeat is a
+	// second parameter. Query files are ASCII: sqlc's SQLite generator miscounts
+	// byte offsets on multibyte characters and corrupts generation.
+	StartQueryLog(ctx context.Context, arg StartQueryLogParams) (QueryLog, error)
 	SweepCatalogColumns(ctx context.Context, arg SweepCatalogColumnsParams) (int64, error)
 	SweepCatalogForeignKeys(ctx context.Context, arg SweepCatalogForeignKeysParams) (int64, error)
 	SweepCatalogTables(ctx context.Context, arg SweepCatalogTablesParams) (int64, error)

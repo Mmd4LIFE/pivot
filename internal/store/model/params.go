@@ -635,3 +635,36 @@ type ListCatalogForeignKeysParams struct {
 	ConnectionID uuid.UUID
 	OrgID        uuid.UUID
 }
+
+// --- the query log -----------------------------------------------------------
+
+type StartQueryLogParams struct {
+	ID           uuid.UUID
+	OrgID        uuid.UUID
+	ConnectionID uuid.UUID
+	UserID       uuid.NullUUID
+	SQLText      string
+	StartedAt    dbtypes.Time
+}
+
+type FinishQueryLogParams struct {
+	State          string
+	FinishedAt     dbtypes.NullTime
+	DurationMs     int64
+	RowsReturned   int64
+	BytesEstimated int64
+	Truncated      dbtypes.Bool
+	ErrorMessage   string
+	ID             uuid.UUID
+	OrgID          uuid.UUID
+}
+
+type ListQueryLogParams struct {
+	OrgID uuid.UUID
+	Limit int64
+}
+
+type GetQueryLogEntryParams struct {
+	ID    uuid.UUID
+	OrgID uuid.UUID
+}

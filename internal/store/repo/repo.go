@@ -47,6 +47,7 @@ type Repositories struct {
 	IdentityProviders *IdentityProviderRepo
 	Connections       *ConnectionRepo
 	Catalog           *CatalogRepo
+	QueryLog          *QueryLogRepo
 
 	q      Querier
 	events *EventBus
@@ -98,6 +99,7 @@ func NewWithQuerier(q Querier) *Repositories {
 		IdentityProviders: &IdentityProviderRepo{base: b},
 		Connections:       &ConnectionRepo{base: b},
 		Catalog:           &CatalogRepo{base: b},
+		QueryLog:          &QueryLogRepo{base: b},
 	}
 }
 
