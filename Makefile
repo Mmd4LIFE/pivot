@@ -107,26 +107,32 @@ clean: ## Remove build artifacts and caches
 	@echo "cleaned"
 
 # ── Development services ─────────────────────────────────────────────────────
-COMPOSE_DEV := deploy/docker-compose.dev.yml
-DEV_PG_URL  := postgres://pivot:pivot@localhost:5433/pivot?sslmode=disable
+COMPOSE_DEV   := deploy/docker-compose.dev.yml
+DEV_PG_URL    := postgres://pivot:pivot@localhost:5433/pivot?sslmode=disable
+
+# MySQL is never Pivot's own store -- ADR-0003 picked two engines and stopped.
+# It is here only as something internal/connectors connects *to*.
+DEV_MYSQL_URL := mysql://pivot:pivot@localhost:3307/pivot
 
 .PHONY: dev-db
-dev-db: ## Start the development Postgres container
+dev-db: ## Start the development database containers
 	docker compose -f $(COMPOSE_DEV) up -d --wait
 	@echo "postgres ready: $(DEV_PG_URL)"
+	@echo "mysql ready:    $(DEV_MYSQL_URL)"
 
 .PHONY: dev-db-stop
-dev-db-stop: ## Stop the development Postgres container
+dev-db-stop: ## Stop the development database containers
 	docker compose -f $(COMPOSE_DEV) down
 
 .PHONY: dev-db-reset
-dev-db-reset: ## Destroy and recreate the development Postgres volume
+dev-db-reset: ## Destroy and recreate the development database volumes
 	docker compose -f $(COMPOSE_DEV) down -v
 	$(MAKE) dev-db
 
 .PHONY: dev-db-url
-dev-db-url: ## Print the development Postgres URL
+dev-db-url: ## Print the development database URLs
 	@echo '$(DEV_PG_URL)'
+	@echo '$(DEV_MYSQL_URL)'
 
 # ── Frontend ─────────────────────────────────────────────────────────────────
 #
@@ -292,12 +298,14 @@ dev-go:
 TEST_FLAGS := -race -count=1 -p 1
 
 .PHONY: test
-test: ## Run all tests with race detection (SQLite only; Postgres tests skip)
+test: ## Run all tests with race detection (SQLite only; Postgres and MySQL tests skip)
 	go test $(TEST_FLAGS) $(PKG)
 
 .PHONY: test-all
-test-all: dev-db ## Run all tests against BOTH SQLite and Postgres
-	PIVOT_TEST_POSTGRES_URL='$(DEV_PG_URL)' go test $(TEST_FLAGS) $(PKG)
+test-all: dev-db ## Run all tests against every engine, including the connector targets
+	PIVOT_TEST_POSTGRES_URL='$(DEV_PG_URL)' \
+	PIVOT_TEST_MYSQL_URL='$(DEV_MYSQL_URL)' \
+	  go test $(TEST_FLAGS) $(PKG)
 
 .PHONY: cover
 cover: ## Run tests and open an HTML coverage report
@@ -336,11 +344,13 @@ GOVULNCHECK_VERSION := v1.8.0
 
 .PHONY: coverage-gate
 coverage-gate: dev-db ## Fail if a changed package is under 80% covered
-	# Against Postgres, like CI. Without it every package whose tests are
-	# opt-in on PIVOT_TEST_POSTGRES_URL is measured with half its tests
+	# Against the real databases, like CI. Without them every package whose
+	# tests are opt-in on a connection URL is measured with half its tests
 	# skipped, and the gate reports a failure CI will not reproduce -- which
 	# is how a guard stops being one.
-	PIVOT_TEST_POSTGRES_URL='$(DEV_PG_URL)' go test -count=1 -p 1 -coverpkg=$(PKG) \
+	PIVOT_TEST_POSTGRES_URL='$(DEV_PG_URL)' \
+	PIVOT_TEST_MYSQL_URL='$(DEV_MYSQL_URL)' \
+	  go test -count=1 -p 1 -coverpkg=$(PKG) \
 	  -coverprofile=coverage.out -covermode=atomic $(PKG) >/dev/null
 	@./scripts/coverage-gate.sh $(BASE_REF) 80
 

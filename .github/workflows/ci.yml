@@ -53,6 +53,34 @@ jobs:
           --health-timeout 5s
           --health-retries 10
 
+      # The MySQL connector's target. Same reasoning: without it the MySQL
+      # suite skips and looks exactly like a pass, so PIVOT_TEST_MYSQL_URL is
+      # set below and the same step asserts the skips did not happen.
+      #
+      # TZ is not decoration. MySQL's default time_zone follows the system
+      # clock, so a server on +05:45 returns every TIMESTAMP shifted unless the
+      # connector pins the session -- which it does. Running CI on UTC would
+      # mean the test that proves the pinning works could not fail.
+      #
+      # Nothing here overrides the server's command line, because a service
+      # container cannot be given one. Everything the tests need is a session
+      # variable the connector sets.
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: pivot
+          MYSQL_DATABASE: pivot
+          MYSQL_USER: pivot
+          MYSQL_PASSWORD: pivot
+          TZ: Asia/Kathmandu
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -upivot -ppivot --silent"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+          --health-start-period 30s
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -114,24 +142,40 @@ jobs:
       - name: OpenAPI spec is self-consistent
         run: make validate-spec
 
-      - name: Tests, against SQLite and Postgres
+      - name: Tests, against SQLite, Postgres and MySQL
         env:
           PIVOT_TEST_POSTGRES_URL: postgres://pivot:pivot@localhost:5432/pivot?sslmode=disable
+          PIVOT_TEST_MYSQL_URL: mysql://pivot:pivot@localhost:3306/pivot
         run: |
           # -p 1 is not a preference. Without it Go starts one test binary per
           # package at once and several hash with Argon2 at 64 MiB under the
           # race detector, which is enough to get the run killed on a
           # two-core runner. See the note in CHECKLIST.md.
-          go test -race -count=1 -p 1 -coverpkg=./... \
+          #
+          # -v so that skipped tests appear at all. Without it `go test` prints
+          # nothing for a skip, which is what made the assertion below vacuous
+          # for the whole of Phase 0 -- see the step after this one.
+          go test -race -count=1 -p 1 -v -coverpkg=./... \
             -coverprofile=coverage.out -covermode=atomic ./... \
             2>&1 | tee test.log
 
-      - name: The Postgres half actually ran
+      - name: Every database-backed suite actually ran
         run: |
-          # A skipped Postgres suite looks exactly like a passing one. This is
-          # the assertion that the service container was really used.
-          if grep -q 'SKIP.*PIVOT_TEST_POSTGRES_URL' test.log; then
-            echo "Postgres tests skipped despite PIVOT_TEST_POSTGRES_URL being set." >&2
+          # A skipped database suite looks exactly like a passing one, and
+          # seven packages opt in on one of these variables. This is the
+          # assertion that the service containers were really used.
+          #
+          # The previous version of this step grepped for 'SKIP.*<VARIABLE>'
+          # and could never have fired: `go test` without -v prints nothing at
+          # all for a skipped test, so the log it searched was empty of both
+          # words. Measured in Part 18-a, after it had been passing since
+          # Phase 0.
+          #
+          # These variable names appear in the log only in a skip message, so
+          # finding one means something opted out.
+          if grep -qE 'PIVOT_TEST_(POSTGRES|MYSQL)_URL' test.log; then
+            echo "A database-backed suite skipped despite its URL being set:" >&2
+            grep -nE 'PIVOT_TEST_(POSTGRES|MYSQL)_URL' test.log >&2
             exit 1
           fi
 

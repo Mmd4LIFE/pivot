@@ -60,8 +60,8 @@ At the end of every part, in this order:
 
 | | |
 |---|---|
-| **Last completed** | Part 17 — The conformance suite |
-| **Next up** | **Part 18 — Two more connectors, and resource governance** |
+| **Last completed** | Part 18-a — MySQL, the second connector |
+| **Next up** | **Part 18-b — SQLite and DuckDB, and resource governance** |
 | **Current phase** | Phase 1 — Connect & Query → v0.1 |
 | **Branch** | `main` |
 | **Blockers** | None |
@@ -93,7 +93,13 @@ there is no way to *run* a question and nothing to show the answer in.
 byte-for-byte, zoned against naive timestamps, streaming order, truncation, cancellation,
 timeouts, error classification, identifier quoting, and every declared capability
 demonstrated rather than believed. It is a library, not a runner: a connector supplies one
-file and calls `conformance.Run`. PostgreSQL passes all sixteen in CI.
+file and calls `conformance.Run`.
+
+**PostgreSQL and MySQL both pass all sixteen, in CI, against real containers.** MySQL was
+the first test of whether the abstraction was right rather than merely comfortable, and it
+cost one change to the suite (unsigned integers) and one to the interface
+([`Canceler`](internal/connectors/sqlbase.go), because MySQL's driver hangs up without
+telling the server to stop). Both are written down where they happened.
 
 **Carried in from Phase 0**, and owned by parts in this phase or named in them:
 - **The container stack pins a superseded release.** `v0.0.2-alpha` was cut on
@@ -104,6 +110,10 @@ file and calls `conformance.Run`. PostgreSQL passes all sixteen in CI.
   what it protects against is Keycloak changing, not Pivot changing.
 - `X-Forwarded-For` is not trusted, so rate limiting behind a proxy keys on the proxy.
   Phase 9 owns it; it matters more as soon as an instance is worth exposing.
+- **MySQL error 1049 is mapped but never exercised.** It is the plain "no such database"
+  that an account with wide grants gets; the test account gets 1044 instead, because MySQL
+  will not tell an unprivileged user whether a database exists. Causing it needs a
+  privileged connection the suite deliberately does not hold.
 
 **Environment.** Go 1.27.1 locally with a `toolchain go1.26.8` directive — the floor in
 `go.mod` is for contributors, the toolchain line is what builds, and CI derives its Go
@@ -118,7 +128,7 @@ few points high; leave margin above 80%.
 
 ```
 Phase 0  Foundations        [██████████████████████████] 31/31   COMPLETE
-Phase 1  Connect & Query    [████                      ]  2/12
+Phase 1  Connect & Query    [██████                    ]  3/13
 Phase 2+ ...                                            (expanded as we approach)
 ```
 
@@ -220,17 +230,47 @@ gets shaped to what those two already do.
 
 ---
 
-### - [ ] Part 18 — Two more connectors, and resource governance
+### - [x] Part 18-a — MySQL, the second connector ✅ 2026-09-28
 
-> Part 17 built the suite these two are measured against. Each connector needs one file:
-> a `conformance.Subject` with its fixture DDL, a sleep and a series expression, two
-> statements it rejects, and an identifier that needs quoting.
-> `internal/connectors/postgres_conformance_test.go` is the worked example.
+> **Split from Part 18** on 2026-09-28: three deliverables — two connectors and resource
+> governance — is more than one session, and the rule is to split in place rather than
+> silently half-finish. 18-a is the second connector; 18-b is the third plus governance.
 
-**Deliverable:** MySQL and SQLite/DuckDB, both through the same door — and no query can
-take the instance down.
+**Deliverable:** MySQL through the same door as PostgreSQL, passing the conformance suite,
+with every change the suite needed written down.
 
-**Build:** The MySQL and SQLite/DuckDB connectors against the conformance suite, plus
+**Build:** The MySQL dialect in `internal/connectors`, its `conformance.Subject`, a dev
+MySQL container and a CI service for it.
+
+**Done when:**
+- MySQL passes the conformance suite, and any change the suite needed is justified in
+  writing rather than made to accommodate a connector
+- The failure modes are classified from MySQL's own error numbers and caused for real,
+  not mocked — a refused password, an unknown database, a missing table, bad syntax
+- **Cancellation reaches the server**, proven from a *second* connection: the query is
+  gone from `information_schema.processlist`, not merely abandoned by the client
+- CI runs it against a real containerized MySQL, and a skipped MySQL suite fails the build
+  the same way a skipped Postgres one does
+
+**Notes:** This is where the Part 16 interface gets its first real test. MySQL differs from
+PostgreSQL in every way the abstraction claims to cover: `?` rather than `$1`, backticks
+rather than double quotes, its own error numbers, no `generate_series`, and a driver that
+cancels by dropping the connection rather than by asking the server.
+
+Expect to change the interface. That is what this part is for — but a change made to
+accommodate a connector, rather than because the abstraction was wrong, is the failure mode
+to watch for.
+
+**Refs:** `P1-DB-002`, `P1-QE-004`
+
+---
+
+### - [ ] Part 18-b — SQLite and DuckDB, and resource governance
+
+**Deliverable:** a third and fourth connector, one of them reading a file — and no query
+can take the instance down.
+
+**Build:** The SQLite and DuckDB connectors against the conformance suite, plus
 per-connection resource governance: max rows, statement timeout, concurrency.
 
 **Done when:**
@@ -242,10 +282,11 @@ per-connection resource governance: max rows, statement timeout, concurrency.
   connector rather than assumed from a context deadline
 - The DuckDB connector reads a file, which is what makes the sample dataset possible
 
-**Notes:** The second and third connectors are where the interface from Part 16 gets its
-first real test. Expect to change it; that is what this part is for.
+**Notes:** DuckDB is the one with a build cost. ADR-0001 named CGo cross-compilation as a
+negative and ADR-0004 set up a `nocgo` fallback build; this is the part that pays that bill,
+so decide early whether DuckDB is behind a build tag or the release matrix grows.
 
-**Refs:** `P1-DB-002`, `P1-DB-003`, `P1-CONN-010`, `P1-QE-004`, `P1-QE-005`
+**Refs:** `P1-DB-003`, `P1-CONN-010`, `P1-QE-005`
 
 ---
 
@@ -460,5 +501,6 @@ Phase 0's log is in
 
 | Date | Part | Shipped | Notes |
 |---|---|---|---|
+| 2026-09-28 | 18-a | The MySQL connector, `Canceler` in the connector interface, unsigned integers in the conformance readers, a dev MySQL container and a CI service for it | **Part 18 was split into 18-a and 18-b**: two connectors plus resource governance is more than one session. **MySQL passes all sixteen conformance properties**, and the \"adding a connector means writing one file\" claim held — `mysql_conformance_test.go` is the whole integration, written before anything in the suite was touched. **The suite needed exactly one change**, and the connector caught it rather than the other way round: MySQL's `ROW_NUMBER()` returns `uint64`, which the readers had never seen because PostgreSQL has no unsigned integers. Added with a ceiling check — a `uint64` above `MaxInt64` is refused rather than wrapped, because a row count that reads `-9223372036854775808` looks like data rather than like a bug. **The interface needed exactly one change, and it was the interesting one.** Measured first: `go-sql-driver` cancels by hanging up, so a canceled `SELECT SLEEP(20)` returned to the client in 301ms and was *still running on the server two seconds later* — it would have held a thread for the full twenty. So `Canceler` is now an optional interface a dialect implements, and MySQL's sends `KILL QUERY`. Three details that matter: it is **KILL QUERY, not KILL CONNECTION**, so the pooled connection survives instead of being thrown away on every cancel; the kill goes over a **separate one-connection pool**, because a kill that queues behind the queries it is trying to kill is a deadlock and the moment it matters most is exactly when the query pool is empty; and the watcher's teardown **waits for the goroutine**, because a query finishing at the same moment its context ends would otherwise race its own `KILL` onto whatever the pool hands out next. Proven from a *second connection* watching `information_schema.processlist`, not from the client returning promptly — the client returned promptly before any of this existed. **Timestamps are pinned on both halves at once.** The driver parses what the server sends using `Loc`, and the server converts `TIMESTAMP` into the session's `time_zone`; setting one without the other shifts every zoned value silently. So the connector pins both to UTC and **refuses** an option that would move one of them. The dev and CI MySQL both run on **Asia/Kathmandu (+05:45)** on purpose — not UTC, not a whole hour — so a connector that inherited the server's zone would be wrong on every row and the test that proves the pinning could actually fail. **MySQL will not say whether a database exists**: an unprivileged account gets 1044 access-denied rather than 1049, because answering would be an information leak. The message carries both possibilities instead of picking one and sending half the people who hit it in the wrong direction. **The biggest find was in CI, not in MySQL.** The step named \"The Postgres half actually ran\" grepped `test.log` for `SKIP.*PIVOT_TEST_POSTGRES_URL` — and `go test` without `-v` prints nothing at all for a skipped test, so it was searching a log containing neither word. **It had never been able to fail, and had been green since Phase 0**, guarding seven packages that opt in on that variable. Fixed with `-v` plus a grep for the variable names, and verified in both directions before being trusted: 15 hits with the variables unset, 0 with them set. The dev compose passes **no command line** to MySQL, because a GitHub Actions service container cannot be given one and a dev database configured differently from CI's produces failures that only reproduce where you cannot debug them — so `cte_max_recursion_depth` (MySQL has no `generate_series`; the suite's rows come from a recursive CTE, and 1000 is the default ceiling) is set per-session through `Options`. |
 | 2026-09-27 | 17 | `internal/connectors/conformance` — sixteen named properties, a breakable reference connector that proves each one can fail, and `postgres_conformance_test.go` as the worked example | **The suite is a library, not a runner.** A connector supplies a `Subject` — its fixture DDL, a sleep and a series expression, two statements it rejects, an identifier that needs quoting — and calls `conformance.Run`. Nothing in the package names a connector, so adding one is writing one file. **PostgreSQL passes all sixteen against the containerized database, in CI** (`ci.yml` sets `PIVOT_TEST_POSTGRES_URL` and fails the build if a Postgres test skips, so this cannot quietly stop running). **The part that makes the rest worth anything is `broken_test.go`**: seventeen deliberate defects — a NULL arriving as `\"\"`, unicode normalized on the way out, a zone applied to a naive timestamp, a result cut at the cap without the flag, a row repeated mid-stream so the count still comes out right, errors returned unclassified, a capability declared and not delivered — each wired into a working connector one at a time, each asserted to fail *its own named property*. A suite that passes is worth exactly the confidence that it would have failed, and that cannot come from reading it. **The fake's dialect is deliberately nothing like PostgreSQL** (`series 40`, `sleep 3`): if the suite only passed against something Postgres-shaped it would be a regression test in a conformance suite's clothes, and this is how that gets caught. **Capabilities are demonstrated, not believed** — declaring `CTEs` means a CTE runs, and declaring `LateralJoins` without supplying a query to prove it is a *failure*, because the compiler reading that field in Phase 3 will emit SQL the source rejects in front of whoever built the dashboard. **The fixture runs on Asia/Tehran**, +03:30: row 1 is stored at 23:30Z and comes back as March **16** at 03:00 local — verified by hand — so a connector confusing zoned for naive lands on the wrong *day*, and the half-hour offset also catches anything assuming whole hours. **Quoting is checked through a real round trip**, aliasing a column to `a \"quoted\" name` with the dialect's own `QuoteIdentifier`: a rule that fails to escape the inner quote is a syntax error, which is the injection this catches. **`Check.Failure` was extracted so the promise — a failure opens with the property, not the assertion — is one tested function rather than a convention.** The readers are permissive about the Go type a driver returns and strict about the value; Part 19 is where normalization becomes a contract. Coverage 88.9% here and 91.3% on `internal/connectors`. **The repo's own gate turned out to be lying locally**: `make coverage-gate` built its profile without `PIVOT_TEST_POSTGRES_URL`, so it reported `FAIL 54.0%` for a package CI measures at 91.3% — every opt-in Postgres test skipped. A local guard that disagrees with CI in either direction is one people learn to ignore, so the target now depends on `dev-db` and sets the URL, exactly as `test-all` and CI do. **Lint caught three things I would not have**: `catalogued` (misspell wants US spelling), `text, _ := asString(v)` in four places (errcheck's check-blank), and two `%v`s that should have been `%w`. |
 | 2026-09-27 | 16 | `internal/connectors` (interface, registry, `SQLConnector`, PostgreSQL), migration 00006 and the `connections` table, `ConnectionRepo`, and three `pivot admin` commands | **Pivot connects to a database somebody else owns.** Created, tested and stored against a real PostgreSQL, with the password landing as `pivot.v1.4a44cfc0...` rather than a string — checked with SQL against the file on both engines, because asking the repository whether it encrypted something is asking the guard whether the door is locked. **All four failure modes were caused for real rather than mocked**: a refused password, a host that does not resolve, a closed port, a missing database. Each says what to do and none contains the password. **The interface is the decision this part exists for.** `Dialect` is not `Connector`: pooling, scanning, truncation and timeouts are identical for every database/sql source, so they live in `SQLConnector` once and a driver supplies the DSN, the capabilities, the catalog query and the error classification — with BigQuery in mind, which is not database/sql-shaped, so this is a helper implementing the interface rather than the interface itself. **A truncated result carries a flag**, because a silently cut result is a wrong answer presented as a right one and the chart Phase 2 draws from it is wrong in a way nobody can see. **The DSN is built with `net/url`**: a generated password contains a colon, an at sign or a slash about a third of the time, and concatenation turns that into a DSN naming a different host. **`Query` still takes a string** — the package comment promised compiled query objects and Phase 3 owns the compiler that makes them; inventing the type now would be designing against an imaginary caller, so Part 20 replaces it. **Three things bit me.** `--host` and `--port` collided with the root command's persistent flags, so `--port 5433` set the *server* port to zero and the command failed before it ran; they are `--db-host` and `--db-port` now. The pgx driver was not registered in this package and had been reaching it by luck of import order. And my own error message hid its cause — `sql.Open` failing said "could not prepare a postgres connection" and nothing else, which sent me looking in the wrong place for ten minutes; at that point nothing secret can be in the error, so it carries the driver's text. **The portability harness caught the new table** before I remembered to declare it, and `sqlc.yaml`'s own warning caught the SQLite type overrides I had not added — the two models had silently diverged on eleven columns. |

@@ -2,6 +2,7 @@ package conformance
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -59,6 +60,32 @@ func asInt64(v any) (int64, error) {
 		return int64(typed), nil
 	case int:
 		return int64(typed), nil
+
+	/*
+		Unsigned, which MySQL returns for ROW_NUMBER() and for any UNSIGNED
+		column. Added when the conformance suite met its second connector and
+		not before: PostgreSQL has no unsigned integers, so a reader written
+		against it alone had never seen one.
+
+		The ceiling check is the point. A uint64 above MaxInt64 converted
+		blindly comes back negative, and a row count that reads as -9223372036
+		is the kind of wrong that looks like data rather than like a bug.
+	*/
+	case uint64:
+		if typed > math.MaxInt64 {
+			return 0, fmt.Errorf("%d does not fit in a signed 64-bit integer", typed)
+		}
+
+		return int64(typed), nil
+	case uint32:
+		return int64(typed), nil
+	case uint:
+		if uint64(typed) > math.MaxInt64 {
+			return 0, fmt.Errorf("%d does not fit in a signed 64-bit integer", typed)
+		}
+
+		return int64(typed), nil
+
 	case float64:
 		// A driver that routes integers through a float is not wrong until the
 		// value stops being exact, which is where this refuses.
@@ -90,6 +117,8 @@ func asFloat64(v any) (float64, error) {
 		return float64(typed), nil
 	case int64:
 		return float64(typed), nil
+	case uint64:
+		return float64(typed), nil
 	case string, []byte:
 		raw := text(v)
 
@@ -113,6 +142,8 @@ func asBool(v any) (bool, error) {
 	case bool:
 		return typed, nil
 	case int64:
+		return typed != 0, nil
+	case uint64:
 		return typed != 0, nil
 	case string, []byte:
 		raw := text(v)

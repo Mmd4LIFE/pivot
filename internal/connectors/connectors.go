@@ -42,9 +42,13 @@ type Kind string
 
 const (
 	// KindPostgres is PostgreSQL, and by extension anything speaking its wire
-	// protocol closely enough — Redshift gets its own Kind in Part 18 rather
-	// than reusing this one, because the dialects differ where it matters.
+	// protocol closely enough — Redshift gets its own Kind rather than reusing
+	// this one, because the dialects differ where it matters.
 	KindPostgres Kind = "postgres"
+
+	// KindMySQL is MySQL 8.0 and later. MariaDB will get its own Kind for the
+	// same reason: the wire protocol is shared and the dialects are not.
+	KindMySQL Kind = "mysql"
 )
 
 func (k Kind) String() string { return string(k) }
