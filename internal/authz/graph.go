@@ -3,6 +3,7 @@ package authz
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"go.opentelemetry.io/otel/attribute"
 
@@ -209,4 +210,53 @@ func knownPermission(p Permission) bool {
 	}
 
 	return false
+}
+
+/*
+Grants returns every relation a subject actually holds on an object, after
+group expansion.
+
+Check answers "may they?", which is a question about one permission. This
+answers "what are they?", which is the question the result cache has to ask:
+two callers may share a cached result exactly when nothing about their
+authorization could make them see different rows, and that is a property of
+the whole set of grants rather than of any single one.
+
+Returned sorted and deduplicated, so the same standing produces the same slice
+whatever order the store reported it in. A fingerprint built from an unstable
+order would be a different key every time, which is a cache that never hits
+and looks like one that does.
+*/
+func (r *Resolver) Grants(ctx context.Context, subject Subject, object Object) ([]Relation, error) {
+	ctx, span := observability.Start(ctx, "authz.Grants",
+		attribute.String("authz.object_type", string(object.Type)),
+	)
+	defer span.End()
+
+	subjects, err := r.expand(ctx, subject)
+	if err != nil {
+		return nil, err
+	}
+
+	relations, err := r.store.RelationsOn(ctx, subjects, object)
+	if err != nil {
+		return nil, fmt.Errorf("read relations: %w", err)
+	}
+
+	seen := make(map[Relation]bool, len(relations))
+
+	out := make([]Relation, 0, len(relations))
+
+	for _, rel := range relations {
+		if !seen[rel] {
+			seen[rel] = true
+
+			out = append(out, rel)
+		}
+	}
+
+	slices.Sort(out)
+	span.SetAttributes(attribute.Int("authz.grants", len(out)))
+
+	return out, nil
 }

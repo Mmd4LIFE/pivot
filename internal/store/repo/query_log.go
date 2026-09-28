@@ -42,7 +42,13 @@ type QueryOutcome struct {
 	Rows           int64
 	BytesEstimated int64
 	Truncated      bool
-	Err            string
+
+	// CacheStatus is hit, miss or uncached. Recorded on the outcome rather
+	// than at the start because at the start it is not yet known: a query
+	// becomes a miss by running and a hit by not having to.
+	CacheStatus string
+
+	Err string
 }
 
 // The states a logged query can be in. A row stays Running until something
@@ -98,6 +104,7 @@ func (r *QueryLogRepo) Finish(ctx context.Context, id uuid.UUID, out QueryOutcom
 		RowsReturned:   out.Rows,
 		BytesEstimated: out.BytesEstimated,
 		Truncated:      dbtypes.Bool(out.Truncated),
+		CacheStatus:    cacheStatusOr(out.CacheStatus),
 		ErrorMessage:   out.Err,
 		ID:             id,
 		OrgID:          s.OrgID(),
@@ -111,6 +118,21 @@ func (r *QueryLogRepo) Finish(ctx context.Context, id uuid.UUID, out QueryOutcom
 	}
 
 	return nil
+}
+
+/*
+cacheStatusOr keeps the column's default meaning when a caller says nothing.
+
+The column is NOT NULL, so the finishing UPDATE has to write something. An
+empty string would be a fourth value that means the same as "uncached" and
+sorts differently in every query anybody writes against this table.
+*/
+func cacheStatusOr(status string) string {
+	if status == "" {
+		return "uncached"
+	}
+
+	return status
 }
 
 // List returns the most recent executions for the tenant, newest first.

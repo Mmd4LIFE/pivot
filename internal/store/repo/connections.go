@@ -10,7 +10,14 @@ import (
 	"github.com/Mmd4LIFE/pivot/internal/store/model"
 )
 
-const entityConnection = "connection"
+// EntityConnection names a connection in a [ChangeEvent].
+//
+// Exported because the result cache subscribes to these events to know when a
+// connection changed underneath it, and a subscriber matching on the literal
+// string would keep compiling after this one was renamed.
+const EntityConnection = "connection"
+
+const entityConnection = EntityConnection
 
 // ConnectionRepo manages an organization's data sources.
 //

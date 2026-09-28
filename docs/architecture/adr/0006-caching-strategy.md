@@ -2,6 +2,11 @@
 
 **Status:** Accepted
 **Date:** 2026-09-19
+**Amended by:** [ADR-0012](0012-the-l1-cache-holds-rows.md) — L1 stores decoded rows rather
+than Arrow batches, because a cached entry is shared by construction and `arrow.RecordBatch`
+is reference counted; and the "resolved policy set" the key hashes is named
+`policy.Fingerprint`, which resolves from permissions today and from RLS predicates in
+Phase 4. Everything else here stands.
 
 ## Context
 

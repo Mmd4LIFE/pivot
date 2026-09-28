@@ -45,6 +45,10 @@ type fixture struct {
 	opens *atomic.Int64
 
 	checker *fakeChecker
+
+	// db is the metadata database, for a test that wants to read a column
+	// back with SQL rather than through the repository it is testing.
+	db *store.DB
 }
 
 type fixtureOptions struct {
@@ -61,6 +65,14 @@ type fixtureOptions struct {
 func newFixture(t *testing.T, opts fixtureOptions) *fixture {
 	t.Helper()
 
+	return newFixtureOn(t, openPivotDB(t), opts)
+}
+
+// newFixtureOn is newFixture over a metadata database the caller chose, so a
+// test can run the same pipeline against PostgreSQL.
+func newFixtureOn(t *testing.T, db *store.DB, opts fixtureOptions) *fixture {
+	t.Helper()
+
 	path := filepath.Join(t.TempDir(), "source.db")
 
 	if opts.kind == "" {
@@ -68,7 +80,6 @@ func newFixture(t *testing.T, opts fixtureOptions) *fixture {
 		applyDDL(t, path, opts.ddl...)
 	}
 
-	db := openPivotDB(t)
 	repos := repo.New(db, repo.WithSecrets(testCipher(t)))
 
 	org, err := repos.System().CreateOrganization(t.Context(),
@@ -94,11 +105,7 @@ func newFixture(t *testing.T, opts fixtureOptions) *fixture {
 		checker = &fakeChecker{allow: true}
 	)
 
-	counting := func(cfg connectors.Config) (connectors.Connector, error) {
-		opens.Add(1)
-
-		return connectors.Open(cfg)
-	}
+	counting := countingOpener(&opens)
 
 	return &fixture{
 		executor: NewExecutor(repos, checker, withOpener(counting)),
@@ -109,7 +116,24 @@ func newFixture(t *testing.T, opts fixtureOptions) *fixture {
 		connID:   conn.ID,
 		opens:    &opens,
 		checker:  checker,
+		db:       db,
 	}
+}
+
+// countingOpener wraps the real connector factory with a counter, which is how
+// every test here proves a query did or did not reach the source.
+func countingOpener(opens *atomic.Int64) func(connectors.Config) (connectors.Connector, error) {
+	return func(cfg connectors.Config) (connectors.Connector, error) {
+		opens.Add(1)
+
+		return connectors.Open(cfg)
+	}
+}
+
+// countingOpener rebinds this fixture's counter, for a test that rebuilds the
+// executor after the fixture was made.
+func (f *fixture) countingOpener() func(connectors.Config) (connectors.Connector, error) {
+	return countingOpener(f.opens)
 }
 
 // applyDDL builds the source file. The connector opens every SQLite file

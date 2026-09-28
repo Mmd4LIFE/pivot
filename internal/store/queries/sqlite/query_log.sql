@@ -18,6 +18,7 @@ SET state = ?,
     rows_returned = ?,
     bytes_estimated = ?,
     truncated = ?,
+    cache_status = ?,
     error_message = ?
 WHERE id = ? AND org_id = ?;
 
