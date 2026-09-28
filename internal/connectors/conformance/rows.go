@@ -1,6 +1,10 @@
 package conformance
 
-import "time"
+import (
+	"time"
+
+	"github.com/Mmd4LIFE/pivot/internal/datatype"
+)
 
 /*
 The fixture's expected contents.
@@ -60,6 +64,39 @@ type Row struct {
 // column-metadata check has one list rather than a literal in two places.
 func Columns() []string {
 	return []string{"id", "name", "notes", "flag", "ratio", "created_utc", "created_naive"}
+}
+
+/*
+CanonicalTypes is the type each fixture column must normalize to.
+
+The contract [datatype] makes, checked against four real databases rather than
+against a table of names somebody wrote down. Two of these are the whole reason
+that package exists:
+
+  - ratio is Float and not Decimal. It is declared DOUBLE everywhere, and a
+    system that called it exact would let somebody total a currency column with
+    it.
+  - created_utc and created_naive are different kinds. One is an instant and
+    one is a clock reading, and the suite already treats them as separate
+    properties -- a type system that merged them would disagree with the checks
+    two files away.
+
+flag is deliberately absent. MySQL has no boolean: BOOLEAN is TINYINT(1), and
+its driver reports plain TINYINT, so a query result there cannot say Boolean
+however the catalog is read. Asserting it would mean either failing MySQL for
+something it cannot do or weakening the check for everybody -- so the column
+stays in the fixture, where the *value* checks still prove it round-trips, and
+the type check covers what every source can actually express.
+*/
+func CanonicalTypes() map[string]datatype.Kind {
+	return map[string]datatype.Kind{
+		"id":            datatype.Integer,
+		"name":          datatype.String,
+		"notes":         datatype.String,
+		"ratio":         datatype.Float,
+		"created_utc":   datatype.TimestampTZ,
+		"created_naive": datatype.Timestamp,
+	}
 }
 
 // Rows is what the fixture must contain, in id order.

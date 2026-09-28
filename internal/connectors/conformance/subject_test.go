@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Mmd4LIFE/pivot/internal/connectors"
+	"github.com/Mmd4LIFE/pivot/internal/datatype"
 )
 
 /*
@@ -175,6 +176,11 @@ func (s stub) Kind() connectors.Kind                 { return connectors.Kind("s
 func (s stub) Capabilities() connectors.Capabilities { return connectors.Capabilities{} }
 func (s stub) Test(context.Context) error            { return s.err }
 func (s stub) Close() error                          { return nil }
+
+func (s stub) NormalizeType(sourceType string) datatype.Type {
+	return datatype.Normalize(sourceType, nil)
+}
+
 func (s stub) Introspect(context.Context) ([]connectors.Table, error) {
 	return nil, s.err
 }

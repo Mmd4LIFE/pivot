@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/Mmd4LIFE/pivot/internal/datatype"
+
 	"modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
 )
@@ -279,4 +281,36 @@ JOIN pragma_table_info(m.name) p
 WHERE m.type IN ('table', 'view')
   AND m.name NOT LIKE 'sqlite_%'
 ORDER BY m.name, p.cid`
+}
+
+/*
+NormalizeType maps SQLite's declared types onto Pivot's.
+
+SQLite is the odd one: a column's type is a *declaration*, not a constraint,
+and what comes back is whatever was written in the CREATE TABLE. So the names
+are whatever the author felt like -- which in practice means the names every
+other database uses, because that is what people type.
+
+Hence almost nothing here: [datatype.Base] already covers it. What is below is
+the two answers SQLite gives that nobody else does.
+*/
+func (sqliteDialect) NormalizeType(sourceType string) datatype.Type {
+	return datatype.Normalize(sourceType, func(name string) (datatype.Type, bool) {
+		switch name {
+		case "any", "":
+			// A column declared with no type at all, which SQLite allows and
+			// the introspection query reports as ANY. Genuinely unknown: the
+			// column can hold anything, and saying otherwise would be a guess.
+			return datatype.Type{Kind: datatype.Unknown}, true
+
+		case "numeric":
+			// SQLite's NUMERIC affinity is not the exact decimal the name
+			// implies -- it stores whatever fits and falls back to a float.
+			// Calling it Decimal would promise exactness SQLite does not
+			// provide, which is the promise this package exists to keep.
+			return datatype.Type{Kind: datatype.Float, Bits: 64}, true
+		}
+
+		return datatype.Type{}, false
+	})
 }

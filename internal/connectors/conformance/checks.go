@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Mmd4LIFE/pivot/internal/connectors"
+	"github.com/Mmd4LIFE/pivot/internal/datatype"
 )
 
 // --- reaching the source ----------------------------------------------------
@@ -283,6 +284,105 @@ func checkIntrospection(ctx context.Context, s Subject) error {
 
 	if byName["id"].Nullable {
 		return fmt.Errorf("%s: id is declared NOT NULL in the fixture and is cataloged as nullable", s.qualifiedFixture())
+	}
+
+	return nil
+}
+
+/*
+Every column carries a canonical type, and the two paths agree on it.
+
+The property [datatype] exists to provide. Everything above the connectors --
+chart selection, the semantic layer, cell formatting, the AI's grounding --
+reads the canonical type rather than parsing "double precision" for itself, and
+all four are wrong together if this is.
+
+Checked on the query path *and* the introspection path, because they come from
+different vocabularies. PostgreSQL's catalog says "timestamp with time zone"
+where its driver says "TIMESTAMPTZ"; for `timetz` the driver says "1266",
+because it has no name for it. Nothing had ever checked the two agree, and a
+column whose type depends on which code path asked is worse than one nobody has
+mapped -- the disagreement is invisible until something built on it is wrong.
+*/
+func checkCanonicalTypes(ctx context.Context, s Subject) error {
+	rows, err := s.fetch(ctx)
+	if err != nil {
+		return err
+	}
+
+	fromQuery := map[string]connectors.Column{}
+	for _, col := range rows.result.Columns {
+		fromQuery[strings.ToLower(col.Name)] = col
+	}
+
+	for name, want := range CanonicalTypes() {
+		col, ok := fromQuery[name]
+		if !ok {
+			return fmt.Errorf("the result has no column %q", name)
+		}
+
+		if col.Type.Kind != want {
+			return fmt.Errorf("%s is %q in the result, want %q -- the source calls it %q",
+				name, col.Type.Kind, want, col.SourceType)
+		}
+	}
+
+	// Introspection, if this subject is cataloged at all.
+	if s.cannot(NeedsIntrospection) != "" {
+		return nil
+	}
+
+	cataloged, err := s.fixtureColumns(ctx)
+	if err != nil {
+		return err
+	}
+
+	for name, want := range CanonicalTypes() {
+		col, ok := cataloged[name]
+		if !ok {
+			return fmt.Errorf("introspection does not report a column %q", name)
+		}
+
+		if col.Type.Kind != want {
+			return fmt.Errorf("%s is %q in the catalog, want %q -- the source calls it %q",
+				name, col.Type.Kind, want, col.SourceType)
+		}
+
+		if query := fromQuery[name].Type.Kind; query != col.Type.Kind {
+			return fmt.Errorf(
+				"%s is %q from a query and %q from the catalog: the two vocabularies "+
+					"(%q and %q) do not normalize to the same thing",
+				name, query, col.Type.Kind, fromQuery[name].SourceType, col.SourceType)
+		}
+	}
+
+	return nil
+}
+
+/*
+A type nobody has mapped says so, rather than guessing.
+
+The other half of the contract, and the easier half to get wrong: a normalizer
+that falls back to String is indistinguishable from one that knows, at exactly
+the point where somebody charts the column.
+
+Checked by asking the dialect about a type name no source has, which must come
+back Unknown with its spelling intact -- because the spelling is the search
+term for whoever adds the mapping.
+*/
+func checkUnmappedTypesSaySo(_ context.Context, s Subject) error {
+	const invented = "pivot_no_such_type_9f2c"
+
+	got := s.Connector.NormalizeType(invented)
+
+	if got.Kind != datatype.Unknown {
+		return fmt.Errorf("a type called %q normalized to %q, so the mapping is guessing",
+			invented, got.Kind)
+	}
+
+	if got.Source != invented {
+		return fmt.Errorf("an unknown type came back with Source %q, want %q -- "+
+			"the source spelling is how the gap gets found", got.Source, invented)
 	}
 
 	return nil
@@ -848,6 +948,31 @@ func (f fixtureRows) timeAt(row int, column string) (time.Time, error) {
 	}
 
 	return got, nil
+}
+
+// fixtureColumns reads the fixture's columns from the catalog, keyed by name.
+func (s Subject) fixtureColumns(ctx context.Context) (map[string]connectors.Column, error) {
+	tables, err := s.Connector.Introspect(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("Introspect: %w", err)
+	}
+
+	for i := range tables {
+		table := &tables[i]
+		if table.Name != s.Fixture.Name ||
+			(s.Fixture.Schema != "" && table.Schema != s.Fixture.Schema) {
+			continue
+		}
+
+		byName := make(map[string]connectors.Column, len(table.Columns))
+		for _, col := range table.Columns {
+			byName[strings.ToLower(col.Name)] = col
+		}
+
+		return byName, nil
+	}
+
+	return nil, fmt.Errorf("introspection does not report %s", s.qualifiedFixture())
 }
 
 func (s Subject) qualifiedFixture() string {

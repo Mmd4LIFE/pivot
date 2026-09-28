@@ -130,16 +130,28 @@ func seedSQLite(t *testing.T) string {
 
 	defer func() { _ = db.Close() }()
 
-	// id is NOT NULL explicitly. INTEGER PRIMARY KEY on its own is an alias
-	// for the rowid, which SQLite reports as nullable -- true, surprising, and
-	// the sort of thing the catalog check exists to surface.
+	/*
+		Two declarations worth explaining.
+
+		id is NOT NULL explicitly. INTEGER PRIMARY KEY on its own is an alias
+		for the rowid, which SQLite reports as nullable -- true, surprising,
+		and the sort of thing the catalog check exists to surface.
+
+		created_utc is TIMESTAMPTZ, which is not a SQLite type -- but no name
+		is. SQLite stores a *declaration*, accepts any word, and hands it back
+		unchanged. That makes the declared name the only place intent can live:
+		nothing about the storage distinguishes an instant from a clock
+		reading, so the author saying which is the best information anyone will
+		ever have. Writing TIMESTAMP here would be declaring the opposite of
+		what the column holds.
+	*/
 	create := `CREATE TABLE ` + sqliteFixtureTable + ` (
 		id            INTEGER NOT NULL PRIMARY KEY,
 		name          TEXT NOT NULL,
 		notes         TEXT,
 		flag          BOOLEAN NOT NULL,
 		ratio         REAL NOT NULL,
-		created_utc   TIMESTAMP NOT NULL,
+		created_utc   TIMESTAMPTZ NOT NULL,
 		created_naive DATETIME NOT NULL
 	)`
 

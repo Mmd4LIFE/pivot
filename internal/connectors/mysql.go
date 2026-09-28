@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/go-sql-driver/mysql"
+
+	"github.com/Mmd4LIFE/pivot/internal/datatype"
 )
 
 /*
@@ -431,7 +433,10 @@ SELECT c.table_schema,
        c.table_name,
        CASE t.table_type WHEN 'VIEW' THEN 'view' ELSE 'table' END AS table_type,
        c.column_name,
-       c.data_type,
+       -- column_type rather than data_type: data_type flattens TINYINT(1) to
+       -- "tinyint", which is how MySQL's only boolean becomes indistinguishable
+       -- from a small integer, and it drops "unsigned" as well.
+       c.column_type,
        c.is_nullable = 'YES' AS nullable,
        c.ordinal_position
 FROM information_schema.columns c
@@ -440,4 +445,74 @@ JOIN information_schema.tables t
 WHERE c.table_schema NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys')
   AND t.table_type IN ('BASE TABLE', 'VIEW')
 ORDER BY c.table_schema, c.table_name, c.ordinal_position`
+}
+
+/*
+NormalizeType maps MySQL's type names onto Pivot's.
+
+MySQL has no boolean. `BOOLEAN` is an alias for `TINYINT(1)`, and
+`information_schema.columns.data_type` flattens it to plain "tinyint" -- so a
+boolean column and a small integer are indistinguishable there.
+
+[mysqlDialect.IntrospectQuery] selects `column_type` instead, which keeps the
+width: "tinyint(1)". That is the signal, and treating it as a boolean is a
+heuristic rather than a fact -- somebody *could* mean a one-digit integer. It
+is the heuristic every MySQL client makes, including JDBC's `tinyInt1isBit`,
+and the alternative is that every boolean column in every MySQL source renders
+as 0 and 1 forever.
+
+The driver cannot make the distinction at all: it reports "TINYINT" for both.
+So a query result over a MySQL boolean says Integer where the catalog says
+Boolean. That is a disagreement the driver leaves no way to avoid, and the
+catalog is the richer of the two.
+*/
+func (mysqlDialect) NormalizeType(sourceType string) datatype.Type {
+	// Checked before the name is reduced, because the width is the whole
+	// signal and bareName drops it.
+	if strings.EqualFold(strings.TrimSpace(sourceType), "tinyint(1)") {
+		return datatype.Type{Kind: datatype.Boolean, Source: sourceType}
+	}
+
+	return datatype.Normalize(sourceType, func(name string) (datatype.Type, bool) {
+		switch name {
+		/*
+			MySQL's names are inverted relative to everybody else's, and this
+			is the single most consequential entry in this file.
+
+			In the SQL standard and in PostgreSQL, TIMESTAMP is a wall-clock
+			reading and TIMESTAMP WITH TIME ZONE is an instant. In MySQL,
+			TIMESTAMP *is* the instant -- stored as UTC and converted into the
+			session's zone on the way out, which is why this connector pins
+			that zone -- and DATETIME is the wall-clock reading.
+
+			So the shared table is exactly wrong here, in the direction that
+			does the most damage: it would call MySQL's instants naive and its
+			naive values instants, on every row of every MySQL source. The
+			conformance suite caught it the first time it ran.
+		*/
+		case "timestamp":
+			return datatype.Type{Kind: datatype.TimestampTZ}, true
+
+		case "datetime":
+			return datatype.Type{Kind: datatype.Timestamp}, true
+
+		case "enum", "set":
+			// A fixed vocabulary, which is text to everything downstream --
+			// and worth knowing is low-cardinality when Phase 2 picks a chart.
+			return datatype.Type{Kind: datatype.String}, true
+
+		case "year":
+			// Four digits. Not a Date: it has no month or day, and pretending
+			// otherwise puts it on a timeline at the first of January.
+			return datatype.Type{Kind: datatype.Integer, Bits: 16}, true
+
+		case "bit":
+			return datatype.Type{Kind: datatype.Binary}, true
+
+		case "geometry", "point", "linestring", "polygon":
+			return datatype.Type{Kind: datatype.Unknown}, true
+		}
+
+		return datatype.Type{}, false
+	})
 }

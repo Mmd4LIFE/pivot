@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Mmd4LIFE/pivot/internal/connectors"
+	"github.com/Mmd4LIFE/pivot/internal/datatype"
 )
 
 /*
@@ -50,6 +51,7 @@ const (
 	defectWrongCancelReason
 	defectWrongTimeoutReason
 	defectRawErrors
+	defectGuessesTypes
 )
 
 // fakeTimeout is short, so the timeout check costs milliseconds here.
@@ -82,6 +84,19 @@ func (f *fake) Capabilities() connectors.Capabilities {
 
 func (f *fake) Test(context.Context) error { return nil }
 
+// NormalizeType knows only what the fixture needs, so that an invented name
+// still falls through to Unknown -- which is the property being checked.
+func (f *fake) NormalizeType(sourceType string) datatype.Type {
+	if f.defect == defectGuessesTypes {
+		// Everything is text, which is the type system failure this suite
+		// exists to catch: indistinguishable from knowledge until somebody
+		// charts it.
+		return datatype.Type{Kind: datatype.String, Source: sourceType}
+	}
+
+	return datatype.Normalize(sourceType, nil)
+}
+
 func (f *fake) Close() error { return nil }
 
 func (f *fake) Introspect(context.Context) ([]connectors.Table, error) {
@@ -94,7 +109,8 @@ func (f *fake) Introspect(context.Context) ([]connectors.Table, error) {
 	for i, name := range Columns() {
 		table.Columns = append(table.Columns, connectors.Column{
 			Name:       name,
-			SourceType: "FAKE",
+			SourceType: fakeSourceTypes[name],
+			Type:       f.NormalizeType(fakeSourceTypes[name]),
 			Nullable:   name == "notes" || (name == "id" && f.defect == defectNullableID),
 			Position:   i + 1,
 		})
@@ -147,13 +163,17 @@ func (f *fake) fixture() *connectors.Result {
 	result := &connectors.Result{}
 
 	for i, name := range Columns() {
-		sourceType := "FAKE"
+		sourceType := fakeSourceTypes[name]
 		if f.defect == defectNoSourceType {
 			sourceType = ""
 		}
 
 		result.Columns = append(result.Columns, connectors.Column{
-			Name: name, SourceType: sourceType, Nullable: name == "notes", Position: i + 1,
+			Name:       name,
+			SourceType: sourceType,
+			Type:       f.NormalizeType(sourceType),
+			Nullable:   name == "notes",
+			Position:   i + 1,
 		})
 	}
 
@@ -277,6 +297,24 @@ func (f *fake) series(query string) (*connectors.Result, error) {
 	}
 
 	return result, nil
+}
+
+/*
+fakeSourceTypes is what this dialect calls its own types.
+
+Ordinary SQL names rather than the toy vocabulary the rest of the fake uses,
+because the canonical-type check reads them through the shared table in
+[datatype] -- and a source whose type names were "FAKE" would make that check
+pass by being unmapped rather than by being right.
+*/
+var fakeSourceTypes = map[string]string{
+	"id":            "BIGINT",
+	"name":          "TEXT",
+	"notes":         "TEXT",
+	"flag":          "BOOLEAN",
+	"ratio":         "DOUBLE PRECISION",
+	"created_utc":   "TIMESTAMP WITH TIME ZONE",
+	"created_naive": "TIMESTAMP WITHOUT TIME ZONE",
 }
 
 // fakeMaxRows is the fake's row cap, small enough that the truncation check

@@ -238,6 +238,8 @@ func Checks() []Check {
 		{Property: "timestamps_keep_their_instant", Needs: NeedsFixture, Run: checkTimestamps},
 
 		{Property: "columns_describe_themselves", Needs: NeedsFixture, Run: checkColumnMetadata},
+		{Property: "columns_carry_a_canonical_type", Needs: NeedsFixture, Run: checkCanonicalTypes},
+		{Property: "an_unmapped_type_says_so", Needs: NeedsNothing, Run: checkUnmappedTypesSaySo},
 		{Property: "introspection_finds_the_fixture", Needs: NeedsIntrospection, Run: checkIntrospection},
 
 		{Property: "declared_placeholder_is_the_real_one", Needs: NeedsFixture, Run: checkPlaceholder},

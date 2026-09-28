@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/marcboeker/go-duckdb/v2"
+
+	"github.com/Mmd4LIFE/pivot/internal/datatype"
 )
 
 /*
@@ -254,4 +256,47 @@ JOIN information_schema.tables t
   ON t.table_schema = c.table_schema AND t.table_name = c.table_name
 WHERE c.table_schema NOT IN ('information_schema', 'pg_catalog')
 ORDER BY c.table_schema, c.table_name, c.ordinal_position`
+}
+
+/*
+NormalizeType maps DuckDB's type names onto Pivot's.
+
+DuckDB follows PostgreSQL closely, so most of this is [datatype.Base]. What is
+below is where it went its own way -- chiefly the explicit integer widths and
+the nested types, which are the reason DuckDB is worth having and the reason a
+flat type system has to say so rather than pretend.
+*/
+func (duckdbDialect) NormalizeType(sourceType string) datatype.Type {
+	return datatype.Normalize(sourceType, func(name string) (datatype.Type, bool) {
+		switch name {
+		case "tinyint", "int1":
+			return datatype.Type{Kind: datatype.Integer, Bits: 8}, true
+		case "utinyint", "usmallint", "uinteger", "ubigint", "hugeint", "uhugeint":
+			// Unsigned and 128-bit. Integer, with the width left unstated:
+			// claiming 64 bits for a hugeint would be a lie a consumer could
+			// act on.
+			return datatype.Type{Kind: datatype.Integer}, true
+
+		case "varchar", "bpchar":
+			return datatype.Type{Kind: datatype.String}, true
+
+		case "blob", "bit", "bitstring":
+			return datatype.Type{Kind: datatype.Binary}, true
+
+		case "timestamp_s", "timestamp_ms", "timestamp_ns", "timestamp_us":
+			// The same instant-less wall clock at different resolutions.
+			return datatype.Type{Kind: datatype.Timestamp}, true
+
+		case "list":
+			return datatype.Type{Kind: datatype.Array}, true
+
+		case "struct", "map", "union":
+			return datatype.Type{Kind: datatype.Struct}, true
+
+		case "enum":
+			return datatype.Type{Kind: datatype.String}, true
+		}
+
+		return datatype.Type{}, false
+	})
 }

@@ -74,6 +74,10 @@ var defects = map[string]struct {
 	"errors are not classified at all": {
 		defectRawErrors, []string{"a_syntax_error_says_so", "a_missing_table_says_so"},
 	},
+	"every type is guessed as text": {
+		defectGuessesTypes,
+		[]string{"columns_carry_a_canonical_type", "an_unmapped_type_says_so"},
+	},
 }
 
 /*
