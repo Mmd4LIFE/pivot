@@ -2,6 +2,12 @@
 
 **Status:** Accepted
 **Date:** 2026-09-19
+**Amended by:** [ADR-0010](0010-duckdb-is-an-opt-in-build.md)
+
+> **Amended 2026-09-28.** The "Revisit if" clause below — *CGo build complexity outweighs
+> the benefit* — turned out to be the case, and ADR-0010 records the measurements and
+> inverts the default: the shipped binary is pure Go and DuckDB is behind a build tag.
+> Everything else here stands.
 
 ## Context
 

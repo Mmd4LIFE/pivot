@@ -182,6 +182,51 @@ jobs:
       - name: Coverage on changed packages
         run: ./scripts/coverage-gate.sh origin/${{ github.base_ref || 'main' }} 80
 
+  # ── The DuckDB build ───────────────────────────────────────────────────────
+  #
+  # A separate job, because it is a separate product decision. ADR-0010 keeps
+  # DuckDB out of the default binary: adding it costs 59MB, the static linkage
+  # the container base depends on, and cross-compilation for every target.
+  #
+  # It still has to work. A build tag nothing compiles is a build tag that has
+  # already broken and nobody has noticed, so this builds it and runs the full
+  # connector suite -- conformance, Parquet and CSV reads, and the memory cap
+  # NFR 1.3 requires.
+  duckdb:
+    name: DuckDB build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Go toolchain from go.mod
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: Build and test with -tags duckdb
+        run: make test-duckdb
+
+      # The size is the whole reason this is opt-in, so it is recorded on every
+      # run rather than rediscovered the next time somebody asks.
+      - name: Record what CGo costs
+        run: |
+          CGO_ENABLED=0 go build -o /tmp/pivot-default ./cmd/pivot
+
+          default=$(stat -c %s /tmp/pivot-default)
+          duckdb=$(stat -c %s bin/pivot-duckdb)
+
+          {
+            echo "| Build | Size | Linkage |"
+            echo "|---|---|---|"
+            echo "| default (\`CGO_ENABLED=0\`) | $(( default / 1024 / 1024 )) MB | $(file -b /tmp/pivot-default | grep -o 'statically linked\|dynamically linked') |"
+            echo "| \`-tags duckdb\` | $(( duckdb / 1024 / 1024 )) MB | $(file -b bin/pivot-duckdb | grep -o 'statically linked\|dynamically linked') |"
+            echo ""
+            echo "ADR-0010 explains why the default is the one that ships."
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # ── Frontend ───────────────────────────────────────────────────────────────
   web:
     name: Frontend
