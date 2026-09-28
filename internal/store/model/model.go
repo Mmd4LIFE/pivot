@@ -271,3 +271,64 @@ type FederatedIdentity struct {
 	CreatedAt   dbtypes.Time
 	LastLoginAt dbtypes.NullTime
 }
+
+/*
+CatalogTable is a table Pivot has seen in a connected database.
+
+FirstSeenAt and LastSeenAt are what make a sync a comparison. Everything the
+source reports gets a fresh LastSeenAt; anything left behind is what has gone.
+
+RemovedAt is set rather than the row deleted. A table disappears for reasons
+that are not "somebody dropped it" -- a permissions change, a migration caught
+mid-flight -- and deleting would take the descriptions and the models pointing
+at it along with it.
+*/
+type CatalogTable struct {
+	ID           uuid.UUID
+	OrgID        uuid.UUID
+	ConnectionID uuid.UUID
+
+	SchemaName string
+	TableName  string
+	TableType  string
+	Comment    string
+
+	FirstSeenAt dbtypes.Time
+	LastSeenAt  dbtypes.Time
+	RemovedAt   dbtypes.NullTime
+
+	CreatedAt dbtypes.Time
+	UpdatedAt dbtypes.Time
+	Version   int64
+}
+
+/*
+CatalogColumn is a column of one.
+
+SourceType and CanonicalType are both kept. The first is what the database
+called it; the second is what internal/datatype made of that. Keeping the
+source spelling is what lets a stored catalog be re-normalized when Pivot
+learns a mapping it did not have, without going back to the warehouse to ask
+again.
+*/
+type CatalogColumn struct {
+	ID      uuid.UUID
+	OrgID   uuid.UUID
+	TableID uuid.UUID
+
+	ColumnName    string
+	SourceType    string
+	CanonicalType string
+
+	IsNullable dbtypes.Bool
+	Position   int64
+	Comment    string
+
+	FirstSeenAt dbtypes.Time
+	LastSeenAt  dbtypes.Time
+	RemovedAt   dbtypes.NullTime
+
+	CreatedAt dbtypes.Time
+	UpdatedAt dbtypes.Time
+	Version   int64
+}

@@ -470,3 +470,96 @@ func seedSource(t *testing.T, path string) {
 		t.Fatalf("seed the source: %v", err)
 	}
 }
+
+/*
+sync-catalog, end to end.
+
+A real store, a real SQLite source, and the command in between. What the unit
+tests cannot cover is that the pieces are wired together at all -- the syncer
+reaching the repository, the repository reaching the right organization, and
+the report reaching somebody's terminal.
+*/
+func TestSyncCatalogReportsWhatChanged(t *testing.T) {
+	t.Parallel()
+
+	dir, env := withOrg(t)
+	source := filepath.Join(dir, "warehouse.db")
+
+	seedSource(t, source)
+
+	if _, _, err := run(t, env, "admin", "add-connection",
+		"--kind", "sqlite", "--slug", "files", "--name", "Local files",
+		"--database", source); err != nil {
+		t.Fatalf("add-connection: %v", err)
+	}
+
+	// The first sync finds everything.
+	stdout, _, err := run(t, env, "admin", "sync-catalog", "files")
+	if err != nil {
+		t.Fatalf("first sync: %v", err)
+	}
+
+	for _, want := range []string{"1 tables", "added main.orders", "added main.orders.id"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("the first sync does not mention %q:\n%s", want, stdout)
+		}
+	}
+
+	// The second finds nothing, which is the whole point of a diff.
+	stdout, _, err = run(t, env, "admin", "sync-catalog", "files")
+	if err != nil {
+		t.Fatalf("second sync: %v", err)
+	}
+
+	if !strings.Contains(stdout, "Nothing changed") {
+		t.Errorf("an unchanged source was not reported as unchanged:\n%s", stdout)
+	}
+
+	// A new column shows up, and nothing else does.
+	addColumn(t, source)
+
+	stdout, _, err = run(t, env, "admin", "sync-catalog", "files")
+	if err != nil {
+		t.Fatalf("third sync: %v", err)
+	}
+
+	if !strings.Contains(stdout, "added main.orders.placed_at") {
+		t.Errorf("the new column was not reported:\n%s", stdout)
+	}
+
+	if strings.Contains(stdout, "added main.orders.id") {
+		t.Errorf("a column that did not change was reported again:\n%s", stdout)
+	}
+}
+
+func TestSyncCatalogNeedsAConnectionThatExists(t *testing.T) {
+	t.Parallel()
+
+	_, env := withOrg(t)
+
+	_, _, err := run(t, env, "admin", "sync-catalog", "nothing-here")
+	if err == nil {
+		t.Fatal("syncing a connection that does not exist succeeded")
+	}
+
+	if !strings.Contains(err.Error(), "nothing-here") {
+		t.Errorf("error = %v, want it to name the slug", err)
+	}
+}
+
+// addColumn changes the source between syncs.
+func addColumn(t *testing.T, path string) {
+	t.Helper()
+
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatalf("open the source: %v", err)
+	}
+
+	defer func() { _ = db.Close() }()
+
+	if _, err = db.ExecContext(t.Context(),
+		"ALTER TABLE orders ADD COLUMN placed_at TIMESTAMPTZ"); err != nil {
+		t.Fatalf("alter: %v", err)
+	}
+}

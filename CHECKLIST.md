@@ -60,8 +60,8 @@ At the end of every part, in this order:
 
 | | |
 |---|---|
-| **Last completed** | Part 19-a — The canonical type system |
-| **Next up** | **Part 19-b — The stored catalog, and a sync that diffs** |
+| **Last completed** | Part 19-b — The stored catalog, and a sync that diffs |
+| **Next up** | **Part 19-c — Foreign keys, and a sync that runs itself** |
 | **Current phase** | Phase 1 — Connect & Query → v0.1 |
 | **Branch** | `main` |
 | **Blockers** | None |
@@ -120,6 +120,14 @@ path *and* the catalog path — which was worth doing, because PostgreSQL's two 
 disagree on 13 of 23 columns and MySQL's `TIMESTAMP`/`DATETIME` naming is **inverted**
 relative to the standard.
 
+**Pivot remembers what is in a connected database, and can say what changed.**
+`catalog_tables` and `catalog_columns` hold it; `internal/catalog` reconciles it. A sync
+upserts what the source reports, sweeps what it did not, and prints the difference —
+`changed public.orders.total: type numeric became text` rather than "Synced.". Nothing is
+deleted: a table that disappears is marked gone, because a source drops one for reasons that
+are not "somebody dropped it", and a delete would take its history and every model pointing
+at it. `pivot admin sync-catalog <slug>` runs one.
+
 **DuckDB exists and is not in the shipped binary.**
 [ADR-0010](docs/architecture/adr/0010-duckdb-is-an-opt-in-build.md) measured what ADR-0004's
 CGo clause actually costs — the binary goes 42.5 MB → 101.8 MB, stops being statically
@@ -166,7 +174,7 @@ few points high; leave margin above 80%.
 
 ```
 Phase 0  Foundations        [██████████████████████████] 31/31   COMPLETE
-Phase 1  Connect & Query    [████████████              ]  6/15
+Phase 1  Connect & Query    [██████████████            ]  7/16
 Phase 2+ ...                                            (expanded as we approach)
 ```
 
@@ -407,21 +415,57 @@ without it.
 
 ---
 
-### - [ ] Part 19-b — The stored catalog, and a sync that diffs
+### - [x] Part 19-b — The stored catalog, and a sync that diffs ✅ 2026-09-28
 
-**Deliverable:** Pivot remembers what is in the database it is connected to, and notices
-when that changes.
+> **Split again** on 2026-09-28, twice over.
+>
+> *Foreign keys* moved to 19-c: they need a query per dialect and a second pair of tables,
+> and the part of this worth getting right is the diff.
+>
+> *Scheduling* moved with them, for a harder reason: **there is no job system.** ADR-0007
+> chose River and nothing has needed it yet, so "a scheduled sync" means building a job
+> runner first. A sync that runs when asked is the whole of the value here; running it on a
+> timer is a scheduling problem, and pretending otherwise would have meant a `time.Ticker`
+> in a package that has no business owning one.
 
-**Build:** The catalog tables, their repositories, streaming introspection, and a scheduled
-sync with change detection.
+**Deliverable:** Pivot remembers what is in the database it is connected to, and can say
+exactly what changed since last time.
+
+**Build:** The catalog tables, their repositories, and a sync that compares rather than
+replaces.
 
 **Done when:**
-- A sync detects added, removed and changed columns rather than replacing the catalog
-- Introspecting a large schema does not hold a connection for the whole of it
-- The catalog is tenant-scoped like everything else
-- Foreign keys and constraints are discovered, which is what Phase 3's join inference reads
+- A sync detects added, removed and changed columns **rather than replacing the catalog**,
+  and reports what it found
+- A table or column that disappears is **marked gone, not deleted** — a permissions blip or
+  a migration caught mid-flight should not destroy history that Phase 3's models point at
+- Introspecting a large schema does not hold the source connection for the whole of it —
+  the write to Pivot's own store happens after the source has been released
+- The catalog is tenant-scoped like everything else, and the isolation harness proves it
 
-**Refs:** `P1-CAT-001`, `P1-CAT-002`, `P1-CAT-004`
+**Refs:** `P1-CAT-001`, `P1-CAT-002`
+
+---
+
+### - [ ] Part 19-c — Foreign keys, and a sync that runs itself
+
+**Deliverable:** the catalog knows how tables relate, and keeps itself current without
+somebody typing a command.
+
+**Build:** Foreign key and constraint discovery per dialect, plus the job runner ADR-0007
+called for and the scheduled sync on top of it.
+
+**Done when:**
+- Foreign keys are discovered on every connector that has them, which is what Phase 3's
+  join inference reads
+- A sync runs on a schedule without a person, and a failed one is visible rather than silent
+- Two Pivots against one database do not both sync the same connection at the same time
+
+**Notes:** The job system is the larger half. ADR-0007 chose River, which needs PostgreSQL —
+and ADR-0003 supports SQLite too, so this part decides what a SQLite instance gets instead.
+That is a real decision, not a detail.
+
+**Refs:** `P1-CAT-002`, `P1-CAT-004`, ADR-0007
 
 ---
 
@@ -624,6 +668,7 @@ Phase 0's log is in
 
 | Date | Part | Shipped | Notes |
 |---|---|---|---|
+| 2026-09-28 | 19-b | Migration 00008 and the catalog tables on both engines, `CatalogRepo`, `internal/catalog` — the sync that reconciles rather than replaces — and `pivot admin sync-catalog` | **Split twice more.** Foreign keys went to 19-c because they need a query per dialect and a second pair of tables, and the part of this worth getting right is the diff. **Scheduling went with them for a harder reason: there is no job system.** ADR-0007 chose River and nothing has needed it yet, so \"a scheduled sync\" means building a job runner first — and 19-c has to decide what a SQLite instance gets, since River needs PostgreSQL and ADR-0003 supports both. Putting a `time.Ticker` in this package to tick the box would have been the wrong answer twice. **The design turns on one word: reconcile.** The obvious implementation deletes everything for a connection and inserts what it just read, and that is wrong three ways — it destroys `first_seen_at`, the descriptions and the identity every Phase 3 model will point at; it cannot answer \"what changed since yesterday\", which is the only reason to sync on a timer; and a source that answers with half its tables because a permission was revoked takes the other half of the catalog with it. So a sync **upserts what it sees, sweeps what it did not, and reports the difference**. Two statements per object and one at the end, no temporary table, no transaction held across a slow source. **Nothing is deleted.** A table that vanishes gets `removed_at` and keeps everything, and comes back unmarked if the source reports it again — reported as an addition, because that is what it is downstream, while the row keeps its original `first_seen_at`. A removal is reported **once**: re-reporting every long-dead table forever is how change detection becomes something people filter out of their alerts. **The report names things rather than counting them.** The sweep returns row counts; the snapshot turns them back into names, and the two are cross-checked — a disagreement is the signature of a concurrent sync on one connection, which is worth saying rather than hiding. **Only type and nullability count as a change.** A comment or a position moving is nothing any consumer can be wrong about, and reporting it would bury the two that are: a column whose type changed is a chart about to render nonsense, and one that became nullable is an aggregate about to skip rows. Both spellings are compared, because either can move alone — `varchar(50)` to `varchar(100)` changes the source and not the kind. **The source is released before Pivot writes**, proven by looking at the pool from *inside* the write: a fake store asserts on every record that the connector has nothing checked out — 8 writes, 0 held. Interleaving would hold a pooled connection against somebody's warehouse for as long as Pivot's own store takes. **The diff is tested against a fake store and the storage against real SQL**, deliberately: the diffing deserves exhaustive cases and a database per case would buy no confidence, while \"the upsert keeps the row's id and its `first_seen_at`\" is a claim only real SQL can settle — and it is checked on both engines. **The portability harness caught the new tables** before I declared them, for the second time in this phase, and `sqlc.yaml` needed 17 per-column SQLite overrides or the two models diverged on every timestamp. Two query shapes had to change for portability: PostgreSQL parameter *reuse* (`$8, $8`) becomes two separate SQLite parameters, and a redundant `org_id` in a subquery made sqlc emit `OrgID_2` — both removed rather than worked around. |
 | 2026-09-28 | 19-a | `internal/datatype` — the canonical type system — `NormalizeType` on the connector interface and all four dialects, and two conformance properties checking it against four real databases | **Split from Part 19**: a type system, a stored catalog, a sync that diffs and streaming introspection is four things, and the notes called the type system \"the load-bearing decision\" — Phase 2 picks charts from it, Phase 3 builds the semantic layer on it, Phase 7 grounds the AI in it, Part 24 formats from it. **The probe came before the design.** Creating a wide table in each source and reading its types back both ways showed what a normalizer is actually up against: **PostgreSQL's two vocabularies disagree on 13 of 23 columns** — `integer`/`INT4`, `timestamp with time zone`/`TIMESTAMPTZ`, `character varying`/`VARCHAR` — and for `timetz` and `money` pgx has no name at all, reporting the raw OIDs **\"1266\" and \"790\"**. Both are mapped, because a column whose canonical type depends on which code path asked is worse than one nobody has mapped: the disagreement is invisible. **Two distinctions justify the package.** Exact against approximate — `DECIMAL(10,2)` is money and `DOUBLE` is not, and conflating them is how a total renders as `0.30000000000000004`. And zoned against naive, which the conformance suite already treats as two separate properties, so a type system that merged them would have disagreed with checks two files away. **Unknown is a real answer**, carrying the source's spelling — a fallback to String is indistinguishable from knowledge at exactly the point where somebody charts the column, and the spelling is the search term for whoever adds the mapping. **The suite caught the biggest error immediately.** MySQL's naming is **inverted**: its `TIMESTAMP` is the *instant* (stored UTC, converted on read) and `DATETIME` is the wall-clock reading — the opposite of the standard and of PostgreSQL. The shared table was therefore exactly wrong for MySQL in the most damaging direction, on every row of every MySQL source, and the new property failed on the first run. **MySQL also has no boolean.** `BOOLEAN` is `TINYINT(1)`, and `data_type` flattens it to `tinyint`; the introspect query now selects `column_type`, which keeps the width and the `unsigned` it was also dropping. Treating `tinyint(1)` as boolean is a heuristic — the one JDBC makes as `tinyInt1isBit`, and the alternative is every MySQL boolean rendering as 0 and 1 forever. The driver cannot make the distinction at all, so **the Done-when I wrote this morning demanding the two paths agree exactly was too strong**: it now says they agree wherever the driver can express the distinction, and `flag` is not among the columns asserted. **SQLite has no types, only declarations** — so the fixture declares `TIMESTAMPTZ`, which SQLite accepts and hands back unchanged. Nothing about the storage distinguishes an instant from a clock reading there, which makes the author's declared name the best information anyone will ever have. `NormalizeType` went on `Connector` rather than only `Dialect` for a real future caller: when Pivot learns a mapping it lacked, the stored catalog can be re-normalized from the spellings it kept without going back to somebody's warehouse. A nineteenth defect in `broken_test.go` — a connector that guesses every type as text — proves both new properties can fail. Coverage 97.9% on the new package. |
 | 2026-09-28 | 18-c | The DuckDB connector behind a `duckdb` build tag, `RegisterAbsent` for connectors compiled out, [ADR-0010](docs/architecture/adr/0010-duckdb-is-an-opt-in-build.md), `make test-duckdb` and a CI job for it | **This part was a measurement, and the measurement decided it.** ADR-0004 accepted CGo and named the escape: *revisit if CGo build complexity outweighs the benefit*. It did. Built the same tree both ways: the binary goes **42.5 MB → 101.8 MB** (ADR-0004 predicted \"roughly 30MB\"), stops being **statically linked** — it pulls `libstdc++`, `libgcc_s`, `libm` and `libc`, and the container base is `distroless/static`, which has none of them — and **stops cross-compiling at all**: `darwin/arm64` and `linux/arm64` both die with `undefined: bindings.Type`, where the default build makes all six targets from one runner. **`windows/arm64` has no published bindings**, so a mandatory DuckDB drops the release from six platforms to five. Two more signals: the module is **deprecated** in favour of `duckdb/duckdb-go`, which **cannot be required under that path** because v1.8.5 still declares itself as `marcboeker/go-duckdb`; and fetching **327 MB** of prebuilt libraries failed once with a connection reset before succeeding on retry. So ADR-0010 **inverts ADR-0004's default**: the shipped binary is pure Go and DuckDB is opt-in. The release matrix is unchanged, which is the point. **DuckDB still works and is still held to the bar** — it passes all seventeen conformance properties, reads Parquet and CSV directly (the reason it is worth having), opens a file read-only like SQLite, and enforces the NFR 1.3 memory cap rather than suggesting it: a sort far over a 128MB budget is refused, and a connection that says nothing gets 1GB rather than DuckDB's own default of most of the host. **The fourth connector found a latent bug in the other three.** DuckDB reports the *same interrupt* for a cancellation and a timeout, so a query killed by its own deadline came back classified \"canceled\". Only the context knows which it was — and PostgreSQL's 57014 and MySQL's 1317 have exactly the same ambiguity, passing until now only because their drivers happened to surface the context error instead. `classify` now upgrades a dialect's \"canceled\" to \"timeout\" when the deadline expired, for every connector. The distinction is the operator's: a timeout means raise the limit, a cancellation means somebody walked away. **A build tag nothing compiles has already broken**, so `make test-duckdb` builds, **lints** and tests the tagged half — lints because `.golangci.yml` pins its own build tags and a single run never sees both sides of a tagged pair, which would have left `duckdb.go` the one file in the repository nothing checked. A CI job runs it and records the size table in the run summary. **Asking a default build for DuckDB explains itself**: `RegisterAbsent` distinguishes *compiled out* from *does not exist*, and the message names ADR-0010, `make build-duckdb`, and sqlite as the always-present alternative. It is not listed in `--kind`, because offering a connector that cannot be opened turns one clear failure into a confusing one later. **Knock-on:** Part 27's sample dataset was specified as DuckDB and a default binary has none, so it is SQLite now — which reads a file, is always present, and is entirely adequate for a first run. And ADR-0004 gained an `Amended by:` line: the ADR conventions had only *supersede*, which is for a decision reversed outright, so amending is now written down as its own thing — otherwise a reader arriving at 0004 follows advice the project no longer takes. |
 | 2026-09-28 | 18-b | The SQLite connector (read-only), migration 00007 dropping the connector-kind enumeration, a `concurrent_queries_all_succeed` conformance property, and per-connector governance tests | **Split again**: DuckDB is not a fourth connector, it is a build decision — CGo, a per-platform release matrix, and the first real use of the `nocgo` tag, which is named in `.golangci.yml` and used by no file. It is Part 18-c. SQLite alone already satisfies \"a connector that reads a file\". **SQLite passes all seventeen properties.** It is the first source with no host, no port and no credentials, and `Config` was built around all five — which cost less than expected, because `Validate` was always the dialect's job. **Two deliberate suite changes.** A subject may now supply no DDL: a connector opened read-only cannot build its own fixture, and that is not an edge case — read-only is the *correct* way to open a BI source, and an account granted SELECT and nothing else is how a careful warehouse administrator hands out access. And a seventeenth property, `concurrent_queries_all_succeed`, because 18-a gave every query its own connection and a watcher goroutine, and a pool that hands one connection to two queries shows up nowhere else in a suite that runs one query at a time. **SQLite is opened read-only, always.** `mode=ro` is set *after* anything `Options` supplied, so a configuration cannot turn it off — tested by trying. Proven by causing INSERT, UPDATE, DELETE, DROP and CREATE to fail *and* by reading the file back through a separate handle, because an error that arrived after the write would satisfy the first half and none of the intent. The fields SQLite cannot use are **refused rather than ignored**: a connection carrying a username and password looks authenticated in every listing, and a SQLite file is protected by its filesystem permissions and nothing else. **The CLI was overreaching.** It required `--db-host` and `--username` of its own accord, which made a file-backed connector impossible to configure; what a connection needs is the dialect's business now. And `--no-test` used to skip validation entirely, so it would store a configuration the connector would refuse — it now skips *dialing*, not checking. **The real find was a bug shipped in 18-a.** The connections table carried `CHECK (kind IN ('postgres'))`, and its own comment called the resulting migration-per-connector deliberate. The very next connector was added without one, so **a MySQL connection could be configured, tested, and then refused by the database on the way in** — the connector tests never reached storage and the storage tests only ever named \"postgres\", so nothing looked. 00007 drops the enumeration on both engines (SQLite needs a full table rebuild; it cannot alter a CHECK). The deeper reason to drop rather than widen it: which connectors exist is a property of the **binary**, not the data — 18-c puts DuckDB behind a build tag, so two Pivots from one commit will disagree about which kinds are valid and no schema can be right for both. **The guard that would have caught it** is `TestEveryRegisteredConnectorCanBeStored`, driven off the registry so a fourth connector is covered by existing. Verified in both directions: with 00007 removed it fails on both engines and names the kind. **Governance is proven rather than declared.** The pool test from Part 16 asserted `MaxOpenConnections` — the setting, which says only that it was applied. It now asserts `WaitCount > 0`, which is the number of times a goroutine actually queued for a connection: 14 waits out of 16 queries, on all three connectors. Without that a pool test passes on a fast machine where nothing ever overlapped. **SQLite cancellation is proven from the pool**, not from a second connection — an embedded database has no second place to look, so the check is that a query issued immediately afterwards on a one-connection pool returns in milliseconds rather than queueing behind a recursive CTE counting to six hundred million. |

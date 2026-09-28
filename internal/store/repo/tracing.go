@@ -537,3 +537,59 @@ func (t *tracingQuerier) DeleteStaleLoginAttempts(ctx context.Context, a1 model.
 
 	return t.next.DeleteStaleLoginAttempts(ctx, a1)
 }
+
+func (t *tracingQuerier) UpsertCatalogTable(ctx context.Context, a1 model.UpsertCatalogTableParams) (model.CatalogTable, error) {
+	ctx, span := observability.Start(ctx, "db.UpsertCatalogTable")
+	defer span.End()
+
+	return t.next.UpsertCatalogTable(ctx, a1)
+}
+
+func (t *tracingQuerier) UpsertCatalogColumn(ctx context.Context, a1 model.UpsertCatalogColumnParams) (model.CatalogColumn, error) {
+	ctx, span := observability.Start(ctx, "db.UpsertCatalogColumn")
+	defer span.End()
+
+	return t.next.UpsertCatalogColumn(ctx, a1)
+}
+
+func (t *tracingQuerier) SweepCatalogTables(ctx context.Context, a1 model.SweepCatalogTablesParams) (int64, error) {
+	ctx, span := observability.Start(ctx, "db.SweepCatalogTables")
+	defer span.End()
+
+	return t.next.SweepCatalogTables(ctx, a1)
+}
+
+func (t *tracingQuerier) SweepCatalogColumns(ctx context.Context, a1 model.SweepCatalogColumnsParams) (int64, error) {
+	ctx, span := observability.Start(ctx, "db.SweepCatalogColumns")
+	defer span.End()
+
+	return t.next.SweepCatalogColumns(ctx, a1)
+}
+
+func (t *tracingQuerier) ListCatalogTables(ctx context.Context, a1 model.ListCatalogTablesParams) ([]model.CatalogTable, error) {
+	ctx, span := observability.Start(ctx, "db.ListCatalogTables")
+	defer span.End()
+
+	return t.next.ListCatalogTables(ctx, a1)
+}
+
+func (t *tracingQuerier) ListCatalogColumns(ctx context.Context, a1 model.ListCatalogColumnsParams) ([]model.CatalogColumn, error) {
+	ctx, span := observability.Start(ctx, "db.ListCatalogColumns")
+	defer span.End()
+
+	return t.next.ListCatalogColumns(ctx, a1)
+}
+
+func (t *tracingQuerier) ListCatalogColumnsForTable(ctx context.Context, a1 model.ListCatalogColumnsForTableParams) ([]model.CatalogColumn, error) {
+	ctx, span := observability.Start(ctx, "db.ListCatalogColumnsForTable")
+	defer span.End()
+
+	return t.next.ListCatalogColumnsForTable(ctx, a1)
+}
+
+func (t *tracingQuerier) GetCatalogTable(ctx context.Context, a1 model.GetCatalogTableParams) (model.CatalogTable, error) {
+	ctx, span := observability.Start(ctx, "db.GetCatalogTable")
+	defer span.End()
+
+	return t.next.GetCatalogTable(ctx, a1)
+}

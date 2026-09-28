@@ -101,6 +101,18 @@ type Querier interface {
 	UpdateConnection(context.Context, model.UpdateConnectionParams) (model.Connection, error)
 	RecordConnectionTest(context.Context, model.RecordConnectionTestParams) (int64, error)
 	SoftDeleteConnection(context.Context, model.SoftDeleteConnectionParams) (int64, error)
+
+	// The catalog: what Pivot has seen in a connected database. A sync is an
+	// upsert per object followed by one sweep, which is what makes it a
+	// comparison rather than a replacement.
+	UpsertCatalogTable(context.Context, model.UpsertCatalogTableParams) (model.CatalogTable, error)
+	UpsertCatalogColumn(context.Context, model.UpsertCatalogColumnParams) (model.CatalogColumn, error)
+	SweepCatalogTables(context.Context, model.SweepCatalogTablesParams) (int64, error)
+	SweepCatalogColumns(context.Context, model.SweepCatalogColumnsParams) (int64, error)
+	ListCatalogTables(context.Context, model.ListCatalogTablesParams) ([]model.CatalogTable, error)
+	ListCatalogColumns(context.Context, model.ListCatalogColumnsParams) ([]model.CatalogColumn, error)
+	ListCatalogColumnsForTable(context.Context, model.ListCatalogColumnsForTableParams) ([]model.CatalogColumn, error)
+	GetCatalogTable(context.Context, model.GetCatalogTableParams) (model.CatalogTable, error)
 	CountConnections(context.Context, uuid.UUID) (int64, error)
 
 	// Identity providers and the federated identities they issue.

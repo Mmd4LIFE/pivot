@@ -62,6 +62,7 @@ type Querier interface {
 	// Replacing an IdP's attributes must not disturb manually assigned ones, so
 	// deletion is scoped by source.
 	DeleteUserAttributesBySource(ctx context.Context, arg DeleteUserAttributesBySourceParams) (int64, error)
+	GetCatalogTable(ctx context.Context, arg GetCatalogTableParams) (CatalogTable, error)
 	GetConnection(ctx context.Context, arg GetConnectionParams) (Connection, error)
 	GetConnectionBySlug(ctx context.Context, arg GetConnectionBySlugParams) (Connection, error)
 	// Federated identities.
@@ -89,6 +90,9 @@ type Querier interface {
 	GrantRole(ctx context.Context, arg GrantRoleParams) error
 	IsGroupMember(ctx context.Context, arg IsGroupMemberParams) (bool, error)
 	LinkFederatedIdentity(ctx context.Context, arg LinkFederatedIdentityParams) (FederatedIdentity, error)
+	ListCatalogColumns(ctx context.Context, arg ListCatalogColumnsParams) ([]CatalogColumn, error)
+	ListCatalogColumnsForTable(ctx context.Context, arg ListCatalogColumnsForTableParams) ([]CatalogColumn, error)
+	ListCatalogTables(ctx context.Context, arg ListCatalogTablesParams) ([]CatalogTable, error)
 	ListChildGroups(ctx context.Context, arg ListChildGroupsParams) ([]Group, error)
 	ListConnections(ctx context.Context, orgID uuid.UUID) ([]Connection, error)
 	ListFederatedIdentitiesForUser(ctx context.Context, arg ListFederatedIdentitiesForUserParams) ([]FederatedIdentity, error)
@@ -157,6 +161,8 @@ type Querier interface {
 	SoftDeleteIdentityProvider(ctx context.Context, arg SoftDeleteIdentityProviderParams) (int64, error)
 	SoftDeleteOrganization(ctx context.Context, arg SoftDeleteOrganizationParams) (int64, error)
 	SoftDeleteUser(ctx context.Context, arg SoftDeleteUserParams) (int64, error)
+	SweepCatalogColumns(ctx context.Context, arg SweepCatalogColumnsParams) (int64, error)
+	SweepCatalogTables(ctx context.Context, arg SweepCatalogTablesParams) (int64, error)
 	// Sliding idle expiry. The absolute cap is never touched, so an active session
 	// still ends when it reaches it.
 	TouchSession(ctx context.Context, arg TouchSessionParams) (int64, error)
@@ -173,6 +179,26 @@ type Querier interface {
 	// Password changes are separate from profile updates so a general "update the
 	// user" call can never rewrite a credential by accident.
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) (int64, error)
+	UpsertCatalogColumn(ctx context.Context, arg UpsertCatalogColumnParams) (CatalogColumn, error)
+	// The catalog: what Pivot has seen in a connected database.
+	//
+	// Placeholders are positional in both dialects and must appear in the same
+	// order, because the two generated parameter structs are converted directly
+	// into one another and a differing field order breaks the conversion - the
+	// lesson of Part 4-a. Query files are ASCII: sqlc's SQLite generator miscounts
+	// byte offsets on multibyte characters and corrupts generation.
+	//
+	// No placeholder is used twice, even where PostgreSQL would allow it. SQLite's
+	// `?` is positional and a repeat is a *second* parameter, so ? appearing twice
+	// here and `?` appearing twice there produce parameter structs of different
+	// sizes - which is exactly the divergence the note above is about.
+	//
+	// The shape of a sync is upsert-then-sweep. Every table the source reports is
+	// upserted with a fresh last_seen_at; afterwards, anything in this connection
+	// not seen by that sweep is marked removed. That is what makes a sync a
+	// comparison rather than a replacement, and it needs no temporary table and no
+	// transaction held open across the whole source.
+	UpsertCatalogTable(ctx context.Context, arg UpsertCatalogTableParams) (CatalogTable, error)
 	// Attributes feed row-level security in Phase 4, so their provenance matters:
 	// an IdP sync must not silently overwrite a deliberate manual assignment, and
 	// vice versa. The source column records which wrote a value, and the upsert
