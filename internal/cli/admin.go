@@ -44,6 +44,7 @@ administrator. Anyone who can run them already has the database credentials.`,
 		newAddProviderCmd(env, flags),
 		newAddConnectionCmd(env, flags),
 		newTestConnectionCmd(env, flags),
+		newSyncCatalogCmd(env, flags),
 		newListConnectionsCmd(env, flags),
 	)
 

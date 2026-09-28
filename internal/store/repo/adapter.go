@@ -1067,3 +1067,143 @@ func (a *liteQuerier) SoftDeleteConnection(ctx context.Context, p model.SoftDele
 func (a *liteQuerier) CountConnections(ctx context.Context, orgID uuid.UUID) (int64, error) {
 	return a.q.CountConnections(ctx, orgID)
 }
+
+// --- catalog ---
+
+func (a *pgQuerier) UpsertCatalogTable(ctx context.Context, p model.UpsertCatalogTableParams) (model.CatalogTable, error) {
+	row, err := a.q.UpsertCatalogTable(ctx, pg.UpsertCatalogTableParams(p))
+
+	return model.CatalogTable(row), err
+}
+
+func (a *pgQuerier) UpsertCatalogColumn(ctx context.Context, p model.UpsertCatalogColumnParams) (model.CatalogColumn, error) {
+	row, err := a.q.UpsertCatalogColumn(ctx, pg.UpsertCatalogColumnParams(p))
+
+	return model.CatalogColumn(row), err
+}
+
+func (a *pgQuerier) SweepCatalogTables(ctx context.Context, p model.SweepCatalogTablesParams) (int64, error) {
+	return a.q.SweepCatalogTables(ctx, pg.SweepCatalogTablesParams(p))
+}
+
+func (a *pgQuerier) SweepCatalogColumns(ctx context.Context, p model.SweepCatalogColumnsParams) (int64, error) {
+	return a.q.SweepCatalogColumns(ctx, pg.SweepCatalogColumnsParams(p))
+}
+
+func (a *pgQuerier) ListCatalogTables(ctx context.Context, p model.ListCatalogTablesParams) ([]model.CatalogTable, error) {
+	rows, err := a.q.ListCatalogTables(ctx, pg.ListCatalogTablesParams(p))
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.CatalogTable, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, model.CatalogTable(row))
+	}
+
+	return out, nil
+}
+
+func (a *pgQuerier) ListCatalogColumns(ctx context.Context, p model.ListCatalogColumnsParams) ([]model.CatalogColumn, error) {
+	rows, err := a.q.ListCatalogColumns(ctx, pg.ListCatalogColumnsParams(p))
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.CatalogColumn, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, model.CatalogColumn(row))
+	}
+
+	return out, nil
+}
+
+func (a *pgQuerier) ListCatalogColumnsForTable(ctx context.Context, p model.ListCatalogColumnsForTableParams) ([]model.CatalogColumn, error) {
+	rows, err := a.q.ListCatalogColumnsForTable(ctx, pg.ListCatalogColumnsForTableParams(p))
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.CatalogColumn, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, model.CatalogColumn(row))
+	}
+
+	return out, nil
+}
+
+func (a *pgQuerier) GetCatalogTable(ctx context.Context, p model.GetCatalogTableParams) (model.CatalogTable, error) {
+	row, err := a.q.GetCatalogTable(ctx, pg.GetCatalogTableParams(p))
+
+	return model.CatalogTable(row), err
+}
+
+// --- catalog ---
+
+func (a *liteQuerier) UpsertCatalogTable(ctx context.Context, p model.UpsertCatalogTableParams) (model.CatalogTable, error) {
+	row, err := a.q.UpsertCatalogTable(ctx, lite.UpsertCatalogTableParams(p))
+
+	return model.CatalogTable(row), err
+}
+
+func (a *liteQuerier) UpsertCatalogColumn(ctx context.Context, p model.UpsertCatalogColumnParams) (model.CatalogColumn, error) {
+	row, err := a.q.UpsertCatalogColumn(ctx, lite.UpsertCatalogColumnParams(p))
+
+	return model.CatalogColumn(row), err
+}
+
+func (a *liteQuerier) SweepCatalogTables(ctx context.Context, p model.SweepCatalogTablesParams) (int64, error) {
+	return a.q.SweepCatalogTables(ctx, lite.SweepCatalogTablesParams(p))
+}
+
+func (a *liteQuerier) SweepCatalogColumns(ctx context.Context, p model.SweepCatalogColumnsParams) (int64, error) {
+	return a.q.SweepCatalogColumns(ctx, lite.SweepCatalogColumnsParams(p))
+}
+
+func (a *liteQuerier) ListCatalogTables(ctx context.Context, p model.ListCatalogTablesParams) ([]model.CatalogTable, error) {
+	rows, err := a.q.ListCatalogTables(ctx, lite.ListCatalogTablesParams(p))
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.CatalogTable, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, model.CatalogTable(row))
+	}
+
+	return out, nil
+}
+
+func (a *liteQuerier) ListCatalogColumns(ctx context.Context, p model.ListCatalogColumnsParams) ([]model.CatalogColumn, error) {
+	rows, err := a.q.ListCatalogColumns(ctx, lite.ListCatalogColumnsParams(p))
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.CatalogColumn, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, model.CatalogColumn(row))
+	}
+
+	return out, nil
+}
+
+func (a *liteQuerier) ListCatalogColumnsForTable(ctx context.Context, p model.ListCatalogColumnsForTableParams) ([]model.CatalogColumn, error) {
+	rows, err := a.q.ListCatalogColumnsForTable(ctx, lite.ListCatalogColumnsForTableParams(p))
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.CatalogColumn, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, model.CatalogColumn(row))
+	}
+
+	return out, nil
+}
+
+func (a *liteQuerier) GetCatalogTable(ctx context.Context, p model.GetCatalogTableParams) (model.CatalogTable, error) {
+	row, err := a.q.GetCatalogTable(ctx, lite.GetCatalogTableParams(p))
+
+	return model.CatalogTable(row), err
+}

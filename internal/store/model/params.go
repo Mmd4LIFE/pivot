@@ -536,3 +536,73 @@ type SoftDeleteConnectionParams struct {
 	ID        uuid.UUID
 	OrgID     uuid.UUID
 }
+
+// --- catalog -----------------------------------------------------------------
+
+type UpsertCatalogTableParams struct {
+	ID           uuid.UUID
+	OrgID        uuid.UUID
+	ConnectionID uuid.UUID
+	SchemaName   string
+	TableName    string
+	TableType    string
+	Comment      string
+	FirstSeenAt  dbtypes.Time
+	LastSeenAt   dbtypes.Time
+}
+
+type UpsertCatalogColumnParams struct {
+	ID            uuid.UUID
+	OrgID         uuid.UUID
+	TableID       uuid.UUID
+	ColumnName    string
+	SourceType    string
+	CanonicalType string
+	IsNullable    dbtypes.Bool
+	Position      int64
+	Comment       string
+	FirstSeenAt   dbtypes.Time
+	LastSeenAt    dbtypes.Time
+}
+
+// SweepCatalogTablesParams marks everything not seen by a sync as gone.
+//
+// LastSeenAt is the cutoff rather than the value: rows whose last_seen_at is
+// older than this were not touched by the sync that just ran.
+type SweepCatalogTablesParams struct {
+	RemovedAt    dbtypes.NullTime
+	UpdatedAt    dbtypes.Time
+	ConnectionID uuid.UUID
+	OrgID        uuid.UUID
+	LastSeenAt   dbtypes.Time
+}
+
+type SweepCatalogColumnsParams struct {
+	RemovedAt    dbtypes.NullTime
+	UpdatedAt    dbtypes.Time
+	OrgID        uuid.UUID
+	LastSeenAt   dbtypes.Time
+	ConnectionID uuid.UUID
+}
+
+type ListCatalogTablesParams struct {
+	ConnectionID uuid.UUID
+	OrgID        uuid.UUID
+}
+
+type ListCatalogColumnsParams struct {
+	ConnectionID uuid.UUID
+	OrgID        uuid.UUID
+}
+
+type ListCatalogColumnsForTableParams struct {
+	TableID uuid.UUID
+	OrgID   uuid.UUID
+}
+
+type GetCatalogTableParams struct {
+	ConnectionID uuid.UUID
+	OrgID        uuid.UUID
+	SchemaName   string
+	TableName    string
+}

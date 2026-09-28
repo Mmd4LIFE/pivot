@@ -233,6 +233,43 @@ sql:
           - column: identity_providers.deleted_at
             go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.NullTime
 
+          # -- catalog_tables ----------------------------------------------------
+          - column: catalog_tables.id
+            go_type: github.com/google/uuid.UUID
+          - column: catalog_tables.org_id
+            go_type: github.com/google/uuid.UUID
+          - column: catalog_tables.connection_id
+            go_type: github.com/google/uuid.UUID
+          - column: catalog_tables.first_seen_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
+          - column: catalog_tables.last_seen_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
+          - column: catalog_tables.removed_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.NullTime
+          - column: catalog_tables.created_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
+          - column: catalog_tables.updated_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
+
+          # -- catalog_columns ---------------------------------------------------
+          - column: catalog_columns.id
+            go_type: github.com/google/uuid.UUID
+          - column: catalog_columns.org_id
+            go_type: github.com/google/uuid.UUID
+          - column: catalog_columns.table_id
+            go_type: github.com/google/uuid.UUID
+          - column: catalog_columns.is_nullable
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Bool
+          - column: catalog_columns.first_seen_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
+          - column: catalog_columns.last_seen_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
+          - column: catalog_columns.removed_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.NullTime
+          - column: catalog_columns.created_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
+          - column: catalog_columns.updated_at
+            go_type: github.com/Mmd4LIFE/pivot/internal/store/dbtypes.Time
           # -- connections ----------------------------------------------------
           - column: connections.id
             go_type: github.com/google/uuid.UUID

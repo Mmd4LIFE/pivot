@@ -11,6 +11,40 @@ import (
 	"github.com/google/uuid"
 )
 
+type CatalogColumn struct {
+	ID            uuid.UUID
+	OrgID         uuid.UUID
+	TableID       uuid.UUID
+	ColumnName    string
+	SourceType    string
+	CanonicalType string
+	IsNullable    dbtypes.Bool
+	Position      int64
+	Comment       string
+	FirstSeenAt   dbtypes.Time
+	LastSeenAt    dbtypes.Time
+	RemovedAt     dbtypes.NullTime
+	CreatedAt     dbtypes.Time
+	UpdatedAt     dbtypes.Time
+	Version       int64
+}
+
+type CatalogTable struct {
+	ID           uuid.UUID
+	OrgID        uuid.UUID
+	ConnectionID uuid.UUID
+	SchemaName   string
+	TableName    string
+	TableType    string
+	Comment      string
+	FirstSeenAt  dbtypes.Time
+	LastSeenAt   dbtypes.Time
+	RemovedAt    dbtypes.NullTime
+	CreatedAt    dbtypes.Time
+	UpdatedAt    dbtypes.Time
+	Version      int64
+}
+
 type Connection struct {
 	ID                  uuid.UUID
 	OrgID               uuid.UUID
