@@ -32,6 +32,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/Mmd4LIFE/pivot/internal/datatype"
 )
 
 // Kind identifies a connector implementation.
@@ -195,6 +197,20 @@ type Connector interface {
 	// inventing the type now would be designing against an imaginary caller.
 	Query(ctx context.Context, sql string, args ...any) (*Result, error)
 
+	/*
+		NormalizeType says what one of this source's type names means.
+
+		Already applied to every [Column] this connector returns, so nothing
+		reading a result or a catalog needs to call it. It is on the interface
+		for the case that does: when Pivot learns a mapping it did not have,
+		the stored catalog can be re-normalized from the source spellings it
+		kept, without going back to somebody's warehouse to ask again.
+
+		That is also why [Column.SourceType] is kept verbatim. The pair is the
+		whole mechanism for fixing a type system in the field.
+	*/
+	NormalizeType(sourceType string) datatype.Type
+
 	// Close releases the pool. A connector that is not closed when its
 	// connection is deleted is a pool held against somebody's warehouse
 	// forever.
@@ -218,17 +234,23 @@ const (
 	TableTypeView  TableType = "view"
 )
 
-// Column is one column, with the source's own type name.
+// Column is one column, with the source's own type name and Pivot's.
 //
-// SourceType is kept verbatim rather than only normalized, because Part 19's
-// normalization will be wrong about something and the original is the only way
-// to find out what.
+// SourceType is kept verbatim as well as normalized, because the normalization
+// will be wrong about something and the original is the only way to find out
+// what. [datatype.Type] carries it too, so the pair travels together.
 type Column struct {
 	Name       string
 	SourceType string
-	Nullable   bool
-	Position   int
-	Comment    string
+
+	// Type is the canonical type. Unknown for a source type nobody has
+	// mapped, which is a real answer rather than a failure -- see
+	// [datatype.Unknown].
+	Type datatype.Type
+
+	Nullable bool
+	Position int
+	Comment  string
 }
 
 // Result is the outcome of a query.

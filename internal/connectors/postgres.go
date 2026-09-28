@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Mmd4LIFE/pivot/internal/datatype"
+
 	"github.com/jackc/pgx/v5/pgconn"
 
 	// The database/sql driver this connector opens. Imported here rather than
@@ -270,4 +272,51 @@ JOIN information_schema.tables t
 WHERE c.table_schema NOT IN ('pg_catalog', 'information_schema')
   AND t.table_type IN ('BASE TABLE', 'VIEW')
 ORDER BY c.table_schema, c.table_name, c.ordinal_position`
+}
+
+/*
+NormalizeType maps PostgreSQL's type names onto Pivot's.
+
+Two vocabularies reach here for the same column. `information_schema` says
+"timestamp with time zone" and "double precision"; pgx says "TIMESTAMPTZ" and
+"FLOAT8". Most of both are in [datatype.Base]; what is below is what
+PostgreSQL alone spells, plus the two cases where pgx gives up.
+
+For `timetz` and `money` pgx has no name at all and reports the type's OID --
+"1266" and "790". Mapped here rather than left Unknown, because a column whose
+canonical type depends on which code path asked is worse than one nobody has
+mapped: the catalog would say Time and a query result would say Unknown for
+the same column, and the disagreement would be invisible.
+*/
+func (postgresDialect) NormalizeType(sourceType string) datatype.Type {
+	return datatype.Normalize(sourceType, func(name string) (datatype.Type, bool) {
+		switch name {
+		case "time with time zone", "timetz", "1266":
+			return datatype.Type{Kind: datatype.Time}, true
+
+		case "790":
+			// money. Exact, and PostgreSQL formats it by locale -- which is
+			// the reason it is Decimal rather than String.
+			return datatype.Type{Kind: datatype.Decimal}, true
+
+		case "name", "citext", "xml":
+			return datatype.Type{Kind: datatype.String}, true
+
+		case "serial", "serial4":
+			return datatype.Type{Kind: datatype.Integer, Bits: 32}, true
+
+		case "bigserial", "serial8":
+			return datatype.Type{Kind: datatype.Integer, Bits: 64}, true
+
+		case "oid":
+			return datatype.Type{Kind: datatype.Integer, Bits: 32}, true
+
+		case "user-defined", "composite", "record":
+			// An enum, a domain or a composite. Not Unknown: the catalog is
+			// telling us it is a shape rather than refusing to say.
+			return datatype.Type{Kind: datatype.Struct}, true
+		}
+
+		return datatype.Type{}, false
+	})
 }

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/Mmd4LIFE/pivot/internal/datatype"
 )
 
 /*
@@ -65,6 +67,20 @@ type Dialect interface {
 	// showing, and the order its rows arrive in. Part 19 replaces this with
 	// something richer; it is here so Introspect is real rather than a stub.
 	IntrospectQuery() string
+
+	/*
+		NormalizeType turns one of this source's type names into a canonical
+		one.
+
+		Per dialect because the names are, and because the same source says it
+		two ways: PostgreSQL's catalog reports "timestamp with time zone" and
+		its driver reports "TIMESTAMPTZ" for the same column. Both arrive here
+		and both have to come out the same.
+
+		A name the dialect does not recognize should fall through to
+		[datatype.Normalize], which knows the spellings everybody shares.
+	*/
+	NormalizeType(sourceType string) datatype.Type
 }
 
 /*
@@ -206,6 +222,11 @@ func (c *SQLConnector) Kind() Kind { return c.dialect.Kind() }
 // Capabilities is what its dialect can do.
 func (c *SQLConnector) Capabilities() Capabilities { return c.dialect.Capabilities() }
 
+// NormalizeType says what one of this source's type names means.
+func (c *SQLConnector) NormalizeType(sourceType string) datatype.Type {
+	return c.dialect.NormalizeType(sourceType)
+}
+
 // DB exposes the pool, for a dialect that needs to run something of its own.
 func (c *SQLConnector) DB() *sql.DB { return c.db }
 
@@ -268,7 +289,11 @@ func (c *SQLConnector) Introspect(ctx context.Context) ([]Table, error) {
 		}
 
 		current.Columns = append(current.Columns, Column{
-			Name: column, SourceType: sourceType, Nullable: nullable, Position: position,
+			Name:       column,
+			SourceType: sourceType,
+			Type:       c.dialect.NormalizeType(sourceType),
+			Nullable:   nullable,
+			Position:   position,
 		})
 	}
 
@@ -309,7 +334,9 @@ func (c *SQLConnector) Query(ctx context.Context, query string, args ...any) (*R
 		nullable, known := t.Nullable()
 
 		result.Columns = append(result.Columns, Column{
-			Name: t.Name(), SourceType: t.DatabaseTypeName(),
+			Name:       t.Name(),
+			SourceType: t.DatabaseTypeName(),
+			Type:       c.dialect.NormalizeType(t.DatabaseTypeName()),
 			// A driver that will not say is reported as nullable, because
 			// assuming NOT NULL and being wrong is a panic on a nil scan.
 			Nullable: nullable || !known,
