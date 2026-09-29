@@ -66,6 +66,22 @@ export default defineConfig({
 
           if (/node_modules\/(react|react-dom|scheduler)\//.test(id)) return "react";
 
+          /*
+           * The virtualizer is excluded for the same reason CodeMirror is: it
+           * is only reached from the editor route's dynamic import, and naming
+           * a chunk here would force it into the eagerly-loaded one and undo
+           * that. TanStack Router and Query stay, because the shell needs them
+           * before anything is interactive.
+           *
+           * `virtual-core` as well as `react-virtual`, and that is not
+           * belt-and-braces. The first version matched only the React wrapper,
+           * so its core went to the eager chunk and took 7.7 KB of the budget
+           * with it while the lazy chunk held 4 KB of our own component. A
+           * package excluded here must have its dependencies excluded too, or
+           * the exclusion buys nothing.
+           */
+          if (/node_modules\/@tanstack\/(react-)?virtual(-core)?\//.test(id)) return undefined;
+
           if (id.includes("node_modules/@tanstack/")) return "tanstack";
 
           return "vendor";

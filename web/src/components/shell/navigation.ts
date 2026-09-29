@@ -16,10 +16,21 @@ import * as Glyph from "./glyphs";
 
 export interface NavItem {
   /** The route path. Must exist in the tree or the link is dead. */
-  to: "/" | "/dashboards" | "/questions" | "/connections" | "/people" | "/settings" | "/account";
+  to:
+    | "/"
+    | "/browse"
+    | "/editor"
+    | "/dashboards"
+    | "/questions"
+    | "/connections"
+    | "/people"
+    | "/settings"
+    | "/account";
 
   titleKey:
     | "nav.home"
+    | "nav.browse"
+    | "nav.editor"
     | "nav.dashboards"
     | "nav.questions"
     | "nav.connections"
@@ -46,6 +57,24 @@ export interface NavItem {
 
 export const NAVIGATION: readonly NavItem[] = [
   { to: "/", titleKey: "nav.home", icon: Glyph.Home, keywords: "start overview" },
+
+  /*
+   * Browse before the editor, because that is the order somebody new needs
+   * them in: an editor is useless to a person who does not yet know what their
+   * warehouse contains, and an empty box is where most first sessions end.
+   */
+  {
+    to: "/browse",
+    titleKey: "nav.browse",
+    icon: Glyph.Database,
+    keywords: "tables schema catalog databases explore",
+  },
+  {
+    to: "/editor",
+    titleKey: "nav.editor",
+    icon: Glyph.Question,
+    keywords: "sql query run native",
+  },
   {
     to: "/dashboards",
     titleKey: "nav.dashboards",

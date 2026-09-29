@@ -425,3 +425,90 @@ func TestClosingReleasesThePool(t *testing.T) {
 		t.Error("a closed connector still runs queries")
 	}
 }
+
+/*
+PostgreSQL says where the problem is, and Pivot keeps it.
+
+The editor underlines the offending word using this, and the underline is worth
+more than the sentence above it. Three codes, because the first version of this
+attached the position only to the two that looked like parse errors and missed
+42703 -- an undefined column, which is the most common typo there is and
+exactly the case an underline helps with. It was found by running a query, not
+by a test, which is why there is now a test.
+*/
+func TestPostgresSaysWhereTheProblemIs(t *testing.T) {
+	t.Parallel()
+
+	c := open(t, liveTarget(t).config())
+
+	cases := map[string]struct {
+		sql  string
+		word string
+	}{
+		"an undefined column": {"SELECT nope FROM information_schema.tables", "nope"},
+		// PostgreSQL's parser reads past the empty target list and objects at
+		// WHERE. The expectation here is what the server actually says, not
+		// what a reader might predict -- the claim under test is that Pivot
+		// carries the position faithfully, not that it can guess a parser.
+		"a syntax error":     {"SELECT FROM WHERE", "WHERE"},
+		"an undefined table": {"SELECT * FROM no_such_table_here", "no_such_table_here"},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := c.Query(t.Context(), tc.sql)
+			if err == nil {
+				t.Fatalf("%q succeeded", tc.sql)
+			}
+
+			var connErr *connectors.Error
+			if !errors.As(err, &connErr) {
+				t.Fatalf("not a connectors.Error: %v", err)
+			}
+
+			if connErr.Position <= 0 {
+				t.Fatalf("no position reported for %q: %v", tc.sql, connErr)
+			}
+
+			// The offset is 1-based and in bytes, and it must land on the word
+			// PostgreSQL objected to -- a position that is merely non-zero
+			// would pass a weaker test and still underline the wrong thing.
+			if at := connErr.Position - 1; at >= len(tc.sql) ||
+				!strings.HasPrefix(tc.sql[at:], tc.word) {
+				t.Errorf("position %d points at %q, want the start of %q",
+					connErr.Position, tc.sql[min(at, len(tc.sql)):], tc.word)
+			}
+		})
+	}
+}
+
+/*
+A failure with nothing to point at reports no position, rather than guessing.
+
+Asserted against a real failure rather than a skip. A test that cannot run is
+worse than no test -- Part 18-a shipped one of those for a whole phase and it
+was green the entire time.
+*/
+func TestAFailureWithNothingToPointAtHasNoPosition(t *testing.T) {
+	t.Parallel()
+
+	c := open(t, liveTarget(t).config())
+
+	// Division by zero is a runtime error, not a parse error: PostgreSQL
+	// reports it without a position because there is no offending token.
+	_, err := c.Query(t.Context(), "SELECT 1 / 0")
+	if err == nil {
+		t.Fatal("dividing by zero succeeded")
+	}
+
+	var connErr *connectors.Error
+	if !errors.As(err, &connErr) {
+		t.Fatalf("not a connectors.Error: %v", err)
+	}
+
+	if connErr.Position != 0 {
+		t.Errorf("a runtime failure reported position %d", connErr.Position)
+	}
+}

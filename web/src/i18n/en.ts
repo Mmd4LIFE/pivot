@@ -201,6 +201,8 @@ export const en = {
     skipToContent: "Skip to content",
 
     home: "Home",
+    browse: "Browse",
+    editor: "SQL editor",
     dashboards: "Dashboards",
     questions: "Questions",
     connections: "Connections",
@@ -248,6 +250,38 @@ export const en = {
     noConnections: "No sources are connected yet",
     noConnectionsBody:
       "Add one with `pivot admin add-connection`, then come back. The screens for this arrive in Part 26.",
+  },
+
+  browse: {
+    title: "Browse",
+    subtitle: "The databases Pivot is connected to, and what is in them.",
+    connectionSubtitle: "Tables the last catalog sync saw. Nothing here touches the source.",
+
+    allSources: "All sources",
+    filter: "Filter tables and columns",
+    open: "Open",
+
+    columns: "{{count}} column",
+    columns_other: "{{count}} columns",
+
+    notSynced: "This connection has not been read yet",
+    notSyncedBody:
+      "Run `pivot admin sync-catalog {{slug}}` to read its schema. Until then there is nothing to browse and autocomplete is empty.",
+
+    noMatches: "Nothing matches",
+    noMatchesBody: "No table or column here matches that.",
+  },
+
+  grid: {
+    label: "Query results",
+    caption: "{{rows}} rows and {{columns}} columns of results",
+    resize: "Resize the {{column}} column",
+
+    selected: "{{count}} cell selected",
+    selected_other: "{{count}} cells selected",
+
+    sum: "Sum",
+    copy: "Copy (⌘C)",
   },
 
   pages: {
