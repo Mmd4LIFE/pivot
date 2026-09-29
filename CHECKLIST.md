@@ -60,8 +60,8 @@ At the end of every part, in this order:
 
 | | |
 |---|---|
-| **Last completed** | Part 22-b — The query monitor, and a kill that crosses processes |
-| **Next up** | **Part 23 — The SQL editor** |
+| **Last completed** | Part 23-a — A query endpoint, and a page that runs one |
+| **Next up** | **Part 23-b — The editor people keep** |
 | **Current phase** | Phase 1 — Connect & Query → v0.1 |
 | **Branch** | `main` |
 | **Blockers** | None |
@@ -200,6 +200,14 @@ clock is what separates a query that is still going from one whose process died,
 instance with a wrong clock can neither declare itself alive nor be declared dead by
 somebody else's disagreement.
 
+**Somebody can open Pivot in a browser, type SQL, and see the answer.** `POST
+/api/v1/queries` runs a statement through the pipeline and returns its rows; `/editor`
+is where it is typed. That endpoint is the **first production caller of everything built
+since Part 20-b** — the executor, the result cache, the governor and the monitor were all
+constructed only by tests until now, which is a strange place for load-bearing code to sit.
+A cached answer says so in the browser, a truncated one says so, a NULL is a word and not an
+empty cell, and a statement the source rejects comes back in the source's own words.
+
 **DuckDB exists and is not in the shipped binary.**
 [ADR-0010](docs/architecture/adr/0010-duckdb-is-an-opt-in-build.md) measured what ADR-0004's
 CGo clause actually costs — the binary goes 42.5 MB → 101.8 MB, stops being statically
@@ -213,10 +221,6 @@ out and what to do instead.
   Phase 0 groundwork", and Phase 1 is twelve parts in. Parts 10 through 21 are recorded
   here and nowhere else, so the file is now wrong rather than merely incomplete — it is
   the first place somebody looks for what changed. Not owned by any part in this phase.
-- **The pipeline is not wired into `serve`.** [query.Executor](internal/query/executor.go)
-  and the cache exist and are tested, and nothing constructs them outside tests, because
-  there is no endpoint yet. Part 23 builds the SQL editor and is where that lands — worth
-  knowing because until then the cache's metrics report on a cache nothing uses.
 - **`query_log` is a subset of what `docs/architecture/data-model.md` specifies**, and
   deliberately. Part 20-b built the columns its Done-when names. Missing: `semantic_query`
   and `source_type`/`source_id`, which have nothing to put in them until Phase 3 compiles a
@@ -267,7 +271,7 @@ few points high; leave margin above 80%.
 
 ```
 Phase 0  Foundations        [██████████████████████████] 31/31   COMPLETE
-Phase 1  Connect & Query    [███████████████████       ] 14/19
+Phase 1  Connect & Query    [████████████████████      ] 15/20
 Phase 2+ ...                                            (expanded as we approach)
 ```
 
@@ -759,13 +763,40 @@ nothing in Pivot has one today.
 
 ---
 
-### - [ ] Part 23 — The SQL editor
+### - [x] Part 23-a — A query endpoint, and a page that runs one ✅ 2026-09-29
 
-**Deliverable:** somebody can write a query in Pivot and run it.
+**Deliverable:** somebody opens Pivot in a browser, types SQL, and sees the answer.
 
-**Build:** CodeMirror 6 with per-dialect highlighting, schema-aware autocomplete, execute /
-cancel / run-selection, a multi-tab workspace with persisted state, inline errors mapped to
-line and column, and query history.
+**Build:** `POST /api/v1/queries` over [query.Executor], the wiring that finally gives the
+pipeline a production caller, and a results page: pick a connection, run a statement, read
+the rows.
+
+**Done when:**
+- A query typed in the browser reaches a real source and its rows come back
+- The endpoint goes through the pipeline and nothing else — the single-door test still
+  passes, and a cached query says so
+- An error from the source arrives as the error envelope, with the source's own message
+- **No new dependency enters the bundle**, and the budget still passes. CodeMirror is 23-b's to justify
+
+**Notes:** **Part 23 was split.** Everything built since Part 20-b has had no production
+caller: `query.Executor`, the cache, the governor and the monitor are all constructed only
+in tests. That is the load-bearing half and it is invisible from the outside, so it ships
+first and on its own — with the plainest possible editor, which is a textarea.
+
+The editor people actually keep is 23-b, and it carries a decision this part deliberately
+avoids: CodeMirror does not fit the remaining 14 KB of the bundle budget.
+
+**Refs:** `P1-SQL-003`, `P1-QE-001`
+
+---
+
+### - [ ] Part 23-b — The editor people keep
+
+**Deliverable:** writing SQL in Pivot is pleasant enough that nobody opens another tool.
+
+**Build:** CodeMirror 6 with per-dialect highlighting, schema-aware autocomplete, cancel and
+run-selection, a multi-tab workspace with persisted state, inline errors mapped to line and
+column, and query history.
 
 **Done when:**
 - Autocomplete knows the tables and columns of the connection in the current tab
@@ -779,7 +810,7 @@ line and column, and query history.
 185.7 KB. CodeMirror does not fit in 14 KB, so this part either code-splits the editor
 route or changes the NFR deliberately. It does not quietly exceed it.
 
-**Refs:** `P1-SQL-001` … `P1-SQL-004`, `P1-SQL-006`, `P1-SQL-007`, `P1-SQL-010`
+**Refs:** `P1-SQL-001`, `P1-SQL-002`, `P1-SQL-004`, `P1-SQL-006`, `P1-SQL-007`, `P1-SQL-010`
 
 ---
 
@@ -893,6 +924,7 @@ Phase 0's log is in
 
 | Date | Part | Shipped | Notes |
 |---|---|---|---|
+| 2026-09-29 | 23-a | `POST /api/v1/queries` and `GET /api/v1/connections`, the pipeline wired into `serve`, and `/editor` — a page that runs a statement and shows the rows | **Part 23 was split**, and the reason is that its two halves are a wiring problem and a dependency decision. Everything built since Part 20-b — the executor, the result cache, the governor, the monitor — had **no production caller** and was constructed only by tests. That is the load-bearing half, it is invisible from outside, and it ships first with the plainest possible editor: a textarea. CodeMirror is 23-b's, because it does not fit the bundle budget and that call has to be made deliberately rather than by a merge. **The single-door test earned its keep immediately.** The first version of the handler imported `internal/connectors` for `Column` and `Error`, and Part 20-b's structural test failed on the spot — which is exactly what it is for. The fix was the better design rather than an allowlist entry: the pipeline now exposes `query.Column` and `query.SourceMessage`, so a caller never reaches past the door to the package the door stands in front of. **The permission is checked twice on purpose.** The route gates on `native_query` and the pipeline enforces it again; the pipeline's is the one that counts, and the route's refuses before a body is read. Editor deliberately does not carry it — raw SQL bypasses semantic row-level security, so it is a separate grant rather than part of "can edit". **The result is materialized, and the doc comment says so.** The pipeline streams end to end and this endpoint does not preserve that: it reads the whole result to answer with one JSON document, which is right for an editor showing a page of rows and wrong for an export. The row cap is what keeps that honest — the whole result is bounded by a number an administrator set — and Part 24 owns streaming to a client. **A source error carries the source's own words.** "no such column: nope" is the entire answer; a generic failure sends somebody to check their connection, their permissions and their network before they find the typo. Verified in a browser as well as in tests. **The browser tests are about the three things that are easy to drop at the last step**: a truncated result saying so, a cache hit saying so, and a NULL that is not an empty string — the connectors have a conformance property keeping those two apart across four databases and the last five pixels is a silly place to lose it. **Measured live**: the same query twice reads miss then hit, 1 ms then 0 ms. Bundle **189.8 KB against the 200 KB budget** and no new dependency; my own Done-when said "untouched", which was not true of a page that adds its own code, so it was corrected rather than left to drift. **A connections endpoint had to come with it** — nothing listed the sources, so an editor had no way to pick one. Deliberately thin: an id, a slug, a name and a kind, with disabled connections omitted rather than offered greyed out. **Also found:** a computed column (`COUNT(*)`, `ROUND(...)`) reports `unknown` with an empty source type, because SQLite declares no type for an expression. That is `datatype.Unknown` behaving as designed, but the grid renders the empty spelling as a blank that looks like something missing — noted for 23-b rather than papered over. |
 | 2026-09-29 | 22-b | Migration 00012 and query ownership on both engines, `query.Monitor` and `query.Supervisor`, `pivot admin queries` with `--usage` and `--kill`, and a per-user usage aggregate | **Three designs were written and judged before one was built**, because this part makes a real commitment to multi-instance and the obvious design is wrong. That design — record the source's session id, let any instance connect and kill — covers **one connector of four**: `Canceler` is implemented by MySQL alone, PostgreSQL runs on the shared pool so no session is identifiable, and SQLite and DuckDB are *embedded*, where the client and the server are the same goroutine and an out-of-band kill is not unimplemented but **inexpressible**. All three judges reached the same winner independently. **The kill travels as a row; the killing is the one that already worked.** The killer writes `cancel_requested_at`, the owning instance polls for its own rows and cancels the context it handed the connector — the path Part 20-b measured stopping a real query in `pg_stat_activity`. Nothing new kills anything, which is the whole design: the part reduces to routing an intent to the process holding the query. **There is no `instances` table**, and that was the decision the panel turned on. A registry of processes needs a lifecycle, a heartbeat of its own and something to collect the dead ones, all to answer a question an opaque owner token on the row answers directly. The token dies with the rows it stamped. It is a random uuid rather than a hostname or pid, because both are reused — a restarted pod would inherit its predecessor's abandoned rows and they would look alive. **The heartbeat is written with the database's clock**, not Go's, and staleness is judged against it, so an instance whose clock is wrong can neither declare itself alive nor be declared dead by somebody else's disagreement. That graft came from a losing design and is what makes the winner correct. **Three states, not two**: owned and beating, owned and gone quiet, and never claimed at all — the third is a row written before this migration, and calling it abandoned would be inventing a failure. `--kill` says which one it is, because the question after pressing the button is whether anything will act on it. **Nothing reaps an abandoned row.** A metadata-database blip stops every heartbeat in the fleet at once and a reaper would then bury every healthy query in an audit table, permanently; migration 00010 already argued that a row left running is the last thing Pivot knew rather than a lie. **The poll and the heartbeat run on their own pool** (`SiblingStore`), because SQLite's store pool is one connection by design and a ticker on it would sit between every request and the database — all three judges raised this independently. **My own test was flaky and I found it before shipping it**: killing a three-row SQLite query failed about one run in four because the query finished first, and the log then honestly said "succeeded". A test for stopping something has to be given something still going; it uses a recursive CTE now. **The cross-process test cannot prove the easy thing**: two Executors, two Monitors, two owner tokens, no shared pointer, and the killer's monitor is asserted *unable* to kill the query directly before the row is written. Verified in the failing direction by not stamping the owner, at which point it says *the kill did not cross the boundary*. Also: the per-user usage aggregate hit the portability tax again — SQLite's `COALESCE(SUM(...), 0)` made sqlc emit `interface{}` where PostgreSQL's `::bigint` gave `int64`, and the whole-struct conversion caught it at compile time. |
 | 2026-09-29 | 22-a | `query.Governor` — per-user and per-connection admission — an organization-wide timeout ceiling, `config.QueryConfig` making every query limit a setting, `pivot admin limits`, and `pivot admin list-connections --limits` | **Part 22 was split**, and the reason is that its two halves share no code, no file and no test. Admission needed nothing that did not exist: the pipeline already has both identities in hand after planning, `loggedStream.Close` is already an exactly-once hook to release on. Termination needs a mechanism Pivot does not have, and 22-b is where that decision gets made rather than buried in this one. **"The pool already queues" is not a defense, and the measurement is what settles it.** A pool of four does block the fifth query — but when a connection frees, `database/sql` hands it to a waiter chosen with `rand.IntN` (`connRequests.TakeRandom`, sql.go:1554), so the longest-waiting caller has no better claim on it than the newest. That is the right trade for a driver managing a resource and the wrong one for a product deciding whose work matters. The pool is also invisible: a caller queued inside it cannot be told they are waiting. **The per-user limit is the whole fairness property**, and it is easy to ship a semaphore that enforces a total and does nothing about the case it was built for — one person running four exports. So the test is two callers: the analyst fills their own allowance and the administrator, who has run nothing, is served immediately. Verified in the failing direction by keying the per-user slot on the connection alone, at which point it says *alice ran a third query against a per-user limit of two*. **The acquisition order is the property, not an implementation detail.** The user's slot is taken first and the connection's second; the other way round, a caller already at their own limit would sit on source capacity while waiting for themselves, so one person queueing behind their own exports would block everybody — exactly what the per-user limit exists to prevent. **Admission sits after the cache**, because a hit opens nothing and asks the source for nothing; making it queue for capacity it will not use would be a limit that punishes the fast path. **Three outcomes, deliberately not one.** Admitted, refused because a limit is full, and the caller gave up — an operator deciding whether to raise a limit needs to tell "the system is full" from "browser tabs closed", and a single rejected count loses exactly that. **The timeout ceiling can only shorten.** The effective timeout is the smaller of the organization's and the connection's, so an operator can bound every query at once and cannot accidentally lengthen one that was deliberately made short; a sub-second ceiling clamps to one second rather than rounding to zero, which would have meant "no limit". **A setting that reaches nothing is worse than no setting**, so `NewGovernorFrom`/`NewCacheFrom` are the one place configuration becomes components and a test checks the numbers arrive — a value can otherwise be bound, validated, printed and enforce nothing, with every step passing its own test. `internal/config` cannot import `internal/query` (query depends on the store and the store depends on config), so the defaults are written twice and pinned together by a test in an external test package. **Review found a real gap in "visible in the product"**: `max_rows`, `query_timeout_seconds` and `max_open_conns` are stored per connection, are the limits a query most often meets, and no command displayed any of them — `pivot admin limits` reads configuration and cannot see them. `list-connections --limits` now does, printing a zero as the default it means rather than as "none allowed". |
 | 2026-09-28 | 21 | `internal/policy` — the caller fingerprint the cache key is derived from — an L1 result cache in `internal/query` bounded by bytes, `cache_status` made writable on both engines, migration 00011 constraining it, cache metrics, and [ADR-0012](docs/architecture/adr/0012-the-l1-cache-holds-rows.md) | **ADR-0006 could not be implemented as written, and the two places it could not are the part.** Its L1 tier stores "Arrow batches", which was written before Part 20-a existed and now means `arrow.RecordBatch` — **reference counted**, and a cached entry is shared by construction, so sharing one safely would be a discipline rather than a property. L1 stores decoded rows instead, which also keeps a hit and a miss on **one conversion path** so the two cannot drift about a decimal rendered as text or a truncation flag. And its key hashes "the resolved policy set", which does not exist before Phase 4 — the answer is `policy.Fingerprint`, one value with one job, resolving from permissions today and from RLS predicates later, with nothing above it changing. ADR-0012 records both; ADR-0006 gained an `Amended by:` line. **The headline property is proven by counting opens, not by reading the code**: an analyst and an administrator run the same SQL against the same connection and the source is opened **twice**. Verified in the failing direction by removing the fingerprint from the key, at which point the test says *an administrator was served a result cached for an analyst*. **The fingerprint fails closed everywhere.** A caller who cannot be resolved has no fingerprint, two unresolved fingerprints are deliberately **not equal to each other**, and a query with no fingerprint is neither cached nor served from cache — because treating "could not resolve" as "the empty policy set" makes every unresolvable caller collide with every other, and the store being unavailable is exactly when nobody is watching. Background work gets its own fingerprint rather than the empty one, since a caller holding no grants would otherwise share it. **A cache and Part 20-a's constant-memory streaming are in direct tension, and the rule is a byte budget.** Rows are teed aside while the entry is small and the copy is abandoned the moment it is not — abandoned, not truncated, because a trimmed entry is a partial answer served as a whole one with no flag on it. So dashboard cards are cached and exports stream exactly as before. **`cache_status` was not writable.** 20-b shipped the column and `FinishQueryLog` never named it, so writing a status would have compiled, stored nothing, and left every assertion passing — a silent no-op behind one of this part's own Done-whens. Both engines' statements gained it and the placeholders were renumbered together. Migration **00011** then constrains it to hit/miss/uncached, because `state` beside it has a CHECK and the asymmetry read as deliberate; SQLite needed the full table rebuild. **The part found a data race shipped since Phase 0.** `authz.Cache` incremented its hit and miss counters under a *read* lock — several goroutines hold one at once by definition — and no test had ever called `Check` concurrently, so the detector had nothing to detect. Part 21 puts that cache on every query. Counters are atomic now, and a concurrency test is permanent; the test stub had the same bug and was fixed with it. **p95 is measured, not asserted**: 200 samples, **p50 295µs, p95 421µs, max 752µs** against a 200 ms budget, with the source opened exactly once across the measurement so the number is of cache hits rather than of a fast local file. The query log cannot answer this question — its duration is whole milliseconds and it measures how long the caller took to read. **Invalidation is a generation counter per connection**, folded into the key and bumped from the existing change-event bus, so editing a connection makes everything derived from it unreachable with one increment and no scan. Two corrections from review before shipping: a cached stream handed callers the cache's own row slice, which makes one caller's misbehavior everybody's, and `MaxRows` of 0 and 100000 name the same cap but derived different keys. |

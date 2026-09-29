@@ -216,6 +216,34 @@ export const en = {
     openMenu: "Open menu",
   },
 
+  editor: {
+    title: "SQL editor",
+    subtitle: "Write a statement, run it against a connected source, and read the answer.",
+
+    source: "Source",
+    statement: "SQL statement",
+    run: "Run",
+    running: "Running…",
+
+    rows: "{{count}} row",
+    rows_other: "{{count}} rows",
+    tookMs: "{{ms}} ms",
+    cached: "From cache",
+    truncated: "Truncated",
+
+    failed: "The source refused this statement",
+
+    resultsCaption: "The result of the statement, {{count}} row",
+    resultsCaption_other: "The result of the statement, {{count}} rows",
+
+    noRows: "No rows",
+    noRowsBody: "The statement ran and returned nothing.",
+
+    noConnections: "No sources are connected yet",
+    noConnectionsBody:
+      "Add one with `pivot admin add-connection`, then come back. The screens for this arrive in Part 26.",
+  },
+
   pages: {
     home: {
       title: "Home",

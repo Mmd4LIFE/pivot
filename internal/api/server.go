@@ -49,6 +49,9 @@ type Server struct {
 	// spa serves the browser application. Nil serves none.
 	spa http.Handler
 
+	// queries runs SQL against a connected source. Nil serves no query API.
+	queries *QueryHandler
+
 	// metrics is the instrument set; metricsHandler serves the endpoint. Both
 	// nil leaves the middleware off and /metrics unregistered.
 	metrics        *observability.Metrics
@@ -127,6 +130,18 @@ func WithSPA(h http.Handler) Option {
 	return func(s *Server) { s.spa = h }
 }
 
+/*
+WithQueries serves the query endpoint.
+
+An Option rather than always-on, because it takes a pipeline and a pipeline
+takes a connector factory, a cache and a governor -- none of which a server
+serving only administration has any use for, and all of which a test would
+otherwise have to build to get a router.
+*/
+func WithQueries(h *QueryHandler) Option {
+	return func(s *Server) { s.queries = h }
+}
+
 // New builds a server. It does not bind a port; [Server.Run] does that.
 func New(cfg config.ServerConfig, log *slog.Logger, opts ...Option) *Server {
 	s := &Server{cfg: cfg, log: log}
@@ -151,6 +166,8 @@ func New(cfg config.ServerConfig, log *slog.Logger, opts ...Option) *Server {
 		OIDC:  s.oidc,
 		Setup: s.setup,
 		SPA:   s.spa,
+
+		Queries: s.queries,
 
 		// Not an Option, because there is no deployment that wants it off and
 		// every one that wants it needs no configuration: it takes a logger,

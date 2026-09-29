@@ -215,6 +215,43 @@ export interface SetupRequest {
 /** The body of `GET /healthz`. */
 export type HealthResponse = JSONResponse<paths["/healthz"]["get"]["responses"]["200"]>;
 
+/** A source that can be queried. */
+export interface QueryableConnection {
+  id: string;
+  slug: string;
+  name: string;
+  kind: string;
+}
+
+export interface QueryableConnections {
+  connections: QueryableConnection[];
+}
+
+/** One column of a result. */
+export interface QueryColumn {
+  name: string;
+  /** The canonical kind, which the grid formats on. */
+  type: string;
+  /** What the source called it, kept verbatim for whoever is debugging. */
+  sourceType: string;
+}
+
+/**
+ * A result.
+ *
+ * `truncated` is not decoration. It means the result met the row cap, and a
+ * grid that ignores it shows a partial answer as a whole one.
+ */
+export interface QueryResult {
+  queryId: string;
+  columns: QueryColumn[];
+  rows: unknown[][];
+  rowCount: number;
+  truncated: boolean;
+  cacheStatus: "hit" | "miss" | "uncached";
+  durationMs: number;
+}
+
 export const api = {
   me: (signal?: AbortSignal) =>
     request<SessionEnvelope>("/auth/me", signal ? { signal } : {}),
@@ -240,6 +277,15 @@ export const api = {
     request<void>("/auth/password", {
       method: "POST",
       body: { currentPassword, newPassword },
+    }),
+
+  queryableConnections: (signal?: AbortSignal) =>
+    request<QueryableConnections>("/connections", signal ? { signal } : {}),
+
+  runQuery: (connectionId: string, sql: string) =>
+    request<QueryResult>("/queries", {
+      method: "POST",
+      body: { connectionId, sql },
     }),
 
   setupStatus: (signal?: AbortSignal) =>

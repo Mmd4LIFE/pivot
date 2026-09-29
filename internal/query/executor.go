@@ -729,3 +729,65 @@ func configFor(c model.Connection) connectors.Config {
 		MaxRows:             c.MaxRows,
 	}
 }
+
+/*
+Column describes one column of a result, without the caller having to know a
+connector exists.
+
+The pipeline is the single door (Part 20-b), and a door that hands back
+connector types is not one: every caller then imports the package the door was
+built to stand in front of, and the structural test that keeps them out fails
+for the one caller that is supposed to be there.
+
+So this is a small, deliberate copy rather than an alias. It carries both the
+canonical kind and the source's own spelling, because a client formats on the
+first and a person debugging wants the second -- which is why Part 19-a kept
+the spelling at all.
+*/
+type Column struct {
+	Name       string
+	Type       string
+	SourceType string
+	Nullable   bool
+}
+
+// Columns describes the result's shape. Valid before the first read.
+func (e *Execution) Columns() []Column {
+	source := e.Stream.Columns()
+	out := make([]Column, 0, len(source))
+
+	for _, c := range source {
+		out = append(out, Column{
+			Name:       c.Name,
+			Type:       string(c.Type.Kind),
+			SourceType: c.SourceType,
+			Nullable:   c.Nullable,
+		})
+	}
+
+	return out
+}
+
+/*
+SourceMessage extracts what the source itself said about a failure.
+
+"syntax error at or near FROM" is the whole answer to why a query failed, and
+anything that paraphrases it loses the only useful part. Exported here for the
+same reason [Column] is: the caller must be able to get at it without reaching
+past the pipeline into the connector package.
+
+Falls back to the error's own text when the failure came from somewhere other
+than a source, so a caller always has something to show.
+*/
+func SourceMessage(err error) string {
+	var connErr *connectors.Error
+	if errors.As(err, &connErr) && connErr.Message != "" {
+		return connErr.Message
+	}
+
+	if err == nil {
+		return ""
+	}
+
+	return err.Error()
+}

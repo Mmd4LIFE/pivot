@@ -62,6 +62,7 @@ export const keys = {
   providers: ["auth", "providers"] as const,
   setupStatus: ["setup", "status"] as const,
   sessions: ["auth", "sessions"] as const,
+  queryableConnections: ["query", "connections"] as const,
 };
 
 /**
@@ -147,6 +148,31 @@ export function useSessions() {
     queryKey: keys.sessions,
     queryFn: ({ signal }: { signal: AbortSignal }) => api.sessions(signal),
     staleTime: 0,
+  });
+}
+
+/** The sources this person may query. */
+export function useQueryableConnections() {
+  return useQuery({
+    queryKey: keys.queryableConnections,
+    queryFn: ({ signal }: { signal: AbortSignal }) => api.queryableConnections(signal),
+  });
+}
+
+/**
+ * Run a statement.
+ *
+ * A mutation rather than a query, and not because it writes -- most statements
+ * do not. It is a mutation because running one is an act somebody takes at a
+ * moment they choose: it must not be retried on a whim, refetched on focus, or
+ * served from a cache this layer keeps. Pivot has a result cache of its own,
+ * on the server, which knows about the row cap and who is asking; a second one
+ * here would answer from neither.
+ */
+export function useRunQuery() {
+  return useMutation({
+    mutationFn: ({ connectionId, sql }: { connectionId: string; sql: string }) =>
+      api.runQuery(connectionId, sql),
   });
 }
 
