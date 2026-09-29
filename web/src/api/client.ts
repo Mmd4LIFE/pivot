@@ -20,6 +20,13 @@ export interface ApiErrorBody {
   details?: { field?: string; message: string }[];
   requestId?: string;
   docs: string;
+
+  /**
+   * Where in what was sent the problem is: a 1-based byte offset, present only
+   * where that means something. The query endpoint sets it when the source
+   * reported one, which today means PostgreSQL parse errors.
+   */
+  position?: number;
 }
 
 /**
@@ -45,6 +52,12 @@ export class ApiError extends Error {
    */
   readonly traceId: string | undefined;
 
+  /**
+   * Where in what was sent the problem is, when the thing that refused it
+   * said. A 1-based byte offset; undefined almost always.
+   */
+  readonly position: number | undefined;
+
   constructor(status: number, body: Partial<ApiErrorBody>, traceId?: string) {
     super(body.message ?? `Request failed with status ${status}`);
     this.name = "ApiError";
@@ -54,6 +67,7 @@ export class ApiError extends Error {
     this.requestId = body.requestId;
     this.docs = body.docs;
     this.traceId = traceId;
+    this.position = body.position;
   }
 
   /** Whether this means "you are not signed in". */
@@ -227,6 +241,25 @@ export interface QueryableConnections {
   connections: QueryableConnection[];
 }
 
+/** A table the last catalog sync saw. */
+export interface SchemaTable {
+  schema: string;
+  name: string;
+  columns: string[];
+}
+
+/**
+ * What Pivot knows a connection contains.
+ *
+ * `synced` false means nobody has run a catalog sync, not that the database is
+ * empty. Completion has nothing to offer either way; only one of them is worth
+ * telling somebody about.
+ */
+export interface ConnectionSchema {
+  tables: SchemaTable[];
+  synced: boolean;
+}
+
 /** One column of a result. */
 export interface QueryColumn {
   name: string;
@@ -281,6 +314,12 @@ export const api = {
 
   queryableConnections: (signal?: AbortSignal) =>
     request<QueryableConnections>("/connections", signal ? { signal } : {}),
+
+  connectionSchema: (connectionId: string, signal?: AbortSignal) =>
+    request<ConnectionSchema>(
+      `/connections/${encodeURIComponent(connectionId)}/schema`,
+      signal ? { signal } : {},
+    ),
 
   runQuery: (connectionId: string, sql: string) =>
     request<QueryResult>("/queries", {

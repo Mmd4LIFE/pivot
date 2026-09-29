@@ -42,6 +42,28 @@ export default defineConfig({
         manualChunks(id) {
           if (!id.includes("node_modules")) return undefined;
 
+          /*
+           * CodeMirror is deliberately unclaimed, and this is the load-bearing
+           * line rather than an exception.
+           *
+           * Naming a chunk here *forces* a module into it, which defeats the
+           * dynamic import that was supposed to keep it out of the initial
+           * load. Measured: with CodeMirror falling through to "vendor", the
+           * vendor chunk went 60.3 KB -> 169.8 KB gzipped and the lazy chunk
+           * came out at 0.9 KB holding nothing but our own component. The
+           * budget went to 296 KB against a limit of 200.
+           *
+           * Returning undefined lets Rollup place it where it is actually
+           * reached from, which is the editor route's dynamic import.
+           *
+           * This is the second time the chunking has quietly not done what it
+           * says -- see the note above about the object form naming entry
+           * specifiers -- and both times the bundle gate is what found it.
+           */
+          if (/node_modules\/(@codemirror|@lezer|crelt|style-mod|w3c-keyname)\//.test(id)) {
+            return undefined;
+          }
+
           if (/node_modules\/(react|react-dom|scheduler)\//.test(id)) return "react";
 
           if (id.includes("node_modules/@tanstack/")) return "tanstack";

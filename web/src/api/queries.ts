@@ -63,6 +63,7 @@ export const keys = {
   setupStatus: ["setup", "status"] as const,
   sessions: ["auth", "sessions"] as const,
   queryableConnections: ["query", "connections"] as const,
+  connectionSchema: (id: string) => ["query", "schema", id] as const,
 };
 
 /**
@@ -156,6 +157,23 @@ export function useQueryableConnections() {
   return useQuery({
     queryKey: keys.queryableConnections,
     queryFn: ({ signal }: { signal: AbortSignal }) => api.queryableConnections(signal),
+  });
+}
+
+/**
+ * What a connection contains, for completion.
+ *
+ * Cached for a good while and never refetched on focus: it is the catalog's
+ * view, which only a sync changes, and re-asking on every window focus would
+ * be a request per alt-tab for an answer that did not move.
+ */
+export function useConnectionSchema(connectionId: string) {
+  return useQuery({
+    queryKey: keys.connectionSchema(connectionId),
+    queryFn: ({ signal }: { signal: AbortSignal }) =>
+      api.connectionSchema(connectionId, signal),
+    enabled: connectionId !== "",
+    staleTime: 5 * 60_000,
   });
 }
 
