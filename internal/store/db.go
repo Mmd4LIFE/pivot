@@ -92,6 +92,27 @@ func (db *DB) OpenSibling() (*sql.DB, error) {
 	return sibling, nil
 }
 
+/*
+SiblingStore is [DB.OpenSibling] wrapped as a store, for a caller that needs
+repositories on a pool of its own rather than a raw handle.
+
+The query monitor is the reason it exists. It polls for kill requests every
+second and heartbeats every five, and on SQLite the store's pool is one
+connection by design -- so doing that through the request pool would put a
+ticker between every request and the database.
+
+The caller owns closing it, and should bound it: what a background ticker needs
+is one connection, not the pool a server wants.
+*/
+func (db *DB) SiblingStore() (*DB, error) {
+	sibling, err := db.OpenSibling()
+	if err != nil {
+		return nil, err
+	}
+
+	return &DB{DB: sibling, engine: db.engine, dsn: db.dsn}, nil
+}
+
 // Open resolves the configured URL, connects, applies pool settings, and
 // verifies the connection with a ping.
 //

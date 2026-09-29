@@ -649,3 +649,35 @@ func (t *tracingQuerier) GetQueryLogEntry(ctx context.Context, a1 model.GetQuery
 
 	return t.next.GetQueryLogEntry(ctx, a1)
 }
+
+func (t *tracingQuerier) QueryUsageByUser(
+	ctx context.Context, a1 model.QueryUsageByUserParams,
+) ([]model.QueryUsage, error) {
+	ctx, span := observability.Start(ctx, "db.QueryUsageByUser")
+	defer span.End()
+
+	return t.next.QueryUsageByUser(ctx, a1)
+}
+
+func (t *tracingQuerier) RequestQueryCancel(
+	ctx context.Context, a1 model.RequestQueryCancelParams,
+) (int64, error) {
+	ctx, span := observability.Start(ctx, "db.RequestQueryCancel")
+	defer span.End()
+
+	return t.next.RequestQueryCancel(ctx, a1)
+}
+
+func (t *tracingQuerier) ListCancelRequested(ctx context.Context, a1 string) ([]uuid.UUID, error) {
+	ctx, span := observability.Start(ctx, "db.ListCancelRequested")
+	defer span.End()
+
+	return t.next.ListCancelRequested(ctx, a1)
+}
+
+func (t *tracingQuerier) HeartbeatOwnedQueries(ctx context.Context, a1 string) (int64, error) {
+	ctx, span := observability.Start(ctx, "db.HeartbeatOwnedQueries")
+	defer span.End()
+
+	return t.next.HeartbeatOwnedQueries(ctx, a1)
+}

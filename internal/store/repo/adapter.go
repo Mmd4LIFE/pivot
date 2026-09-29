@@ -1343,3 +1343,63 @@ func (a *liteQuerier) GetQueryLogEntry(ctx context.Context, p model.GetQueryLogE
 
 	return model.QueryLogEntry(row), err
 }
+
+func (a *pgQuerier) QueryUsageByUser(
+	ctx context.Context, p model.QueryUsageByUserParams,
+) ([]model.QueryUsage, error) {
+	rows, err := a.q.QueryUsageByUser(ctx, pg.QueryUsageByUserParams(p))
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.QueryUsage, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, model.QueryUsage(row))
+	}
+
+	return out, nil
+}
+
+func (a *liteQuerier) QueryUsageByUser(
+	ctx context.Context, p model.QueryUsageByUserParams,
+) ([]model.QueryUsage, error) {
+	rows, err := a.q.QueryUsageByUser(ctx, lite.QueryUsageByUserParams(p))
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.QueryUsage, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, model.QueryUsage(row))
+	}
+
+	return out, nil
+}
+
+func (a *pgQuerier) RequestQueryCancel(
+	ctx context.Context, p model.RequestQueryCancelParams,
+) (int64, error) {
+	return a.q.RequestQueryCancel(ctx, pg.RequestQueryCancelParams(p))
+}
+
+func (a *pgQuerier) ListCancelRequested(ctx context.Context, owner string) ([]uuid.UUID, error) {
+	return a.q.ListCancelRequested(ctx, owner)
+}
+
+func (a *pgQuerier) HeartbeatOwnedQueries(ctx context.Context, owner string) (int64, error) {
+	return a.q.HeartbeatOwnedQueries(ctx, owner)
+}
+
+func (a *liteQuerier) RequestQueryCancel(
+	ctx context.Context, p model.RequestQueryCancelParams,
+) (int64, error) {
+	return a.q.RequestQueryCancel(ctx, lite.RequestQueryCancelParams(p))
+}
+
+func (a *liteQuerier) ListCancelRequested(ctx context.Context, owner string) ([]uuid.UUID, error) {
+	return a.q.ListCancelRequested(ctx, owner)
+}
+
+func (a *liteQuerier) HeartbeatOwnedQueries(ctx context.Context, owner string) (int64, error) {
+	return a.q.HeartbeatOwnedQueries(ctx, owner)
+}

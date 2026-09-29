@@ -645,6 +645,7 @@ type StartQueryLogParams struct {
 	UserID       uuid.NullUUID
 	SQLText      string
 	StartedAt    dbtypes.Time
+	Owner        string
 }
 
 type FinishQueryLogParams struct {
@@ -668,4 +669,18 @@ type ListQueryLogParams struct {
 type GetQueryLogEntryParams struct {
 	ID    uuid.UUID
 	OrgID uuid.UUID
+}
+
+type QueryUsageByUserParams struct {
+	OrgID uuid.UUID
+
+	// StartedAt is the start of the window, named for the column sqlc derived
+	// it from so the whole-struct conversion still compiles.
+	StartedAt dbtypes.Time
+}
+
+type RequestQueryCancelParams struct {
+	CancelRequestedBy uuid.NullUUID
+	ID                uuid.UUID
+	OrgID             uuid.UUID
 }

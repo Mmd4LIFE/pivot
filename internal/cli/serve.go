@@ -20,6 +20,7 @@ import (
 	"github.com/Mmd4LIFE/pivot/internal/logging"
 	"github.com/Mmd4LIFE/pivot/internal/observability"
 	"github.com/Mmd4LIFE/pivot/internal/oidc"
+	"github.com/Mmd4LIFE/pivot/internal/query"
 	"github.com/Mmd4LIFE/pivot/internal/setup"
 	"github.com/Mmd4LIFE/pivot/internal/store"
 	"github.com/Mmd4LIFE/pivot/internal/store/repo"
@@ -240,10 +241,71 @@ readiness change before the drain begins, so no request is dropped.`,
 			runner := startJobs(ctx, db, repos, log)
 			defer stopJobs(runner, log)
 
+			/*
+				The query supervisor, which carries a kill from wherever it was
+				issued to this process if this process is the one running the
+				query.
+
+				Its own pool, because on SQLite the store's is one connection
+				by design and a ticker on it would sit between every request
+				and the database. Its own failure policy too: a supervisor that
+				cannot start means queries here cannot be stopped from
+				elsewhere, which is worth saying loudly and is not worth
+				refusing to serve over.
+			*/
+			stopSupervisor := startQuerySupervisor(ctx, db, log)
+			defer stopSupervisor()
+
 			return srv.Run(ctx)
 		},
 	}
 }
+
+/*
+startQuerySupervisor runs the loop that delivers kills to this process.
+
+Returns its teardown, which closes the pool it opened. A nil-safe no-op when
+anything could not be built, so the caller has one shape to defer rather than a
+condition.
+
+The owner token is minted here and handed to both halves -- the executor that
+stamps it on rows and the supervisor that claims them -- because they must be
+the same value and there is no reason for it to exist anywhere else.
+*/
+func startQuerySupervisor(ctx context.Context, db *store.DB, log *slog.Logger) func() {
+	sibling, err := db.SiblingStore()
+	if err != nil {
+		log.Warn("queries on this instance cannot be stopped from elsewhere",
+			logging.Err(err))
+
+		return func() {}
+	}
+
+	// One connection: this is two statements on a timer, and on SQLite every
+	// extra connection is contention somebody's request pays for.
+	sibling.SetMaxOpenConns(1)
+
+	supervisor := query.NewSupervisor(
+		QueryOwner, QueryMonitor, repo.New(sibling).System(), log)
+
+	go supervisor.Run(ctx)
+
+	return func() { _ = sibling.Close() }
+}
+
+/*
+QueryOwner and QueryMonitor are this process's identity and its registry of
+running queries.
+
+Package-level because the executor and the supervisor are constructed in
+different places and must agree, and because there is exactly one of each per
+process -- which is the definition of the thing they represent. When Part 23
+builds the query endpoint it takes these.
+*/
+var (
+	QueryOwner   = query.NewOwner()
+	QueryMonitor = query.NewMonitor()
+)
 
 // announceSetup tells an operator how to claim an unclaimed instance.
 //

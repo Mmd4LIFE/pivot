@@ -218,3 +218,59 @@ func (r *SystemRepo) CountOrganizations(ctx context.Context) (int64, error) {
 
 	return n, translate(err)
 }
+
+/*
+CancelRequestedFor lists the queries this process is running that somebody has
+asked to stop.
+
+On [SystemRepo] rather than [QueryLogRepo] because it is keyed on the owning
+process, which serves every organization the instance serves. A tenant-scoped
+version would have to be called once per organization, and an instance running
+one query for one tenant would still walk them all.
+
+The isolation harness reflects over the scoped repositories and requires every
+method there to refuse an unscoped context. That rule is right, and this
+genuinely has no tenant -- so it lives where the exceptions live, named to make
+its unscoped nature obvious.
+*/
+func (r *SystemRepo) CancelRequestedFor(ctx context.Context, owner string) ([]uuid.UUID, error) {
+	if owner == "" {
+		// An empty owner matches every row nothing ever claimed, which is the
+		// opposite of what any caller wants.
+		return nil, nil
+	}
+
+	ids, err := r.q.ListCancelRequested(ctx, owner)
+	if err != nil {
+		return nil, translate(err)
+	}
+
+	return ids, nil
+}
+
+/*
+Heartbeat marks every query this process is running as still being run by it,
+and reports how many that was.
+
+One statement for all of them rather than one per query: the question is about
+the process, and a per-row write would turn a healthy instance holding twenty
+queries into twenty writes a second.
+
+The timestamp is the database's own, so staleness is judged by one clock. An
+instance whose clock is wrong can then neither declare itself alive nor be
+declared dead by somebody else's disagreement -- which is the failure a
+heartbeat written in Go would have, silently, on exactly the machine nobody
+suspects.
+*/
+func (r *SystemRepo) Heartbeat(ctx context.Context, owner string) (int64, error) {
+	if owner == "" {
+		return 0, nil
+	}
+
+	n, err := r.q.HeartbeatOwnedQueries(ctx, owner)
+	if err != nil {
+		return 0, translate(err)
+	}
+
+	return n, nil
+}

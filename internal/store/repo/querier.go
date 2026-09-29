@@ -124,6 +124,14 @@ type Querier interface {
 	ListQueryLog(context.Context, model.ListQueryLogParams) ([]model.QueryLogEntry, error)
 	ListRunningQueries(context.Context, uuid.UUID) ([]model.QueryLogEntry, error)
 	GetQueryLogEntry(context.Context, model.GetQueryLogEntryParams) (model.QueryLogEntry, error)
+	QueryUsageByUser(context.Context, model.QueryUsageByUserParams) ([]model.QueryUsage, error)
+
+	// The kill path. RequestQueryCancel is tenant-scoped; the other two are
+	// keyed on the owning process and cross every tenant it serves, which is
+	// why they are reached through SystemRepo.
+	RequestQueryCancel(context.Context, model.RequestQueryCancelParams) (int64, error)
+	ListCancelRequested(context.Context, string) ([]uuid.UUID, error)
+	HeartbeatOwnedQueries(context.Context, string) (int64, error)
 	CountConnections(context.Context, uuid.UUID) (int64, error)
 
 	// Identity providers and the federated identities they issue.

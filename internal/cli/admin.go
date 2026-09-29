@@ -48,6 +48,7 @@ administrator. Anyone who can run them already has the database credentials.`,
 		newJobsCmd(env, flags),
 		newListConnectionsCmd(env, flags),
 		newLimitsCmd(env, flags),
+		newQueriesCmd(env, flags),
 	)
 
 	return cmd
