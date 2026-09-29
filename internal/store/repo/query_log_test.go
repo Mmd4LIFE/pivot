@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Mmd4LIFE/pivot/internal/store"
+	"github.com/Mmd4LIFE/pivot/internal/store/model"
 	"github.com/Mmd4LIFE/pivot/internal/store/repo"
 )
 
@@ -270,4 +271,128 @@ func seedConnection(t *testing.T, f connectionFixture) uuid.UUID {
 	}
 
 	return conn.ID
+}
+
+/*
+Per-user usage, on both engines.
+
+The aggregate is computed in SQL, which is the only interesting thing about it:
+the numbers are summed by a database rather than by Go, so the two engines have
+to agree, and SQLite needed explicit CASTs to stop sqlc emitting `interface{}`
+where PostgreSQL gives int64.
+*/
+func TestUsageIsReportedPerPerson(t *testing.T) {
+	t.Parallel()
+
+	eachEngine(t, func(t *testing.T, db *store.DB) {
+		f := newConnectionFixture(t, db)
+		conn := seedConnection(t, f)
+
+		base := time.Date(2026, 9, 29, 9, 0, 0, 0, time.UTC)
+		ada := uuid.NullUUID{UUID: uuid.New(), Valid: true}
+		grace := uuid.NullUUID{UUID: uuid.New(), Valid: true}
+
+		record := func(user uuid.NullUUID, at time.Time, state string, ms, rows int64, cache string) {
+			t.Helper()
+
+			entry, err := f.repos.QueryLog.Start(f.ctx, repo.QueryStart{
+				ConnectionID: conn, UserID: user, SQL: loggedSQL, At: at,
+			})
+			if err != nil {
+				t.Fatalf("start: %v", err)
+			}
+
+			if ferr := f.repos.QueryLog.Finish(f.ctx, entry.ID, repo.QueryOutcome{
+				State: state, At: at.Add(time.Duration(ms) * time.Millisecond),
+				Duration: time.Duration(ms) * time.Millisecond,
+				Rows:     rows, BytesEstimated: rows * 10, CacheStatus: cache,
+			}); ferr != nil {
+				t.Fatalf("finish: %v", ferr)
+			}
+		}
+
+		record(ada, base, repo.StateSucceeded, 1000, 10, "miss")
+		record(ada, base.Add(time.Minute), repo.StateFailed, 500, 0, "uncached")
+		record(ada, base.Add(2*time.Minute), repo.StateSucceeded, 100, 10, "hit")
+		record(grace, base.Add(3*time.Minute), repo.StateSucceeded, 50, 1, "miss")
+
+		// And one before the window, which must not be counted.
+		record(grace, base.Add(-time.Hour), repo.StateSucceeded, 9999, 999, "miss")
+
+		usage, err := f.repos.QueryLog.UsageByUser(f.ctx, base)
+		if err != nil {
+			t.Fatalf("usage: %v", err)
+		}
+
+		byUser := make(map[uuid.UUID]model.QueryUsage, len(usage))
+		for _, u := range usage {
+			byUser[u.UserID.UUID] = u
+		}
+
+		mine := byUser[ada.UUID]
+
+		switch {
+		case mine.Queries != 3:
+			t.Errorf("ada ran %d queries in the window, want 3", mine.Queries)
+		case mine.TotalMs != 1600:
+			t.Errorf("ada's total is %dms, want 1600", mine.TotalMs)
+		case mine.TotalRows != 20:
+			t.Errorf("ada returned %d rows, want 20", mine.TotalRows)
+		case mine.TotalBytes != 200:
+			t.Errorf("ada's bytes = %d, want 200", mine.TotalBytes)
+		case mine.Failures != 1:
+			t.Errorf("ada had %d failures, want 1", mine.Failures)
+		case mine.CacheHits != 1:
+			t.Errorf("ada had %d cache hits, want 1", mine.CacheHits)
+		}
+
+		// The window is honored: grace's earlier query is not in her total.
+		if theirs := byUser[grace.UUID]; theirs.Queries != 1 {
+			t.Errorf("grace has %d queries in the window, want 1; the window is not being applied",
+				theirs.Queries)
+		}
+
+		// Ordered by cost, so the first row is the person to talk to.
+		if len(usage) > 0 && usage[0].UserID.UUID != ada.UUID {
+			t.Error("the most expensive user is not listed first")
+		}
+	})
+}
+
+// Work with no person behind it is its own row, not attributed and not dropped.
+func TestUnattendedWorkIsItsOwnUsageRow(t *testing.T) {
+	t.Parallel()
+
+	eachEngine(t, func(t *testing.T, db *store.DB) {
+		f := newConnectionFixture(t, db)
+		conn := seedConnection(t, f)
+
+		at := time.Date(2026, 9, 29, 9, 0, 0, 0, time.UTC)
+
+		entry, err := f.repos.QueryLog.Start(f.ctx, repo.QueryStart{
+			ConnectionID: conn, SQL: loggedSQL, At: at,
+		})
+		if err != nil {
+			t.Fatalf("start: %v", err)
+		}
+
+		if ferr := f.repos.QueryLog.Finish(f.ctx, entry.ID, repo.QueryOutcome{
+			State: repo.StateSucceeded, At: at, Duration: time.Second,
+		}); ferr != nil {
+			t.Fatalf("finish: %v", ferr)
+		}
+
+		usage, err := f.repos.QueryLog.UsageByUser(f.ctx, at.Add(-time.Hour))
+		if err != nil {
+			t.Fatalf("usage: %v", err)
+		}
+
+		if len(usage) != 1 {
+			t.Fatalf("got %d usage rows, want 1", len(usage))
+		}
+
+		if usage[0].UserID.Valid {
+			t.Errorf("unattended work was attributed to %v", usage[0].UserID)
+		}
+	})
 }

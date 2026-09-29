@@ -90,8 +90,10 @@ type Querier interface {
 	// Granting a role twice is a no-op, not a duplicate row: a tuple is a fact,
 	// and a fact is either stored or not.
 	GrantRole(ctx context.Context, arg GrantRoleParams) error
+	HeartbeatOwnedQueries(ctx context.Context, owner string) (int64, error)
 	IsGroupMember(ctx context.Context, arg IsGroupMemberParams) (bool, error)
 	LinkFederatedIdentity(ctx context.Context, arg LinkFederatedIdentityParams) (FederatedIdentity, error)
+	ListCancelRequested(ctx context.Context, owner string) ([]uuid.UUID, error)
 	ListCatalogColumns(ctx context.Context, arg ListCatalogColumnsParams) ([]CatalogColumn, error)
 	ListCatalogColumnsForTable(ctx context.Context, arg ListCatalogColumnsForTableParams) ([]CatalogColumn, error)
 	ListCatalogForeignKeys(ctx context.Context, arg ListCatalogForeignKeysParams) ([]CatalogForeignKey, error)
@@ -132,6 +134,7 @@ type Querier interface {
 	ListUserGroups(ctx context.Context, arg ListUserGroupsParams) ([]Group, error)
 	ListUserSessions(ctx context.Context, arg ListUserSessionsParams) ([]Session, error)
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]User, error)
+	QueryUsageByUser(ctx context.Context, arg QueryUsageByUserParams) ([]QueryUsageByUserRow, error)
 	// Recording a test result is deliberately not a versioned update. It is not a
 	// change somebody made, it is an observation about the world, and making it
 	// bump the version would mean a background health check invalidates the form
@@ -141,6 +144,7 @@ type Querier interface {
 	RecordFederatedLogin(ctx context.Context, arg RecordFederatedLoginParams) (int64, error)
 	RecordUserLogin(ctx context.Context, arg RecordUserLoginParams) (int64, error)
 	RemoveGroupMember(ctx context.Context, arg RemoveGroupMemberParams) (int64, error)
+	RequestQueryCancel(ctx context.Context, arg RequestQueryCancelParams) (int64, error)
 	// Removing a user or group takes its grants with it.
 	RevokeAllForSubject(ctx context.Context, arg RevokeAllForSubjectParams) (int64, error)
 	// Revoking every session *except* one is what changing your own password

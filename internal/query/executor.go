@@ -25,6 +25,18 @@ var (
 
 	// ErrNoConnection is a request naming no connection.
 	ErrNoConnection = errors.New("query: no connection named")
+
+	/*
+		ErrKilled is the cause attached when an administrator stops a query.
+
+		Distinct from a plain cancellation, which is what a caller walking away
+		looks like. Both arrive as a canceled context through the same channel
+		and they are different facts: one is somebody's decision about this
+		query and the other is a closed browser tab. The query log records
+		which, because "why did my dashboard stop" has two very different
+		answers.
+	*/
+	ErrKilled = errors.New("query: stopped by an administrator")
 )
 
 /*
@@ -76,6 +88,15 @@ type Executor struct {
 	// queryTimeout is an organization-wide ceiling on how long any query may
 	// run. Zero leaves each connection's own timeout in charge.
 	queryTimeout time.Duration
+
+	// monitor holds the cancel for every query this process is running, so
+	// that something other than the caller can stop one. Nil means nothing
+	// can, which is what an executor built for a test wants.
+	monitor *Monitor
+
+	// owner names this process on the rows it writes, so a kill issued
+	// anywhere can be routed to the only place that can deliver it.
+	owner string
 
 	// open is [connectors.Open], swapped in tests. Unexported and with no
 	// setter outside this package: a caller that could substitute it could
@@ -147,6 +168,33 @@ func WithQueryTimeout(d time.Duration) Option {
 			e.queryTimeout = d
 		}
 	}
+}
+
+/*
+WithMonitor lets queries be stopped by somebody other than their caller.
+
+Without it a query can only be canceled by the context its caller holds, which
+is fine for a caller who closed a browser tab and useless for an administrator
+watching a warehouse burn.
+*/
+func WithMonitor(m *Monitor) Option {
+	return func(e *Executor) {
+		if m != nil {
+			e.monitor = m
+		}
+	}
+}
+
+/*
+WithOwner stamps this process's token on every query it starts.
+
+Without it a row is written unowned, and an unowned row is one no supervisor
+will ever claim -- so the query runs normally and simply cannot be stopped from
+another process. That is the honest degradation: not a failure, and not a
+pretense that the kill worked.
+*/
+func WithOwner(owner string) Option {
+	return func(e *Executor) { e.owner = owner }
 }
 
 // withOpener substitutes the connector factory. Test-only, and unexported so
@@ -375,6 +423,7 @@ func (e *Executor) serveFromCache(
 		UserID:       scope.ActorID(),
 		SQL:          plan.SQL,
 		At:           started,
+		Owner:        e.owner,
 	})
 	if err != nil {
 		_ = cached.Close()
@@ -485,6 +534,7 @@ func (e *Executor) execute(
 		UserID:       scope.ActorID(),
 		SQL:          plan.SQL,
 		At:           started,
+		Owner:        e.owner,
 	})
 	if err != nil {
 		_ = connector.Close()
@@ -496,8 +546,25 @@ func (e *Executor) execute(
 		return nil, fmt.Errorf("query: record the start: %w", err)
 	}
 
-	stream, err := connector.Stream(ctx, plan.SQL)
+	/*
+		A context of this query's own, derived from the caller's.
+
+		The caller's cancellation still reaches it -- that is what derived
+		means -- and now so does anybody holding the monitor. Canceling with a
+		cause is what lets the log tell "an administrator stopped this" from
+		"the caller left", which arrive identically otherwise.
+
+		Registered before the statement is sent, so a kill that arrives while
+		the source is still deciding whether to answer is not too early to
+		land.
+	*/
+	queryCtx, cancel := context.WithCancelCause(ctx)
+	unwatch := e.monitor.watch(entry.ID, cancel)
+
+	stream, err := connector.Stream(queryCtx, plan.SQL)
 	if err != nil {
+		unwatch()
+		cancel(nil)
 		e.finish(ctx, entry, started, nil, err)
 		_ = connector.Close()
 
@@ -523,10 +590,14 @@ func (e *Executor) execute(
 			cacheKey:    key,
 			caching:     cacheable,
 			release:     release,
-			// The context the query ran under, not the caller's next one: the
-			// completing write has to happen even when the reason it is
-			// happening is that this context was canceled.
-			ctx: ctx,
+			unwatch:     unwatch,
+			cancel:      cancel,
+			// The context the query actually ran under. Derived from the
+			// caller's, so it carries the same tenant scope, and unlike the
+			// caller's it carries the *cause* -- which is the only way to
+			// tell an administrator's kill from a caller walking away once
+			// the connector has wrapped both into its own canceled error.
+			ctx: queryCtx,
 		},
 	}, nil
 }
@@ -559,6 +630,19 @@ func (e *Executor) finish(
 	}
 
 	switch {
+	case cause != nil && errors.Is(context.Cause(ctx), ErrKilled):
+		/*
+			Killed, and recorded as its own thing.
+
+			Read from the context's cause rather than from the error the stream
+			returned, because by the time a cancellation has been through the
+			connector it is a connectors.Error saying "the query was canceled"
+			-- true of both a kill and a closed browser tab, and useless for
+			telling them apart. The cause is the only place the distinction
+			survives.
+		*/
+		out.State = repo.StateCanceled
+		out.Err = ErrKilled.Error()
 	case cause != nil && isCanceled(cause):
 		out.State = repo.StateCanceled
 		out.Err = cause.Error()

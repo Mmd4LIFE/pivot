@@ -175,20 +175,24 @@ type Organization struct {
 }
 
 type QueryLog struct {
-	ID             uuid.UUID
-	OrgID          uuid.UUID
-	ConnectionID   uuid.UUID
-	UserID         uuid.NullUUID
-	SQLText        string
-	State          string
-	StartedAt      dbtypes.Time
-	FinishedAt     dbtypes.NullTime
-	DurationMs     int64
-	RowsReturned   int64
-	BytesEstimated int64
-	Truncated      dbtypes.Bool
-	CacheStatus    string
-	ErrorMessage   string
+	ID                uuid.UUID
+	OrgID             uuid.UUID
+	ConnectionID      uuid.UUID
+	UserID            uuid.NullUUID
+	SQLText           string
+	State             string
+	StartedAt         dbtypes.Time
+	FinishedAt        dbtypes.NullTime
+	DurationMs        int64
+	RowsReturned      int64
+	BytesEstimated    int64
+	Truncated         dbtypes.Bool
+	CacheStatus       string
+	ErrorMessage      string
+	Owner             string
+	HeartbeatAt       dbtypes.NullTime
+	CancelRequestedAt dbtypes.NullTime
+	CancelRequestedBy uuid.NullUUID
 }
 
 type RoleAssignment struct {

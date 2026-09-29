@@ -87,9 +87,11 @@ var expectedColumns = map[string][]string{
 		"to_table", "updated_at", "version",
 	},
 	"query_log": {
-		"bytes_estimated", "cache_status", "connection_id", "duration_ms",
-		"error_message", "finished_at", "id", "org_id", "rows_returned",
-		"sql_text", "started_at", "state", "truncated", "user_id",
+		"bytes_estimated", "cache_status", "cancel_requested_at",
+		"cancel_requested_by", "connection_id", "duration_ms", "error_message",
+		"finished_at", "heartbeat_at", "id", "org_id", "owner",
+		"rows_returned", "sql_text", "started_at", "state", "truncated",
+		"user_id",
 	},
 	"catalog_tables": {
 		"comment", "connection_id", "created_at", "first_seen_at", "id",

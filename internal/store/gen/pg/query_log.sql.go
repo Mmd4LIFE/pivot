@@ -58,7 +58,7 @@ func (q *Queries) FinishQueryLog(ctx context.Context, arg FinishQueryLogParams) 
 }
 
 const getQueryLogEntry = `-- name: GetQueryLogEntry :one
-SELECT id, org_id, connection_id, user_id, sql_text, state, started_at, finished_at, duration_ms, rows_returned, bytes_estimated, truncated, cache_status, error_message FROM query_log
+SELECT id, org_id, connection_id, user_id, sql_text, state, started_at, finished_at, duration_ms, rows_returned, bytes_estimated, truncated, cache_status, error_message, owner, heartbeat_at, cancel_requested_at, cancel_requested_by FROM query_log
 WHERE id = $1 AND org_id = $2
 `
 
@@ -85,12 +85,58 @@ func (q *Queries) GetQueryLogEntry(ctx context.Context, arg GetQueryLogEntryPara
 		&i.Truncated,
 		&i.CacheStatus,
 		&i.ErrorMessage,
+		&i.Owner,
+		&i.HeartbeatAt,
+		&i.CancelRequestedAt,
+		&i.CancelRequestedBy,
 	)
 	return i, err
 }
 
+const heartbeatOwnedQueries = `-- name: HeartbeatOwnedQueries :execrows
+UPDATE query_log
+SET heartbeat_at = now()
+WHERE owner = $1 AND state = 'running'
+`
+
+func (q *Queries) HeartbeatOwnedQueries(ctx context.Context, owner string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, heartbeatOwnedQueries, owner)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const listCancelRequested = `-- name: ListCancelRequested :many
+SELECT id FROM query_log
+WHERE owner = $1 AND state = 'running' AND cancel_requested_at IS NOT NULL
+`
+
+func (q *Queries) ListCancelRequested(ctx context.Context, owner string) ([]uuid.UUID, error) {
+	rows, err := q.db.QueryContext(ctx, listCancelRequested, owner)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listQueryLog = `-- name: ListQueryLog :many
-SELECT id, org_id, connection_id, user_id, sql_text, state, started_at, finished_at, duration_ms, rows_returned, bytes_estimated, truncated, cache_status, error_message FROM query_log
+SELECT id, org_id, connection_id, user_id, sql_text, state, started_at, finished_at, duration_ms, rows_returned, bytes_estimated, truncated, cache_status, error_message, owner, heartbeat_at, cancel_requested_at, cancel_requested_by FROM query_log
 WHERE org_id = $1
 ORDER BY started_at DESC
 LIMIT $2::bigint
@@ -125,6 +171,10 @@ func (q *Queries) ListQueryLog(ctx context.Context, arg ListQueryLogParams) ([]Q
 			&i.Truncated,
 			&i.CacheStatus,
 			&i.ErrorMessage,
+			&i.Owner,
+			&i.HeartbeatAt,
+			&i.CancelRequestedAt,
+			&i.CancelRequestedBy,
 		); err != nil {
 			return nil, err
 		}
@@ -140,7 +190,7 @@ func (q *Queries) ListQueryLog(ctx context.Context, arg ListQueryLogParams) ([]Q
 }
 
 const listRunningQueries = `-- name: ListRunningQueries :many
-SELECT id, org_id, connection_id, user_id, sql_text, state, started_at, finished_at, duration_ms, rows_returned, bytes_estimated, truncated, cache_status, error_message FROM query_log
+SELECT id, org_id, connection_id, user_id, sql_text, state, started_at, finished_at, duration_ms, rows_returned, bytes_estimated, truncated, cache_status, error_message, owner, heartbeat_at, cancel_requested_at, cancel_requested_by FROM query_log
 WHERE org_id = $1 AND state = 'running'
 ORDER BY started_at
 `
@@ -169,6 +219,10 @@ func (q *Queries) ListRunningQueries(ctx context.Context, orgID uuid.UUID) ([]Qu
 			&i.Truncated,
 			&i.CacheStatus,
 			&i.ErrorMessage,
+			&i.Owner,
+			&i.HeartbeatAt,
+			&i.CancelRequestedAt,
+			&i.CancelRequestedBy,
 		); err != nil {
 			return nil, err
 		}
@@ -183,11 +237,92 @@ func (q *Queries) ListRunningQueries(ctx context.Context, orgID uuid.UUID) ([]Qu
 	return items, nil
 }
 
+const queryUsageByUser = `-- name: QueryUsageByUser :many
+SELECT user_id,
+       COUNT(*)::bigint                                                        AS queries,
+       COALESCE(SUM(duration_ms), 0)::bigint                                   AS total_ms,
+       COALESCE(SUM(rows_returned), 0)::bigint                                 AS total_rows,
+       COALESCE(SUM(bytes_estimated), 0)::bigint                               AS total_bytes,
+       COALESCE(SUM(CASE WHEN state = 'failed' THEN 1 ELSE 0 END), 0)::bigint  AS failures,
+       COALESCE(SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END), 0)::bigint AS cache_hits
+FROM query_log
+WHERE org_id = $1 AND started_at >= $2
+GROUP BY user_id
+ORDER BY total_ms DESC
+`
+
+type QueryUsageByUserParams struct {
+	OrgID     uuid.UUID
+	StartedAt dbtypes.Time
+}
+
+type QueryUsageByUserRow struct {
+	UserID     uuid.NullUUID
+	Queries    int64
+	TotalMs    int64
+	TotalRows  int64
+	TotalBytes int64
+	Failures   int64
+	CacheHits  int64
+}
+
+func (q *Queries) QueryUsageByUser(ctx context.Context, arg QueryUsageByUserParams) ([]QueryUsageByUserRow, error) {
+	rows, err := q.db.QueryContext(ctx, queryUsageByUser, arg.OrgID, arg.StartedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []QueryUsageByUserRow{}
+	for rows.Next() {
+		var i QueryUsageByUserRow
+		if err := rows.Scan(
+			&i.UserID,
+			&i.Queries,
+			&i.TotalMs,
+			&i.TotalRows,
+			&i.TotalBytes,
+			&i.Failures,
+			&i.CacheHits,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const requestQueryCancel = `-- name: RequestQueryCancel :execrows
+UPDATE query_log
+SET cancel_requested_at = now(),
+    cancel_requested_by = $1
+WHERE id = $2 AND org_id = $3 AND state = 'running'
+`
+
+type RequestQueryCancelParams struct {
+	CancelRequestedBy uuid.NullUUID
+	ID                uuid.UUID
+	OrgID             uuid.UUID
+}
+
+func (q *Queries) RequestQueryCancel(ctx context.Context, arg RequestQueryCancelParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, requestQueryCancel, arg.CancelRequestedBy, arg.ID, arg.OrgID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const startQueryLog = `-- name: StartQueryLog :one
 
-INSERT INTO query_log (id, org_id, connection_id, user_id, sql_text, started_at)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, org_id, connection_id, user_id, sql_text, state, started_at, finished_at, duration_ms, rows_returned, bytes_estimated, truncated, cache_status, error_message
+INSERT INTO query_log (id, org_id, connection_id, user_id, sql_text, started_at, owner)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, org_id, connection_id, user_id, sql_text, state, started_at, finished_at, duration_ms, rows_returned, bytes_estimated, truncated, cache_status, error_message, owner, heartbeat_at, cancel_requested_at, cancel_requested_by
 `
 
 type StartQueryLogParams struct {
@@ -197,6 +332,7 @@ type StartQueryLogParams struct {
 	UserID       uuid.NullUUID
 	SQLText      string
 	StartedAt    dbtypes.Time
+	Owner        string
 }
 
 // The query log.
@@ -213,6 +349,7 @@ func (q *Queries) StartQueryLog(ctx context.Context, arg StartQueryLogParams) (Q
 		arg.UserID,
 		arg.SQLText,
 		arg.StartedAt,
+		arg.Owner,
 	)
 	var i QueryLog
 	err := row.Scan(
@@ -230,6 +367,10 @@ func (q *Queries) StartQueryLog(ctx context.Context, arg StartQueryLogParams) (Q
 		&i.Truncated,
 		&i.CacheStatus,
 		&i.ErrorMessage,
+		&i.Owner,
+		&i.HeartbeatAt,
+		&i.CancelRequestedAt,
+		&i.CancelRequestedBy,
 	)
 	return i, err
 }

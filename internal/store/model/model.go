@@ -403,4 +403,43 @@ type QueryLogEntry struct {
 	CacheStatus string
 
 	ErrorMessage string
+
+	/*
+		Owner is the process running this query, and the rest is the kill path.
+
+		An opaque token minted per process rather than a foreign key into a
+		table of instances: a registry of processes needs a lifecycle, a
+		heartbeat of its own and something to collect the dead ones, all to
+		answer a question these columns answer directly. The token dies with
+		the rows it stamped.
+
+		Empty means nothing ever claimed the row -- written before migration
+		00012, or by a path with no monitor -- which is a third state, distinct
+		from "owned and beating" and "owned and gone quiet".
+	*/
+	Owner       string
+	HeartbeatAt dbtypes.NullTime
+
+	CancelRequestedAt dbtypes.NullTime
+	CancelRequestedBy uuid.NullUUID
+}
+
+/*
+QueryUsage is what one person has cost, over a window.
+
+UserID is absent for work with no person behind it -- the same nullable actor
+[QueryLogEntry] carries -- so "unattended" is its own row rather than being
+attributed to somebody or dropped from the total.
+*/
+type QueryUsage struct {
+	UserID uuid.NullUUID
+
+	Queries int64
+
+	TotalMs    int64
+	TotalRows  int64
+	TotalBytes int64
+
+	Failures  int64
+	CacheHits int64
 }

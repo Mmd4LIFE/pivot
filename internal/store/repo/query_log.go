@@ -32,6 +32,11 @@ type QueryStart struct {
 	UserID       uuid.NullUUID
 	SQL          string
 	At           time.Time
+
+	// Owner names the process that will run it, so that a kill issued
+	// anywhere can be routed to the only place that can deliver it. Empty
+	// means unowned, and an unowned query cannot be killed.
+	Owner string
 }
 
 // QueryOutcome is how an execution ended.
@@ -75,6 +80,7 @@ func (r *QueryLogRepo) Start(ctx context.Context, in QueryStart) (model.QueryLog
 		UserID:       in.UserID,
 		SQLText:      in.SQL,
 		StartedAt:    dbtypes.NewTime(in.At),
+		Owner:        in.Owner,
 	})
 	if err != nil {
 		return model.QueryLogEntry{}, translate(err)
@@ -166,6 +172,74 @@ func (r *QueryLogRepo) Running(ctx context.Context) ([]model.QueryLogEntry, erro
 	}
 
 	return entries, nil
+}
+
+/*
+UsageByUser reports what each person has cost since a point in time.
+
+Grouped in SQL rather than by reading the log and totalling in Go, because the
+question is asked over a window that may hold every query an organization has
+ever run and the answer is a handful of rows.
+
+`since` rather than a page: usage is a question about a period, and a caller
+who asked for "the last day" and got the most recent thousand rows would be
+given a different question's answer.
+*/
+func (r *QueryLogRepo) UsageByUser(ctx context.Context, since time.Time) ([]model.QueryUsage, error) {
+	s, err := r.scope(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	usage, err := r.q.QueryUsageByUser(ctx, model.QueryUsageByUserParams{
+		OrgID:     s.OrgID(),
+		StartedAt: dbtypes.NewTime(since),
+	})
+	if err != nil {
+		return nil, translate(err)
+	}
+
+	return usage, nil
+}
+
+/*
+RequestCancel asks for a running query to be stopped.
+
+Tenant-scoped, and the scope is the security boundary rather than a
+convenience: a kill is an instruction to stop somebody's work, and one that
+could name a query in another organization would be a denial of service with a
+tenant boundary drawn in the wrong place.
+
+Returns [ErrNotFound] when nothing matched, which covers three cases the caller
+has to tell apart by other means: the query finished a moment ago, it belongs
+to another tenant, or it never existed. All three mean "there is nothing to
+stop", which is what this layer knows.
+
+The timestamp comes from the database rather than from Go, because whether a
+kill is stale is judged against the heartbeat and both must be measured by one
+clock. A cancel stamped by a machine running four seconds fast would otherwise
+look like it had been ignored.
+*/
+func (r *QueryLogRepo) RequestCancel(ctx context.Context, id uuid.UUID) error {
+	s, err := r.scope(ctx)
+	if err != nil {
+		return err
+	}
+
+	n, err := r.q.RequestQueryCancel(ctx, model.RequestQueryCancelParams{
+		CancelRequestedBy: s.ActorID(),
+		ID:                id,
+		OrgID:             s.OrgID(),
+	})
+	if err != nil {
+		return translate(err)
+	}
+
+	if n == 0 {
+		return ErrNotFound
+	}
+
+	return nil
 }
 
 // Get returns one logged execution.

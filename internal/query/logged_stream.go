@@ -59,6 +59,18 @@ type loggedStream struct {
 	*/
 	release func()
 
+	/*
+		unwatch takes this query out of the monitor, and cancel releases the
+		context derived for it.
+
+		Both are called from Close, which is sync.Once-guarded. Leaving a
+		cancel un-called leaks it; leaving the registration in place means the
+		monitor claims to be running a query that finished, and an
+		administrator killing it would be told it worked.
+	*/
+	unwatch func()
+	cancel  context.CancelCauseFunc
+
 	// exhausted distinguishes a stream that ended from one the caller walked
 	// away from. Only the first may be cached: a partial read stored whole
 	// would be served as a complete answer, with nothing on it to say it was
@@ -137,8 +149,19 @@ func (s *loggedStream) Close() error {
 		s.store(cause)
 		s.executor.finish(s.ctx, s.entry, s.started, s, cause)
 
+		if s.unwatch != nil {
+			s.unwatch()
+		}
+
 		if s.release != nil {
 			s.release()
+		}
+
+		// After the stream is closed and the slot returned, because canceling
+		// a context whose work is already finished is free and canceling one
+		// whose work is not would be racing the thing we just closed.
+		if s.cancel != nil {
+			s.cancel(nil)
 		}
 
 		// Nil on a cache hit, which opened nothing. Guarded rather than
