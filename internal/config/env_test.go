@@ -38,6 +38,14 @@ var sample = map[string]string{
 	"PIVOT_DATABASE_CONN_MAX_LIFETIME":    "45m",
 	"PIVOT_DATABASE_CONN_MAX_IDLE_TIME":   "7m",
 	"PIVOT_DATABASE_AUTO_MIGRATE":         "false",
+	"PIVOT_QUERY_MAX_PER_USER":            "3",
+	"PIVOT_QUERY_MAX_PER_CONNECTION":      "11",
+	"PIVOT_QUERY_QUEUE_WAIT":              "4s",
+	"PIVOT_QUERY_TIMEOUT":                 "90s",
+	"PIVOT_QUERY_CACHE_ENABLED":           "false",
+	"PIVOT_QUERY_CACHE_MAX_BYTES":         "12345678",
+	"PIVOT_QUERY_CACHE_MAX_ENTRY_BYTES":   "2345678",
+	"PIVOT_QUERY_CACHE_TTL":               "42s",
 	"PIVOT_AUTH_SESSION_IDLE_TIMEOUT":     "2h",
 	"PIVOT_AUTH_SESSION_ABSOLUTE_TIMEOUT": "48h",
 	"PIVOT_AUTH_MAX_FAILED_ATTEMPTS":      "9",
@@ -131,6 +139,11 @@ func TestEveryEnvironmentVariableTakesEffect(t *testing.T) {
 		{"PIVOT_TRACING_INSECURE", c.Observability.Tracing.Insecure, false},
 		{"PIVOT_TRACING_SAMPLE_RATIO", c.Observability.Tracing.SampleRatio, 0.25},
 		{"PIVOT_TRACING_SERVICE_NAME", c.Observability.Tracing.ServiceName, "pivot-test"},
+		{"PIVOT_QUERY_MAX_PER_USER", c.Query.MaxPerUser, 3},
+		{"PIVOT_QUERY_MAX_PER_CONNECTION", c.Query.MaxPerConnection, 11},
+		{"PIVOT_QUERY_CACHE_ENABLED", c.Query.Cache.Enabled, false},
+		{"PIVOT_QUERY_CACHE_MAX_BYTES", c.Query.Cache.MaxBytes, int64(12345678)},
+		{"PIVOT_QUERY_CACHE_MAX_ENTRY_BYTES", c.Query.Cache.MaxEntryBytes, int64(2345678)},
 	}
 
 	for _, check := range checks {
@@ -157,6 +170,9 @@ func TestEveryEnvironmentVariableTakesEffect(t *testing.T) {
 		{"PIVOT_AUTH_SESSION_ABSOLUTE_TIMEOUT", c.Auth.SessionAbsoluteTimeout, "48h0m0s"},
 		{"PIVOT_AUTH_LOCKOUT_DURATION", c.Auth.LockoutDuration, "3m0s"},
 		{"PIVOT_AUTH_LOCKOUT_MAX_DURATION", c.Auth.LockoutMaxDuration, "30m0s"},
+		{"PIVOT_QUERY_QUEUE_WAIT", c.Query.QueueWait, "4s"},
+		{"PIVOT_QUERY_TIMEOUT", c.Query.Timeout, "1m30s"},
+		{"PIVOT_QUERY_CACHE_TTL", c.Query.Cache.TTL, "42s"},
 	}
 
 	for _, check := range durations {

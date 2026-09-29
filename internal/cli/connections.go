@@ -3,10 +3,13 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -263,12 +266,21 @@ against every warehouse in the organization.`,
 
 // newListConnectionsCmd builds `pivot admin list-connections`.
 func newListConnectionsCmd(env Env, flags *globalFlags) *cobra.Command {
-	var orgSlug string
+	var (
+		orgSlug string
+		limits  bool
+	)
 
 	cmd := &cobra.Command{
 		Use:   "list-connections",
 		Short: "List an organization's data sources",
-		Args:  cobra.NoArgs,
+		Long: `List the data sources configured in an organization.
+
+--limits shows what each connection bounds instead of where it points: the row
+cap, the query timeout and the pool size. Those are stored per connection and
+are the limits a query actually meets, so "pivot admin limits" alone does not
+account for them.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			db, repos, err := openRepos(cmd, env, flags)
 			if err != nil {
@@ -300,6 +312,12 @@ func newListConnectionsCmd(env Env, flags *globalFlags) *cobra.Command {
 
 			w := tabwriter.NewWriter(env.Stdout, 0, 0, 2, ' ', 0)
 
+			if limits {
+				printConnectionLimits(w, conns)
+
+				return w.Flush()
+			}
+
 			fmt.Fprintln(w, "SLUG\tNAME\tKIND\tTARGET\tENABLED\tLAST TEST")
 
 			for _, c := range conns {
@@ -316,8 +334,51 @@ func newListConnectionsCmd(env Env, flags *globalFlags) *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&orgSlug, "org", "", "Organization slug; omit when only one exists")
+	cmd.Flags().BoolVar(&limits, "limits", false, "Show each connection's limits instead of its target")
 
 	return cmd
+}
+
+/*
+printConnectionLimits shows what each connection bounds.
+
+These live in the database rather than in configuration, which is why they were
+invisible: `pivot admin limits` reads the resolved configuration and cannot see
+them, and this command showed where a connection points rather than what it
+allows. Between them the two commands now account for every limit a query can
+meet.
+
+A zero prints as the default it means. "0" in this table would read as "none
+allowed", which is the opposite of what it does.
+*/
+func printConnectionLimits(w io.Writer, conns []model.Connection) {
+	fmt.Fprintln(w, "SLUG\tMAX ROWS\tQUERY TIMEOUT\tPOOL SIZE")
+
+	for _, c := range conns {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+			c.Slug,
+			orDefault(c.MaxRows, fmt.Sprintf("%d (default)", connectors.DefaultMaxRows)),
+			orDefaultSeconds(c.QueryTimeoutSeconds),
+			orDefault(c.MaxOpenConns, "driver default"),
+		)
+	}
+}
+
+// orDefault renders a zero as the word for what zero means here.
+func orDefault(v int64, whenZero string) string {
+	if v <= 0 {
+		return whenZero
+	}
+
+	return strconv.FormatInt(v, 10)
+}
+
+func orDefaultSeconds(v int64) string {
+	if v <= 0 {
+		return connectors.DefaultQueryTimeout.String() + " (default)"
+	}
+
+	return (time.Duration(v) * time.Second).String()
 }
 
 // configFor builds a connector config from a stored row.

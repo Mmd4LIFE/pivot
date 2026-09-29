@@ -137,6 +137,63 @@ func bindings() []binding {
 			},
 		},
 		{
+			key:  EnvPrefix + "QUERY_MAX_PER_USER",
+			help: "Queries one person may run against one connection at once",
+			apply: func(c *Config, v string) error {
+				return setInt(&c.Query.MaxPerUser, v)
+			},
+		},
+		{
+			key:  EnvPrefix + "QUERY_MAX_PER_CONNECTION",
+			help: "Queries anybody may run against one connection at once",
+			apply: func(c *Config, v string) error {
+				return setInt(&c.Query.MaxPerConnection, v)
+			},
+		},
+		{
+			key:  EnvPrefix + "QUERY_QUEUE_WAIT",
+			help: "How long a query waits for a slot before it is refused",
+			apply: func(c *Config, v string) error {
+				return setDuration(&c.Query.QueueWait, v)
+			},
+		},
+		{
+			key: EnvPrefix + "QUERY_TIMEOUT",
+			help: "Ceiling on how long any query may run; " +
+				"shortens a connection's own timeout, never lengthens it",
+			apply: func(c *Config, v string) error {
+				return setDuration(&c.Query.Timeout, v)
+			},
+		},
+		{
+			key:  EnvPrefix + "QUERY_CACHE_ENABLED",
+			help: "Serve repeated queries from the in-process result cache",
+			apply: func(c *Config, v string) error {
+				return setBool(&c.Query.Cache.Enabled, v)
+			},
+		},
+		{
+			key:  EnvPrefix + "QUERY_CACHE_MAX_BYTES",
+			help: "Memory the whole result cache may hold",
+			apply: func(c *Config, v string) error {
+				return setInt64(&c.Query.Cache.MaxBytes, v)
+			},
+		},
+		{
+			key:  EnvPrefix + "QUERY_CACHE_MAX_ENTRY_BYTES",
+			help: "Largest result that will be cached; bigger ones stream uncached",
+			apply: func(c *Config, v string) error {
+				return setInt64(&c.Query.Cache.MaxEntryBytes, v)
+			},
+		},
+		{
+			key:  EnvPrefix + "QUERY_CACHE_TTL",
+			help: "How long a cached result is trusted",
+			apply: func(c *Config, v string) error {
+				return setDuration(&c.Query.Cache.TTL, v)
+			},
+		},
+		{
 			key:  EnvPrefix + "AUTH_SESSION_IDLE_TIMEOUT",
 			help: "End a session unused for this long; slides forward on use",
 			apply: func(c *Config, v string) error {
@@ -344,6 +401,19 @@ func setInt(dst *int, raw string) error {
 	if err != nil {
 		return fmt.Errorf("expected an integer, got %q", raw)
 	}
+	*dst = v
+
+	return nil
+}
+
+// setInt64 is setInt for the byte counts, which are int64 because a cache
+// budget above two gigabytes is a reasonable thing for somebody to want.
+func setInt64(dst *int64, raw string) error {
+	v, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return fmt.Errorf("expected an integer, got %q", raw)
+	}
+
 	*dst = v
 
 	return nil

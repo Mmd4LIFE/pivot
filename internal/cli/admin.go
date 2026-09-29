@@ -47,6 +47,7 @@ administrator. Anyone who can run them already has the database credentials.`,
 		newSyncCatalogCmd(env, flags),
 		newJobsCmd(env, flags),
 		newListConnectionsCmd(env, flags),
+		newLimitsCmd(env, flags),
 	)
 
 	return cmd
