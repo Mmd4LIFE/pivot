@@ -439,6 +439,11 @@ func (r *Router) queryRoutes(authed Middleware) {
 	// somebody who may not.
 	r.mux.Handle("GET "+APIPrefix+"/connections",
 		mayQuery(http.HandlerFunc(h.handleConnections)))
+
+	// What a connection contains, for completion. The catalog answers it, so
+	// typing costs the source nothing.
+	r.mux.Handle("GET "+APIPrefix+"/connections/{id}/schema",
+		mayQuery(http.HandlerFunc(h.handleSchema)))
 }
 
 // telemetryRoutes registers the browser error endpoint.

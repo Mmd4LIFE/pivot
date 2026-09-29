@@ -93,7 +93,91 @@ type queryableConnectionsResponse struct {
 	Connections []queryableConnection `json:"connections"`
 }
 
+type schemaTable struct {
+	Schema  string   `json:"schema"`
+	Name    string   `json:"name"`
+	Columns []string `json:"columns"`
+}
+
+type connectionSchemaResponse struct {
+	Tables []schemaTable `json:"tables"`
+
+	// Synced says whether anything has been cataloged. False is not an error:
+	// a connection nobody has synced has no schema to offer, and an editor
+	// that said "no tables" would be reporting an empty database instead of an
+	// unread one.
+	Synced bool `json:"synced"`
+}
+
 // --- handler ---------------------------------------------------------------
+
+/*
+handleSchema returns what Pivot knows a connection contains, for completion.
+
+Read from the *catalog* rather than from the source. Autocomplete fires on
+every keystroke, and introspecting somebody's warehouse that often would be an
+outage with a text cursor in front of it -- Part 19-b built the catalog so this
+question has a cheap answer.
+
+The cost of that is honesty about staleness: this is what the last sync saw,
+which is why the response says whether there has been one. A table added five
+minutes ago will not complete until the next sync, and an editor that implied
+otherwise would have somebody convinced their table does not exist.
+
+Tables marked gone are left out. A sync marks rather than deletes, because a
+table disappears for reasons that are not "somebody dropped it" -- but
+completing a name the source will reject helps nobody.
+*/
+func (h *QueryHandler) handleSchema(w http.ResponseWriter, r *http.Request) {
+	connectionID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		WriteError(w, r, NewError(CodeValidationFailed, "that is not a connection id", err))
+
+		return
+	}
+
+	tables, err := h.repos.Catalog.Tables(r.Context(), connectionID)
+	if err != nil {
+		WriteError(w, r, err)
+
+		return
+	}
+
+	columns, err := h.repos.Catalog.Columns(r.Context(), connectionID)
+	if err != nil {
+		WriteError(w, r, err)
+
+		return
+	}
+
+	byTable := make(map[uuid.UUID][]string, len(tables))
+	for _, c := range columns {
+		if c.RemovedAt.Valid {
+			continue
+		}
+
+		byTable[c.TableID] = append(byTable[c.TableID], c.ColumnName)
+	}
+
+	out := make([]schemaTable, 0, len(tables))
+
+	for _, table := range tables {
+		if table.RemovedAt.Valid {
+			continue
+		}
+
+		out = append(out, schemaTable{
+			Schema:  table.SchemaName,
+			Name:    table.TableName,
+			Columns: byTable[table.ID],
+		})
+	}
+
+	WriteJSON(r.Context(), w, http.StatusOK, connectionSchemaResponse{
+		Tables: out,
+		Synced: len(tables) > 0,
+	})
+}
 
 /*
 handleConnections lists the sources this caller could query.
@@ -289,7 +373,11 @@ func queryError(err error) error {
 		return NewError(CodeUnavailable, CodeUnavailable.Summary(), err)
 
 	default:
-		// The source's own message, which is the useful part.
-		return NewError(CodeQueryFailed, query.SourceMessage(err), err)
+		// The source's own message, which is the useful part, and where it
+		// said the problem is when it said.
+		failure := NewError(CodeQueryFailed, query.SourceMessage(err), err)
+		failure.Position = query.SourcePosition(err)
+
+		return failure
 	}
 }

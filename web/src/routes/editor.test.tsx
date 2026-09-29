@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { createQueryClient } from "../api/queries";
 import { initI18n } from "../i18n";
+import { locate } from "./editor";
+import { clearWorkspace } from "./editor.workspace";
 import { routeTree } from "./tree";
 
 /*
@@ -48,6 +50,8 @@ beforeEach(async () => {
       });
     }),
   );
+
+  clearWorkspace();
 
   await initI18n();
 });
@@ -249,4 +253,53 @@ test("explains an instance with no sources", async () => {
 
   expect(await screen.findByText(/no sources are connected/i)).toBeInTheDocument();
   expect(calls).not.toContain("POST /api/v1/queries");
+});
+
+/*
+ * Turning the source's byte offset into a place in the text.
+ *
+ * Counted in bytes because that is what the source reports. Doing it in
+ * JavaScript string indices lands on the wrong character in any statement
+ * containing a non-ASCII identifier -- and a marker one place to the left of
+ * the problem is worse than no marker, because it is confidently wrong.
+ */
+describe("locating an error in the statement", () => {
+  test("finds the line and column of a byte offset", () => {
+    const sql = "SELECT 1\nFROM nope\nWHERE x";
+
+    // 1-based, pointing at the "n" of nope: 9 bytes of the first line and its
+    // newline, then 5 more.
+    const at = locate(sql, 15);
+
+    expect(at).toEqual({ line: 2, column: 6, text: "FROM nope" });
+  });
+
+  test("points at the first character when the offset is 1", () => {
+    expect(locate("SELECT", 1)).toEqual({ line: 1, column: 1, text: "SELECT" });
+  });
+
+  /*
+   * The case that makes bytes rather than characters the right unit.
+   *
+   * "SELECT ä, nope" is 15 bytes but 14 characters, because ä takes two. An
+   * offset counted in string indices would point one character to the left of
+   * the word that is actually wrong.
+   */
+  test("counts bytes, not characters", () => {
+    const sql = "SELECT ä, nope";
+
+    // Byte 11 is the "n" of nope: 7 for "SELECT ", 2 for ä, then ", ".
+    expect(locate(sql, 11)?.column).toBe(10);
+  });
+
+  test("has nothing to say without a position", () => {
+    expect(locate("SELECT 1", undefined)).toBeUndefined();
+    expect(locate("SELECT 1", 0)).toBeUndefined();
+  });
+
+  // A position past the end is a source disagreeing with itself. Showing a
+  // marker somewhere arbitrary would be worse than showing none.
+  test("refuses a position past the end", () => {
+    expect(locate("SELECT 1", 999)).toBeUndefined();
+  });
 });

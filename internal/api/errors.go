@@ -176,6 +176,20 @@ type ErrorBody struct {
 	Details   []Detail `json:"details,omitempty"`
 	RequestID string   `json:"requestId,omitempty"`
 	Docs      string   `json:"docs"`
+
+	/*
+		Position is where in the caller's input the problem is: a 1-based byte
+		offset, present only where that means something.
+
+		Here rather than in Details because a position is a number and Details
+		carries strings -- and because it is the difference between an editor
+		underlining the word that is wrong and showing a sentence above ten
+		lines of SQL.
+
+		Omitted almost always. Only the query endpoint sets it, and only when
+		the source reported one, which today means PostgreSQL parse errors.
+	*/
+	Position int `json:"position,omitempty"`
 }
 
 // ErrorResponse wraps the envelope, so a success body and an error body can
@@ -189,6 +203,10 @@ type APIError struct {
 	Code    Code
 	Message string
 	Details []Detail
+
+	// Position is where in the caller's input the problem is, when the thing
+	// that refused it said. See [ErrorBody.Position].
+	Position int
 
 	// Err is the underlying cause. It is logged, never sent: internal errors
 	// leak implementation detail and sometimes credentials.
@@ -293,6 +311,7 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 		Code:      apiErr.Code,
 		Message:   apiErr.Message,
 		Details:   apiErr.Details,
+		Position:  apiErr.Position,
 		RequestID: requestID,
 		Docs:      apiErr.Code.DocsURL(),
 	}})

@@ -232,6 +232,12 @@ export const en = {
     truncated: "Truncated",
 
     failed: "The source refused this statement",
+    atLine: "Line {{line}}, column {{column}}",
+
+    tabs: "Open queries",
+    newTab: "New query",
+    closeTab: "Close {{title}}",
+    notSynced: "Autocomplete is empty until this connection's schema is read — run pivot admin sync-catalog.",
 
     resultsCaption: "The result of the statement, {{count}} row",
     resultsCaption_other: "The result of the statement, {{count}} rows",

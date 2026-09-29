@@ -495,6 +495,23 @@ type Error struct {
 	// Hint is what to try. Empty when there is nothing honest to suggest.
 	Hint string
 
+	/*
+		Position is where in the statement the source says the problem is: a
+		1-based offset in bytes, or zero when it did not say.
+
+		Zero is the ordinary case rather than the exception. PostgreSQL reports
+		a position for a parse error and nothing else does -- MySQL's protocol
+		has no field for it, and SQLite and DuckDB are parsing in this process
+		and still do not offer one. So a caller must treat this as a hint that
+		is usually absent, and an editor that only showed an error when it
+		could underline it would hide most of them.
+
+		Bytes rather than runes, because that is what the wire carries. A
+		caller turning it into a line and column has to count in bytes to land
+		on the right character in a statement with any non-ASCII in it.
+	*/
+	Position int
+
 	// Err is the driver's original error, kept for the log and never shown to
 	// a caller: it can carry the host, the user, and occasionally the password
 	// in a DSN.

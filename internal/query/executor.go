@@ -779,6 +779,24 @@ past the pipeline into the connector package.
 Falls back to the error's own text when the failure came from somewhere other
 than a source, so a caller always has something to show.
 */
+/*
+SourcePosition is where in the statement the source said the problem is: a
+1-based byte offset, or zero when it did not say.
+
+Exported beside [SourceMessage] and for the same reason -- a caller must be
+able to get at it without reaching past the pipeline into the connector
+package. Zero is the ordinary answer: only PostgreSQL reports a position at
+all.
+*/
+func SourcePosition(err error) int {
+	var connErr *connectors.Error
+	if errors.As(err, &connErr) {
+		return connErr.Position
+	}
+
+	return 0
+}
+
 func SourceMessage(err error) string {
 	var connErr *connectors.Error
 	if errors.As(err, &connErr) && connErr.Message != "" {

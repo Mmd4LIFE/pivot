@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 
@@ -468,5 +469,144 @@ func TestValuesSurviveTheTripToJSON(t *testing.T) {
 	// And a NULL is null, not "".
 	if row[3] != nil {
 		t.Errorf("a NULL came back as %#v, which a grid cannot tell from an empty string", row[3])
+	}
+}
+
+/*
+What a connection contains, for completion.
+
+Read from the catalog rather than the source, because completion fires on every
+keystroke and introspecting somebody's warehouse that often would be an outage
+with a text cursor in front of it.
+
+The `synced` flag is the part worth testing. An unsynced connection and an
+empty database produce the same empty list, and only one of them is worth
+telling somebody about -- an editor that said "no tables" about an unread
+catalog would have somebody convinced their database is empty.
+*/
+func TestTheSchemaSaysWhetherItHasEverBeenRead(t *testing.T) {
+	t.Parallel()
+
+	f := newAuthFixture(t, openSQLite(t))
+	grant(t, f, authz.RelationAnalyst)
+
+	if resp := f.login(t, fixtureEmail, fixturePassword); resp.status != http.StatusOK {
+		t.Fatalf("login: %s", resp)
+	}
+
+	conn, err := f.repos.Connections.Create(f.ctx, repo.CreateConnection{
+		Slug: "warehouse", Name: "Warehouse", Kind: "sqlite",
+		Database: filepath.Join(t.TempDir(), "w.db"), IsEnabled: true,
+	})
+	if err != nil {
+		t.Fatalf("create connection: %v", err)
+	}
+
+	path := api.APIPrefix + "/connections/" + conn.ID.String() + "/schema"
+
+	// Nothing cataloged yet.
+	resp := f.request(t, http.MethodGet, path, nil)
+	if resp.status != http.StatusOK {
+		t.Fatalf("status = %d: %s", resp.status, resp)
+	}
+
+	var before struct {
+		Tables []any `json:"tables"`
+		Synced bool  `json:"synced"`
+	}
+
+	if derr := json.Unmarshal(resp.body, &before); derr != nil {
+		t.Fatalf("decode: %v", derr)
+	}
+
+	if before.Synced {
+		t.Error("an unsynced connection reported itself as read")
+	}
+
+	// Now catalog something, the way a sync would.
+	at := time.Now()
+
+	table, err := f.repos.Catalog.RecordTable(f.ctx, repo.SeenTable{
+		ConnectionID: conn.ID, Schema: "main", Name: "orders", Type: "table",
+	}, at)
+	if err != nil {
+		t.Fatalf("record table: %v", err)
+	}
+
+	for i, name := range []string{"id", "region"} {
+		if _, err := f.repos.Catalog.RecordColumn(f.ctx, repo.SeenColumn{
+			TableID: table.ID, Name: name, SourceType: "TEXT",
+			CanonicalType: "string", Position: int64(i + 1),
+		}, at); err != nil {
+			t.Fatalf("record column %s: %v", name, err)
+		}
+	}
+
+	resp = f.request(t, http.MethodGet, path, nil)
+
+	var after struct {
+		Tables []struct {
+			Schema  string   `json:"schema"`
+			Name    string   `json:"name"`
+			Columns []string `json:"columns"`
+		} `json:"tables"`
+		Synced bool `json:"synced"`
+	}
+
+	if err := json.Unmarshal(resp.body, &after); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if !after.Synced {
+		t.Error("a cataloged connection reported itself as unread")
+	}
+
+	if len(after.Tables) != 1 {
+		t.Fatalf("got %d tables, want 1: %s", len(after.Tables), resp.body)
+	}
+
+	if got := after.Tables[0]; got.Name != "orders" || len(got.Columns) != 2 {
+		t.Errorf("table = %+v, want orders with two columns", got)
+	}
+}
+
+// A table a sync marked gone is not offered, because completing a name the
+// source will reject helps nobody.
+func TestTheSchemaOmitsWhatIsGone(t *testing.T) {
+	t.Parallel()
+
+	f := newAuthFixture(t, openSQLite(t))
+	grant(t, f, authz.RelationAnalyst)
+
+	if resp := f.login(t, fixtureEmail, fixturePassword); resp.status != http.StatusOK {
+		t.Fatalf("login: %s", resp)
+	}
+
+	conn, err := f.repos.Connections.Create(f.ctx, repo.CreateConnection{
+		Slug: "warehouse", Name: "Warehouse", Kind: "sqlite",
+		Database: filepath.Join(t.TempDir(), "w.db"), IsEnabled: true,
+	})
+	if err != nil {
+		t.Fatalf("create connection: %v", err)
+	}
+
+	at := time.Now()
+
+	if _, err := f.repos.Catalog.RecordTable(f.ctx, repo.SeenTable{
+		ConnectionID: conn.ID, Schema: "main", Name: "departed", Type: "table",
+	}, at); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+
+	// A later sync that saw nothing marks it gone.
+	if _, _, err := f.repos.Catalog.MarkGone(f.ctx, conn.ID, at.Add(time.Minute)); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+
+	resp := f.request(t, http.MethodGet,
+		api.APIPrefix+"/connections/"+conn.ID.String()+"/schema", nil)
+
+	if containsFold(string(resp.body), "departed") {
+		t.Errorf("a table marked gone is still offered for completion: %s", resp.body)
 	}
 }

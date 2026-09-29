@@ -858,6 +858,43 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
+  /api/v1/connections/{id}/schema:
+    get:
+      tags: [query]
+      operationId: getConnectionSchema
+      summary: What Pivot knows a connection contains
+      description: |
+        The tables and columns the last catalog sync saw, for autocomplete.
+
+        Read from the catalog rather than from the source. Completion fires on
+        every keystroke, and introspecting a warehouse that often would be an
+        outage with a text cursor in front of it.
+
+        The cost of that is staleness, which `synced` is honest about: a
+        connection nobody has synced has no schema to offer, and reporting an
+        empty list as "no tables" would describe an empty database rather than
+        an unread one. Tables a sync marked gone are omitted.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The cataloged schema
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectionSchema"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
   /api/v1/queries:
     post:
       tags: [query]
@@ -953,6 +990,33 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/QueryableConnection"
+
+    SchemaTable:
+      type: object
+      required: [schema, name, columns]
+      properties:
+        schema:
+          type: string
+        name:
+          type: string
+        columns:
+          type: array
+          items:
+            type: string
+
+    ConnectionSchema:
+      type: object
+      required: [tables, synced]
+      properties:
+        tables:
+          type: array
+          items:
+            $ref: "#/components/schemas/SchemaTable"
+        synced:
+          type: boolean
+          description: |
+            Whether anything has been cataloged. False means nobody has run a
+            sync, not that the database is empty.
 
     RunQueryRequest:
       type: object

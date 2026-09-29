@@ -164,6 +164,21 @@ and the messages are not. The network failures have no SQLSTATE — the
 connection never got far enough to have one — so those are classified from the
 error types net gives us, which is the closest thing to a code available.
 */
+/*
+at attaches the position PostgreSQL reported, if it reported one.
+
+Separate from [Errorf] because it is a PostgreSQL-only fact. Every other source
+Pivot speaks to gives no position at all, and building it into the shared
+constructor would suggest a generality that does not exist.
+*/
+func at(pgErr *pgconn.PgError, e *Error) *Error {
+	if pgErr.Position > 0 {
+		e.Position = int(pgErr.Position)
+	}
+
+	return e
+}
+
 func (postgresDialect) Classify(err error) *Error {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
@@ -184,12 +199,16 @@ func (postgresDialect) Classify(err error) *Error {
 				"permission denied by PostgreSQL")
 
 		case "42601":
-			return Errorf(ReasonSyntax, err, "", "PostgreSQL could not parse the query")
+			// The only place any source tells Pivot *where* it stopped
+			// reading, so the editor can underline it rather than saying
+			// something went wrong somewhere in ten lines.
+			return at(pgErr, Errorf(ReasonSyntax, err, "",
+				"PostgreSQL could not parse the query"))
 
 		case "42P01":
-			return Errorf(ReasonSyntax, err,
+			return at(pgErr, Errorf(ReasonSyntax, err,
 				"check the schema and the search_path",
-				"no such table")
+				"no such table"))
 
 		case "57014":
 			return Errorf(ReasonCanceled, err, "", "the query was canceled")
