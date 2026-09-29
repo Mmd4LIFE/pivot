@@ -60,6 +60,33 @@ export interface SqlEditorProps {
 
   /** Run the statement. Wired to Ctrl/Cmd-Enter, which is what people try. */
   onRun?: () => void;
+
+  /**
+   * Called when the selection changes, with whatever is selected.
+   *
+   * Lifted out because the Run button has to say what it will do: "Run
+   * selection" when there is one is the difference between a button somebody
+   * trusts and one they check the result of.
+   */
+  onSelectionChange?: (selected: string) => void;
+
+  /** Hands back a way to replace the document, for Format. */
+  onReady?: (api: SqlEditorApi) => void;
+
+  /** How tall the editor is, which the page's splitter owns. */
+  height?: number;
+}
+
+/** What the page can do to the editor from outside it. */
+export interface SqlEditorApi {
+  /**
+   * Replace the whole document as one undoable edit.
+   *
+   * One transaction rather than a clear and an insert, so a single Ctrl-Z puts
+   * back exactly what was there. Formatting somebody's query is only safe if
+   * it is trivially reversible.
+   */
+  replaceAll: (text: string) => void;
 }
 
 /**
@@ -102,7 +129,16 @@ function sqlConfig(dialect: string, schema?: Record<string, string[]>): SQLConfi
   return config;
 }
 
-export function SqlEditor({ value, onChange, dialect, schema, onRun }: SqlEditorProps) {
+export function SqlEditor({
+  value,
+  onChange,
+  dialect,
+  schema,
+  onRun,
+  onSelectionChange,
+  onReady,
+  height = 224,
+}: SqlEditorProps) {
   const host = useRef<HTMLDivElement | null>(null);
   const view = useRef<EditorView | null>(null);
 
@@ -110,8 +146,10 @@ export function SqlEditor({ value, onChange, dialect, schema, onRun }: SqlEditor
   // editor, which would take the cursor and the undo history with it.
   const change = useRef(onChange);
   const run = useRef(onRun);
+  const selectionChange = useRef(onSelectionChange);
   change.current = onChange;
   run.current = onRun;
+  selectionChange.current = onSelectionChange;
 
   /*
    * The language, in a compartment.
@@ -187,6 +225,12 @@ export function SqlEditor({ value, onChange, dialect, schema, onRun }: SqlEditor
       ]),
       EditorView.updateListener.of((update) => {
         if (update.docChanged) change.current(update.state.doc.toString());
+
+        if (update.selectionSet || update.docChanged) {
+          const { from, to } = update.state.selection.main;
+
+          selectionChange.current?.(from === to ? "" : update.state.sliceDoc(from, to));
+        }
       }),
     ];
 
@@ -196,6 +240,17 @@ export function SqlEditor({ value, onChange, dialect, schema, onRun }: SqlEditor
     });
 
     view.current = editor;
+
+    onReady?.({
+      replaceAll: (text: string) => {
+        const current = view.current;
+        if (!current) return;
+
+        current.dispatch({
+          changes: { from: 0, to: current.state.doc.length, insert: text },
+        });
+      },
+    });
 
     return () => {
       editor.destroy();
@@ -242,7 +297,8 @@ export function SqlEditor({ value, onChange, dialect, schema, onRun }: SqlEditor
       // A real height rather than a minimum, so the editor has somewhere to
       // fill. With min-height the box grows with the content and the empty
       // area below a short query belongs to nothing.
-      className="h-56 overflow-hidden rounded-token border border-line"
+      style={{ height }}
+      className="overflow-hidden rounded-token border border-line"
     />
   );
 }

@@ -168,3 +168,141 @@ test("emptyWorkspace is always usable", () => {
   expect(workspace.tabs).toHaveLength(1);
   expect(workspace.activeId).toBe(workspace.tabs[0]?.id);
 });
+
+describe("organising tabs", () => {
+  test("renames a tab", () => {
+    const { result } = renderHook(() => useWorkspace());
+
+    act(() => result.current.rename(result.current.active.id, "Revenue by region"));
+
+    expect(result.current.active.title).toBe("Revenue by region");
+  });
+
+  /*
+   * An empty name falls back rather than leaving a tab with no label.
+   *
+   * A strip of unlabelled tabs is unusable, and clearing the field is what
+   * somebody does on the way to typing something else.
+   */
+  test("refuses to leave a tab unlabelled", () => {
+    const { result } = renderHook(() => useWorkspace());
+
+    act(() => result.current.rename(result.current.active.id, "   "));
+
+    expect(result.current.active.title).toBeTruthy();
+  });
+
+  test("a rename survives a reload", () => {
+    const first = renderHook(() => useWorkspace());
+
+    act(() => first.result.current.rename(first.result.current.active.id, "Kept"));
+    first.unmount();
+
+    expect(renderHook(() => useWorkspace()).result.current.active.title).toBe("Kept");
+  });
+
+  test("moves a tab along the strip", () => {
+    const { result } = renderHook(() => useWorkspace());
+
+    act(() => result.current.rename(result.current.active.id, "First"));
+    act(() => result.current.open());
+    act(() => result.current.rename(result.current.active.id, "Second"));
+
+    const second = result.current.active.id;
+
+    act(() => result.current.move(second, -1));
+
+    expect(result.current.workspace.tabs.map((tab) => tab.title)).toEqual(["Second", "First"]);
+  });
+
+  // Moving off either end does nothing rather than wrapping or dropping.
+  test("stops at the ends", () => {
+    const { result } = renderHook(() => useWorkspace());
+
+    const only = result.current.active.id;
+
+    act(() => result.current.move(only, -1));
+    act(() => result.current.move(only, 1));
+
+    expect(result.current.workspace.tabs).toHaveLength(1);
+    expect(result.current.active.id).toBe(only);
+  });
+
+  /*
+   * A tab opened from a link or from Browse is added, never substituted.
+   *
+   * Whatever was already being written is somebody's work, and a link that
+   * silently overwrote it would be the last link they clicked.
+   */
+  test("opens an arriving question beside what was there", () => {
+    const { result } = renderHook(() => useWorkspace());
+
+    act(() => result.current.update({ sql: "SELECT mine" }));
+
+    act(() =>
+      result.current.openWith({ title: "Shared", sql: "SELECT theirs", connectionId: "c1" }),
+    );
+
+    expect(result.current.workspace.tabs).toHaveLength(2);
+    expect(result.current.workspace.tabs[0]?.sql).toBe("SELECT mine");
+    expect(result.current.active.sql).toBe("SELECT theirs");
+  });
+
+  /*
+   * The same question twice is the same tab.
+   *
+   * The address bar carries the statement as it is typed, so a reload hands
+   * the page its own fragment back on mount. Appending unconditionally meant
+   * every refresh opened a second copy of the tab somebody was already in --
+   * and the refresh after that a third.
+   */
+  test("reuses the tab that already holds an arriving question", () => {
+    const { result } = renderHook(() => useWorkspace());
+
+    act(() =>
+      result.current.openWith({ title: "Shared", sql: "SELECT theirs", connectionId: "c1" }),
+    );
+
+    const opened = result.current.workspace.activeId;
+
+    act(() =>
+      result.current.openWith({ title: "Shared", sql: "SELECT theirs", connectionId: "c1" }),
+    );
+
+    expect(result.current.workspace.tabs).toHaveLength(2);
+    expect(result.current.workspace.activeId).toBe(opened);
+  });
+
+  // Renaming is the one edit that must not make a link stop matching: the
+  // title is the part somebody changes, the statement is the question.
+  test("matches an arriving question past a rename", () => {
+    const { result } = renderHook(() => useWorkspace());
+
+    act(() =>
+      result.current.openWith({ title: "Shared", sql: "SELECT theirs", connectionId: "c1" }),
+    );
+
+    const opened = result.current.workspace.activeId;
+
+    act(() => result.current.rename(opened, "Mine now"));
+
+    act(() =>
+      result.current.openWith({ title: "Shared", sql: "SELECT theirs", connectionId: "c1" }),
+    );
+
+    expect(result.current.workspace.tabs).toHaveLength(2);
+    expect(result.current.workspace.activeId).toBe(opened);
+  });
+
+  // A different source is a different question, even with identical text --
+  // "SELECT count(*) FROM orders" against staging is not the one against
+  // production, and silently landing on the wrong tab would be a real error.
+  test("keeps questions against different sources apart", () => {
+    const { result } = renderHook(() => useWorkspace());
+
+    act(() => result.current.openWith({ title: "A", sql: "SELECT 1", connectionId: "c1" }));
+    act(() => result.current.openWith({ title: "B", sql: "SELECT 1", connectionId: "c2" }));
+
+    expect(result.current.workspace.tabs).toHaveLength(3);
+  });
+});

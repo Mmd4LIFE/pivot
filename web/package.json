@@ -48,6 +48,7 @@
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "react-i18next": "17.0.15",
+    "sql-formatter": "^15.9.0",
     "tailwind-merge": "3.7.0"
   },
   "devDependencies": {
