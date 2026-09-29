@@ -166,6 +166,27 @@ export function useWorkspace() {
   return { workspace, active, update, open, close, select };
 }
 
+/**
+ * Put a statement in a new tab, for somebody arriving from somewhere else.
+ *
+ * Written straight to storage rather than passed through the URL: a statement
+ * is long, contains quotes and newlines, and a query string is a poor place to
+ * carry one -- it ends up encoded, truncated by something, and visible in
+ * every log between here and the server.
+ *
+ * The editor reads the workspace on mount, so navigating there afterwards
+ * lands on the new tab with nothing else to coordinate.
+ */
+export function openInWorkspace(title: string, sql: string, connectionId: string): void {
+  const current = load();
+
+  counter += 1;
+
+  const tab: EditorTab = { id: `tab-${counter}`, title, sql, connectionId };
+
+  save({ tabs: [...current.tabs, tab], activeId: tab.id });
+}
+
 /** For tests, which must not inherit a workspace from each other. */
 export function clearWorkspace(): void {
   try {

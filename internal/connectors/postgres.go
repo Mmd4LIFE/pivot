@@ -164,12 +164,36 @@ and the messages are not. The network failures have no SQLSTATE — the
 connection never got far enough to have one — so those are classified from the
 error types net gives us, which is the closest thing to a code available.
 */
+func (postgresDialect) Classify(err error) *Error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		/*
+			The position, attached once for everything PostgreSQL classified.
+
+			Once rather than per branch, because which codes carry a position
+			is PostgreSQL's business and not a list worth maintaining here.
+			This was originally wired into the two branches that looked like
+			parse errors, and it missed 42703 -- an undefined column, which is
+			the most common typo there is and the case the underline is most
+			useful for. Found by running it.
+
+			Position is zero unless the server set it, so this is a no-op for
+			the errors that have no position, which is most of them.
+		*/
+		return at(pgErr, classifyPostgres(pgErr, err))
+	}
+
+	return classifyPostgresNetwork(err)
+}
+
 /*
 at attaches the position PostgreSQL reported, if it reported one.
 
 Separate from [Errorf] because it is a PostgreSQL-only fact. Every other source
-Pivot speaks to gives no position at all, and building it into the shared
-constructor would suggest a generality that does not exist.
+Pivot speaks to gives no position at all -- MySQL's protocol has no field for
+it, and SQLite and DuckDB parse in this process and still do not offer one --
+so building it into the shared constructor would suggest a generality that does
+not exist.
 */
 func at(pgErr *pgconn.PgError, e *Error) *Error {
 	if pgErr.Position > 0 {
@@ -179,53 +203,55 @@ func at(pgErr *pgconn.PgError, e *Error) *Error {
 	return e
 }
 
-func (postgresDialect) Classify(err error) *Error {
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) {
-		switch pgErr.Code {
-		case "28P01", "28000":
-			return Errorf(ReasonAuth, err,
-				"check the username and password",
-				"PostgreSQL refused those credentials")
+// classifyPostgres maps a SQLSTATE onto something actionable.
+func classifyPostgres(pgErr *pgconn.PgError, err error) *Error {
+	switch pgErr.Code {
+	case "28P01", "28000":
+		return Errorf(ReasonAuth, err,
+			"check the username and password",
+			"PostgreSQL refused those credentials")
 
-		case "3D000":
-			return Errorf(ReasonNoDatabase, err,
-				"check the database name; the server is reachable and the credentials work",
-				"that database does not exist on this server")
+	case "3D000":
+		return Errorf(ReasonNoDatabase, err,
+			"check the database name; the server is reachable and the credentials work",
+			"that database does not exist on this server")
 
-		case "42501":
-			return Errorf(ReasonPermission, err,
-				"the account authenticated but is not allowed to do this",
-				"permission denied by PostgreSQL")
+	case "42501":
+		return Errorf(ReasonPermission, err,
+			"the account authenticated but is not allowed to do this",
+			"permission denied by PostgreSQL")
 
-		case "42601":
-			// The only place any source tells Pivot *where* it stopped
-			// reading, so the editor can underline it rather than saying
-			// something went wrong somewhere in ten lines.
-			return at(pgErr, Errorf(ReasonSyntax, err, "",
-				"PostgreSQL could not parse the query"))
+	case "42601":
+		// The only place any source tells Pivot *where* it stopped
+		// reading, so the editor can underline it rather than saying
+		// something went wrong somewhere in ten lines.
+		return Errorf(ReasonSyntax, err, "",
+			"PostgreSQL could not parse the query")
 
-		case "42P01":
-			return at(pgErr, Errorf(ReasonSyntax, err,
-				"check the schema and the search_path",
-				"no such table"))
+	case "42P01":
+		return Errorf(ReasonSyntax, err,
+			"check the schema and the search_path",
+			"no such table")
 
-		case "57014":
-			return Errorf(ReasonCanceled, err, "", "the query was canceled")
+	case "57014":
+		return Errorf(ReasonCanceled, err, "", "the query was canceled")
 
-		case "53300":
-			return Errorf(ReasonUnreachable, err,
-				"the server is out of connection slots; lower this connection's pool size",
-				"PostgreSQL refused the connection: too many clients")
-		}
-
-		// A code nobody has mapped yet. Reported as unknown *with the code*,
-		// so the next person to see it has something to look up rather than a
-		// sentence somebody wrote once.
-		return Errorf(ReasonUnknown, err, "",
-			"PostgreSQL reported %s: %s", pgErr.Code, pgErr.Message)
+	case "53300":
+		return Errorf(ReasonUnreachable, err,
+			"the server is out of connection slots; lower this connection's pool size",
+			"PostgreSQL refused the connection: too many clients")
 	}
 
+	// A code nobody has mapped yet. Reported as unknown *with the code*, so
+	// the next person to see it has something to look up rather than a
+	// sentence somebody wrote once.
+	return Errorf(ReasonUnknown, err, "",
+		"PostgreSQL reported %s: %s", pgErr.Code, pgErr.Message)
+}
+
+// classifyPostgresNetwork handles the failures that never reached a server, so
+// have no SQLSTATE to classify from.
+func classifyPostgresNetwork(err error) *Error {
 	var dnsErr *net.DNSError
 	if errors.As(err, &dnsErr) {
 		return Errorf(ReasonUnreachable, err,

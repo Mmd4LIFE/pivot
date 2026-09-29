@@ -61,7 +61,7 @@ At the end of every part, in this order:
 | | |
 |---|---|
 | **Last completed** | Part 23-b — The editor people keep |
-| **Next up** | **Part 24 — Results and export** |
+| **Next up** | **Part 23-d — The editor, properly** |
 | **Current phase** | Phase 1 — Connect & Query → v0.1 |
 | **Branch** | `main` |
 | **Blockers** | None |
@@ -214,6 +214,12 @@ reload, and a parse error underlined at the line it came from. **CodeMirror is l
 107 KB gzipped that a browser fetches when somebody opens the editor, leaving the initial
 bundle at **192.9 KB against the 200 KB budget**.
 
+**The answer is readable, and what is connected is browsable.** The results grid is
+virtualized with a cell cursor, shift and drag range selection, copy as TSV that pastes into
+a spreadsheet with its columns intact, resizable columns, three-state sort and type-aware
+dates. `/browse` lists the connected sources and their tables from the catalog, and opening
+one lands in the editor with a statement quoted for that dialect.
+
 **DuckDB exists and is not in the shipped binary.**
 [ADR-0010](docs/architecture/adr/0010-duckdb-is-an-opt-in-build.md) measured what ADR-0004's
 CGo clause actually costs — the binary goes 42.5 MB → 101.8 MB, stops being statically
@@ -277,7 +283,7 @@ few points high; leave margin above 80%.
 
 ```
 Phase 0  Foundations        [██████████████████████████] 31/31   COMPLETE
-Phase 1  Connect & Query    [█████████████████████     ] 16/20
+Phase 1  Connect & Query    [████████████████████      ] 18/23
 Phase 2+ ...                                            (expanded as we approach)
 ```
 
@@ -820,6 +826,98 @@ route or changes the NFR deliberately. It does not quietly exceed it.
 
 ---
 
+### - [x] Part 23-c — The results grid ✅ 2026-09-29
+
+**Deliverable:** reading an answer is as easy as reading a spreadsheet.
+
+**Build:** A real data grid: virtualized rows, sticky header, row numbers, resizable and
+auto-sized columns, type-aware alignment, cell and range selection, copy as TSV, keyboard
+navigation, client-side sort, and a value inspector for what does not fit in a cell.
+
+**Done when:**
+- **A selection copies as TSV and pastes into a spreadsheet with its columns intact.** This
+  is the one that decides whether people export or just copy
+- 100,000 rows scroll without the page stuttering, measured — not "feels fine"
+- Arrow keys, Home/End, PageUp/Down and shift-selection move a cell cursor, and the grid
+  does not steal the page's scroll
+- A column can be resized and auto-sized to its content, and the widths survive a re-run
+- A NULL, an empty string and the text "NULL" are three visibly different things
+- Numbers are right-aligned and share a decimal alignment; text is not
+
+**Notes:** The current table is a plain `<table>` that renders `String(cell)`. It proves the
+pipeline and nothing else.
+
+Semantics first: this stays a real `<table>` if virtualization allows it, because header
+association and "column 3 of 7" come from the element. Where that is impossible, the ARIA
+grid pattern is implemented in full rather than partly — a half-built grid is worse for a
+screen reader than a plain table.
+
+**Refs:** `P1-SQL-005`, `P1-SQL-008`
+
+---
+
+### - [ ] Part 23-d — The editor, properly
+
+**Deliverable:** writing SQL in Pivot feels like a tool somebody chose, not one they settled
+for.
+
+**Build:** A CodeMirror theme built from Pivot's own tokens, a styled completion popup,
+current-line and bracket highlighting, search and replace, format, run-selection, a resizable
+split between editor and results, and a tab strip that can rename and reorder.
+
+**Done when:**
+- The editor is themed from the design tokens and is right in **both** light and dark,
+  including the completion popup, the selection, and the gutter
+- Running with a selection runs the selection, and the button says which it will do
+- Format turns a pasted one-line query into something readable, and is undoable
+- The split between editor and results can be dragged, and the position survives a reload
+- Nothing in the editor uses a colour that is not a token — an embedder restyles Pivot by
+  changing tokens, and a hard-coded hex in here breaks that silently
+
+**Already done, ahead of this part:** the theme itself. It was pulled forward because
+23-b's components referenced `--color-*` properties that do not exist here, so the editor
+rendered with browser defaults in both modes — that had to be fixed before anything else
+could be judged. Search, bracket matching, active-line highlight, a styled completion popup
+and Tab-to-accept came with it. What remains is run-selection, format, the draggable split,
+and a tab strip that can rename and reorder.
+
+**Notes:** Part 23-b shipped CodeMirror with **no theme at all**: the components referenced
+`--color-*` custom properties that do not exist in this project, so they rendered with
+browser defaults in both themes. The vocabulary is Tailwind utilities over `--pivot-*`
+(`bg-surface`, `text-content-muted`, `border-line`, `rounded-token`). That is fixed before
+this part starts; this part is what makes it good rather than merely correct.
+
+**Refs:** `P1-SQL-001`, `P1-SQL-009`
+
+---
+
+### - [x] Part 23-e — Browse what is connected ✅ 2026-09-29
+
+**Deliverable:** somebody can see what is in their databases without writing a query first.
+
+**Build:** `/browse` — the connected sources, the tables in each, and a table's columns with
+their types — read from the catalog, with a click that opens the table in the editor.
+
+**Done when:**
+- Every connected source is listed, and every table the last sync saw
+- A connection nobody has synced says so and names the command, rather than looking empty
+- Opening a table lands in the editor with a runnable statement in a new tab, quoted for
+  that source's dialect
+- A table marked gone by a sync is not offered
+
+**Notes:** The backend for this already exists -- `GET /connections` and
+`GET /connections/{id}/schema` were built for the editor's autocomplete in 23-b. This is the
+screen over them, and it is the first thing a new user does: Metabase's `/browse/databases`
+is the page people land on before they have any idea what to type.
+
+Opening a table hands the query to the editor rather than running it here. One data-viewing
+path, not two -- and the statement stays visible and editable, which is honest about what
+"preview this table" actually does.
+
+**Refs:** `P1-CAT-005`
+
+---
+
 ### - [ ] Part 24 — Results and export
 
 **Deliverable:** the answer, on screen and out of the building.
@@ -930,6 +1028,7 @@ Phase 0's log is in
 
 | Date | Part | Shipped | Notes |
 |---|---|---|---|
+| 2026-09-29 | 23-c, 23-e | A virtualized results grid with spreadsheet selection and TSV copy, `/browse` over the catalog, a CodeMirror theme built from the design tokens, and the cursor bug fixed | **Part 23 was split again into 23-c, 23-d and 23-e**, because "the editor is bad" turned out to be three problems. The first was reported by the user and was mine: the editor was rebuilt on every keystroke and the caret vanished after each character — the completion schema was a fresh object in the effect's dependencies. Fixed with a memo *and* a CodeMirror compartment, so changing a tab's source reconfigures rather than rebuilds; four tests compare DOM node identity across re-renders and were verified to fail against the original. **The second was that nothing was styled at all.** 23-b's components referenced `--color-border`, `--color-bg`, `--color-fg-muted` — none of which exist in this project, whose vocabulary is Tailwind utilities over `--pivot-*`. Every component I had written rendered with browser defaults in both themes. A real CodeMirror theme followed, built entirely from tokens with no hex anywhere, because an embedder restyles Pivot by redefining those and one hard-coded colour is a patch of somebody else's product. **The third was column sizing, and it took five reports to fix because I kept tuning instead of checking.** Four attempts estimated text width — guessed per-character constants, a canvas measurement, a resolved font, a correction pass — and all four were wrong for one reason: `ctx.font` silently ignores a string it cannot parse and goes on measuring at `10px sans-serif`. First the value was an unresolved `var()`; then it was resolved but still contained the newlines the token is declared across. A symptom that stays consistently wrong through four different fixes is evidence the mechanism is broken, and I read it as calibration four times. **The fix was to delete the estimator.** The first render carries no widths, the browser lays the table out at `max-content`, and the result is read back and locked in. It cannot be wrong about fonts because it never asks about fonts. **The grid is selectable the way a database tool is**: an anchor-and-focus model so shifting back toward the anchor shrinks rather than restarts, drag to sweep, Ctrl-A, and a copy as **TSV** — tab-separated because a spreadsheet pastes it into cells with no import dialog, which is what decides whether people export or just copy. Tabs inside a value become spaces; quoting would be more faithful and arrives visible in the cell. **Dates are shown as dates**: a DATE came off the wire as `2026-09-26T00:00:00Z` and rendering that midnight told somebody their date has a time in it. Read as text and never through `Date`, because parsing and reformatting applies the *viewer's* zone and silently moves every value — a row stamped 00:30 UTC showing as the previous day in New York. **The chunking trap caught me twice more.** `manualChunks` forces a module into the chunk it names, so routing CodeMirror through `vendor` defeated its dynamic import (296 KB against a 200 KB budget), and excluding `@tanstack/react-virtual` without its `virtual-core` dependency did the same thing more quietly. A package excluded there must have its dependencies excluded too. Final: **194.6 KB initial**, with CodeMirror and the virtualizer in chunks fetched on demand. **`/browse` cost almost nothing** because its backend already existed — `GET /connections` and `/connections/{id}/schema` were built for autocomplete in 23-b. Opening a table hands a dialect-quoted statement to the editor rather than running it there: one data-viewing path, and the query stays visible. Also found: neither Browse nor the editor was in the sidebar, so the only way to reach the editor was to type the URL. |
 | 2026-09-29 | 23-b | CodeMirror 6 lazy-loaded with per-dialect highlighting, catalog-fed autocomplete and `GET /connections/{id}/schema`, a tab workspace that survives a reload, and a parse error underlined at its line | **The bundle decision was the part, and the first attempt failed loudly.** A dynamic import for CodeMirror is not enough on its own: `manualChunks` in `vite.config.ts` sent everything under `node_modules` that was not React or TanStack to `vendor`, and naming a chunk there *forces* a module into it. Measured — vendor went **60.3 KB → 169.8 KB** gzipped, the lazy chunk came out at 0.9 KB holding nothing but our own component, and the budget hit **296 KB against a limit of 200**. Returning undefined for `@codemirror`/`@lezer` lets Rollup place them where they are actually reached from, and the initial bundle is **192.9 KB with a 107 KB editor chunk fetched on demand**. This is the second time the chunking has quietly not done what it says — the config's own comment records the first — and both times the bundle gate is what found it. **Autocomplete reads the catalog, not the source.** Completion fires on every keystroke, and introspecting somebody's warehouse that often would be an outage with a text cursor in front of it; Part 19-b built the catalog so this question has a cheap answer. The cost is staleness, and the response is honest about it: `synced` distinguishes "nobody has run a sync" from "the database is empty", which are the same empty list and lead somewhere completely different. Tables a sync marked gone are omitted, because completing a name the source will reject helps nobody. **Only PostgreSQL says where a parse error is.** `connectors.Error` gained a `Position`, populated from `pgErr.Position` — MySQL's protocol has no field for it, and SQLite and DuckDB parse in this process and still do not offer one. So the feature degrades to the message alone almost everywhere, and the doc comment says that plainly rather than implying a generality that does not exist. **The offset is counted in bytes**, because that is what the wire carries: doing it in JavaScript string indices lands one character to the left of the problem in any statement with a non-ASCII identifier, which is worse than no marker because it is confidently wrong. There is a test with an `ä` in it. **The workspace is localStorage, not the server.** A draft is not content — not shared, not versioned, and not something anybody wants synchronised across devices mid-sentence; saved queries are Phase 2's and have a different lifecycle. Every read and write is guarded, and a blocked store costs the reload guarantee and nothing else. What a previous version left behind is validated rather than trusted: junk, a tab missing its fields, and an active id naming a tab that is gone all resolve to a usable editor instead of a blank screen. **A product decision fell out of a test failure**: six page tests broke because a new tab starts empty, so Run was disabled and did nothing. The fix was not the test — the first tab now starts with `SELECT 1`, because an empty editor with a dead button is a poor first screen on which to find out whether any of this works. Tabs opened afterwards start empty, since by then the question is answered. |
 | 2026-09-29 | 23-a | `POST /api/v1/queries` and `GET /api/v1/connections`, the pipeline wired into `serve`, and `/editor` — a page that runs a statement and shows the rows | **Part 23 was split**, and the reason is that its two halves are a wiring problem and a dependency decision. Everything built since Part 20-b — the executor, the result cache, the governor, the monitor — had **no production caller** and was constructed only by tests. That is the load-bearing half, it is invisible from outside, and it ships first with the plainest possible editor: a textarea. CodeMirror is 23-b's, because it does not fit the bundle budget and that call has to be made deliberately rather than by a merge. **The single-door test earned its keep immediately.** The first version of the handler imported `internal/connectors` for `Column` and `Error`, and Part 20-b's structural test failed on the spot — which is exactly what it is for. The fix was the better design rather than an allowlist entry: the pipeline now exposes `query.Column` and `query.SourceMessage`, so a caller never reaches past the door to the package the door stands in front of. **The permission is checked twice on purpose.** The route gates on `native_query` and the pipeline enforces it again; the pipeline's is the one that counts, and the route's refuses before a body is read. Editor deliberately does not carry it — raw SQL bypasses semantic row-level security, so it is a separate grant rather than part of "can edit". **The result is materialized, and the doc comment says so.** The pipeline streams end to end and this endpoint does not preserve that: it reads the whole result to answer with one JSON document, which is right for an editor showing a page of rows and wrong for an export. The row cap is what keeps that honest — the whole result is bounded by a number an administrator set — and Part 24 owns streaming to a client. **A source error carries the source's own words.** "no such column: nope" is the entire answer; a generic failure sends somebody to check their connection, their permissions and their network before they find the typo. Verified in a browser as well as in tests. **The browser tests are about the three things that are easy to drop at the last step**: a truncated result saying so, a cache hit saying so, and a NULL that is not an empty string — the connectors have a conformance property keeping those two apart across four databases and the last five pixels is a silly place to lose it. **Measured live**: the same query twice reads miss then hit, 1 ms then 0 ms. Bundle **189.8 KB against the 200 KB budget** and no new dependency; my own Done-when said "untouched", which was not true of a page that adds its own code, so it was corrected rather than left to drift. **A connections endpoint had to come with it** — nothing listed the sources, so an editor had no way to pick one. Deliberately thin: an id, a slug, a name and a kind, with disabled connections omitted rather than offered greyed out. **Also found:** a computed column (`COUNT(*)`, `ROUND(...)`) reports `unknown` with an empty source type, because SQLite declares no type for an expression. That is `datatype.Unknown` behaving as designed, but the grid renders the empty spelling as a blank that looks like something missing — noted for 23-b rather than papered over. |
 | 2026-09-29 | 22-b | Migration 00012 and query ownership on both engines, `query.Monitor` and `query.Supervisor`, `pivot admin queries` with `--usage` and `--kill`, and a per-user usage aggregate | **Three designs were written and judged before one was built**, because this part makes a real commitment to multi-instance and the obvious design is wrong. That design — record the source's session id, let any instance connect and kill — covers **one connector of four**: `Canceler` is implemented by MySQL alone, PostgreSQL runs on the shared pool so no session is identifiable, and SQLite and DuckDB are *embedded*, where the client and the server are the same goroutine and an out-of-band kill is not unimplemented but **inexpressible**. All three judges reached the same winner independently. **The kill travels as a row; the killing is the one that already worked.** The killer writes `cancel_requested_at`, the owning instance polls for its own rows and cancels the context it handed the connector — the path Part 20-b measured stopping a real query in `pg_stat_activity`. Nothing new kills anything, which is the whole design: the part reduces to routing an intent to the process holding the query. **There is no `instances` table**, and that was the decision the panel turned on. A registry of processes needs a lifecycle, a heartbeat of its own and something to collect the dead ones, all to answer a question an opaque owner token on the row answers directly. The token dies with the rows it stamped. It is a random uuid rather than a hostname or pid, because both are reused — a restarted pod would inherit its predecessor's abandoned rows and they would look alive. **The heartbeat is written with the database's clock**, not Go's, and staleness is judged against it, so an instance whose clock is wrong can neither declare itself alive nor be declared dead by somebody else's disagreement. That graft came from a losing design and is what makes the winner correct. **Three states, not two**: owned and beating, owned and gone quiet, and never claimed at all — the third is a row written before this migration, and calling it abandoned would be inventing a failure. `--kill` says which one it is, because the question after pressing the button is whether anything will act on it. **Nothing reaps an abandoned row.** A metadata-database blip stops every heartbeat in the fleet at once and a reaper would then bury every healthy query in an audit table, permanently; migration 00010 already argued that a row left running is the last thing Pivot knew rather than a lie. **The poll and the heartbeat run on their own pool** (`SiblingStore`), because SQLite's store pool is one connection by design and a ticker on it would sit between every request and the database — all three judges raised this independently. **My own test was flaky and I found it before shipping it**: killing a three-row SQLite query failed about one run in four because the query finished first, and the log then honestly said "succeeded". A test for stopping something has to be given something still going; it uses a recursive CTE now. **The cross-process test cannot prove the easy thing**: two Executors, two Monitors, two owner tokens, no shared pointer, and the killer's monitor is asserted *unable* to kill the query directly before the row is written. Verified in the failing direction by not stamping the owner, at which point it says *the kill did not cross the boundary*. Also: the per-user usage aggregate hit the portability tax again — SQLite's `COALESCE(SUM(...), 0)` made sqlc emit `interface{}` where PostgreSQL's `::bigint` gave `int64`, and the whole-struct conversion caught it at compile time. |

@@ -1,5 +1,5 @@
 import { createRoute } from "@tanstack/react-router";
-import { Suspense, lazy, type FormEvent } from "react";
+import { Suspense, lazy, useMemo, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Route as authenticatedRoute } from "./authenticated";
@@ -13,7 +13,6 @@ import { Button } from "../ui/Button";
 import { Card, CardBody } from "../ui/Card";
 import { EmptyState } from "../ui/EmptyState";
 import { Skeleton } from "../ui/Skeleton";
-import { TBody, THead, Table, Td, Th, Tr } from "../ui/Table";
 
 /*
  * CodeMirror, loaded when somebody opens this page and not before.
@@ -25,6 +24,13 @@ import { TBody, THead, Table, Td, Th, Tr } from "../ui/Table";
  * what would notice.
  */
 const SqlEditor = lazy(() => import("../components/editor/SqlEditor"));
+
+/*
+ * The grid, on the same terms as the editor: loaded with the page rather than
+ * with the application, so the virtualizer it brings costs nothing to somebody
+ * who never opens this screen.
+ */
+const ResultGrid = lazy(() => import("../components/grid/ResultGrid"));
 
 /**
  * The SQL editor.
@@ -72,7 +78,15 @@ function Editor() {
   const kind = available.find((connection) => connection.id === selected)?.kind ?? "";
 
   const schema = useConnectionSchema(selected);
-  const completion = completionSchema(schema.data);
+  /*
+   * Memoized, and that is not a micro-optimization.
+   *
+   * This object is a dependency of the editor's language configuration.
+   * Building a fresh one on every render made the editor reconfigure on every
+   * keystroke -- which, before the editor used a compartment, rebuilt it
+   * outright and took the cursor with it.
+   */
+  const completion = useMemo(() => completionSchema(schema.data), [schema.data]);
 
   // Named, because two things start a query: the button and Ctrl-Enter. A
   // shortcut that does something subtly different from the button is worse
@@ -112,13 +126,13 @@ function Editor() {
         <CardBody>
           <form className="flex flex-col gap-3" onSubmit={onSubmit}>
             <div className="flex flex-wrap items-center gap-3">
-              <label className="text-sm text-[--color-fg-muted]" htmlFor="editor-connection">
+              <label className="text-sm text-content-muted" htmlFor="editor-connection">
                 {t("editor.source")}
               </label>
 
               <select
                 id="editor-connection"
-                className="rounded-md border border-[--color-border] bg-[--color-bg] px-2 py-1 text-sm"
+                className="rounded-md border border-line bg-surface px-2 py-1 text-sm"
                 value={selected}
                 onChange={(event) => update({ connectionId: event.target.value })}
               >
@@ -154,7 +168,7 @@ function Editor() {
                 itself and names the fix.
               */}
               {schema.data && !schema.data.synced ? (
-                <span className="text-sm text-[--color-fg-subtle]">
+                <span className="text-sm text-content-subtle">
                   {t("editor.notSynced")}
                 </span>
               ) : null}
@@ -246,7 +260,7 @@ function ResultSummary({ result }: { result: QueryResult }) {
   const { t } = useTranslation();
 
   return (
-    <div className="flex items-center gap-2 text-sm text-[--color-fg-muted]">
+    <div className="flex items-center gap-2 text-sm text-content-muted">
       <span>{t("editor.rows", { count: result.rowCount })}</span>
       <span>·</span>
       <span>{t("editor.tookMs", { ms: result.durationMs })}</span>
@@ -271,54 +285,10 @@ function Results({ result }: { result: QueryResult }) {
   }
 
   return (
-    <Card>
-      <div className="overflow-auto">
-        <Table caption={t("editor.resultsCaption", { count: result.rowCount })}>
-          <THead>
-            <Tr>
-              {result.columns.map((column) => (
-                <Th key={column.name}>
-                  <span>{column.name}</span>
-                  <span className="ml-2 font-normal text-[--color-fg-subtle]">
-                    {column.sourceType}
-                  </span>
-                </Th>
-              ))}
-            </Tr>
-          </THead>
-
-          <TBody>
-            {result.rows.map((row, rowIndex) => (
-              <Tr key={rowIndex}>
-                {row.map((cell, cellIndex) => (
-                  <Td key={cellIndex}>{renderCell(cell)}</Td>
-                ))}
-              </Tr>
-            ))}
-          </TBody>
-        </Table>
-      </div>
-    </Card>
+    <Suspense fallback={<Skeleton className="h-64 w-full" />}>
+      <ResultGrid columns={result.columns} rows={result.rows} />
+    </Suspense>
   );
-}
-
-/**
- * A cell, rendered so that nothing is mistaken for something else.
- *
- * NULL is shown as a word in a dimmer colour rather than as an empty cell,
- * because an empty cell is also what an empty string looks like -- and the
- * connectors went to real trouble (Part 17's conformance suite has a property
- * for it) to keep those two apart all the way here.
- */
-function renderCell(cell: unknown) {
-  if (cell === null || cell === undefined) {
-    return <span className="text-[--color-fg-subtle] italic">NULL</span>;
-  }
-
-  if (typeof cell === "boolean") return cell ? "true" : "false";
-  if (typeof cell === "object") return JSON.stringify(cell);
-
-  return String(cell);
 }
 
 /*
@@ -352,7 +322,7 @@ function Tabs({
           key={tab.id}
           className={`flex items-center gap-1 rounded-md border px-2 py-1 text-sm ${
             tab.id === activeId
-              ? "border-[--color-border-strong] bg-[--color-bg-subtle]"
+              ? "border-line-strong bg-surface-sunken"
               : "border-transparent"
           }`}
         >
@@ -363,7 +333,7 @@ function Tabs({
           <button
             type="button"
             aria-label={t("editor.closeTab", { title: tab.title })}
-            className="text-[--color-fg-subtle] hover:text-[--color-fg]"
+            className="text-content-subtle hover:text-content"
             onClick={() => onClose(tab.id)}
           >
             ×

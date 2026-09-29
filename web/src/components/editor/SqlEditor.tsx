@@ -7,9 +7,29 @@ import {
   type SQLDialect,
 } from "@codemirror/lang-sql";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
-import { EditorState, type Extension } from "@codemirror/state";
-import { EditorView, keymap, lineNumbers, placeholder } from "@codemirror/view";
+import { Compartment, EditorState, type Extension } from "@codemirror/state";
+import {
+  EditorView,
+  drawSelection,
+  highlightActiveLine,
+  highlightActiveLineGutter,
+  keymap,
+  lineNumbers,
+  placeholder,
+  rectangularSelection,
+} from "@codemirror/view";
+import { bracketMatching, indentOnInput } from "@codemirror/language";
+import {
+  acceptCompletion,
+  autocompletion,
+  closeBrackets,
+  closeBracketsKeymap,
+  completionKeymap,
+} from "@codemirror/autocomplete";
+import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
 import { useEffect, useRef } from "react";
+
+import { pivotEditorTheme, pivotHighlight } from "./theme";
 
 /**
  * The SQL editor itself.
@@ -93,14 +113,49 @@ export function SqlEditor({ value, onChange, dialect, schema, onRun }: SqlEditor
   change.current = onChange;
   run.current = onRun;
 
+  /*
+   * The language, in a compartment.
+   *
+   * Changing the dialect or the schema has to reconfigure the editor rather
+   * than rebuild it. A rebuild throws away the cursor, the selection and the
+   * undo history -- so switching a tab's connection would silently move
+   * somebody's caret to the start of their query, which is the same bug as
+   * the one below and just rarer.
+   */
+  const language = useRef(new Compartment());
+
   useEffect(() => {
     if (!host.current) return undefined;
 
     const extensions: Extension[] = [
       lineNumbers(),
+      highlightActiveLine(),
+      highlightActiveLineGutter(),
       history(),
       placeholder("SELECT …"),
-      sql(sqlConfig(dialect, schema)),
+
+      // Selection drawn by CodeMirror rather than the browser, so that the
+      // theme can colour it and so rectangular selection works at all.
+      drawSelection(),
+      rectangularSelection(),
+
+      bracketMatching(),
+      closeBrackets(),
+      indentOnInput(),
+      highlightSelectionMatches(),
+
+      // Search as a panel rather than the browser's find, which cannot see
+      // text CodeMirror has not rendered.
+      search({ top: true }),
+
+      // Completion opens on typing rather than only on a keystroke somebody
+      // has to know about. `activateOnTyping` is the difference between
+      // autocomplete people use and autocomplete people are told exists.
+      autocompletion({ activateOnTyping: true, icons: false }),
+
+      pivotEditorTheme,
+      pivotHighlight,
+      language.current.of(sql(sqlConfig(dialect, schema))),
       keymap.of([
         // Before the defaults, so Ctrl-Enter runs rather than inserting a
         // newline. People try this before they try a button.
@@ -112,17 +167,26 @@ export function SqlEditor({ value, onChange, dialect, schema, onRun }: SqlEditor
             return true;
           },
         },
+        /*
+          Tab accepts the completion, and indents when there is not one.
+
+          `acceptCompletion` returns false when no completion is open, so the
+          binding falls through to indentWithTab below it -- which is why the
+          order matters and why this is not two separate keys. Tab is what
+          people press: every editor they have used accepts a suggestion with
+          it, and leaving it bound only to indent means the suggestion has to
+          be dismissed before the line can be indented anyway.
+        */
+        { key: "Tab", run: acceptCompletion },
         indentWithTab,
+        ...completionKeymap,
+        ...closeBracketsKeymap,
+        ...searchKeymap,
         ...defaultKeymap,
         ...historyKeymap,
       ]),
       EditorView.updateListener.of((update) => {
         if (update.docChanged) change.current(update.state.doc.toString());
-      }),
-      EditorView.theme({
-        "&": { fontSize: "13px" },
-        ".cm-content": { fontFamily: "ui-monospace, SFMono-Regular, monospace" },
-        "&.cm-focused": { outline: "none" },
       }),
     ];
 
@@ -138,10 +202,23 @@ export function SqlEditor({ value, onChange, dialect, schema, onRun }: SqlEditor
       view.current = null;
     };
 
-    // Rebuilt when the dialect or the schema changes, because both are baked
-    // into the extension. Deliberately not on `value` -- see the note about
-    // being uncontrolled.
+    /*
+     * Built exactly once, for the life of the component.
+     *
+     * The first version of this listed [dialect, schema], and the schema was
+     * a fresh object on every render -- so every keystroke destroyed the
+     * editor and built a new one, and the cursor vanished after each
+     * character. Nothing about the language belongs in here now; the
+     * compartment handles it.
+     */
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // The language, reconfigured in place when the source or its schema changes.
+  useEffect(() => {
+    view.current?.dispatch({
+      effects: language.current.reconfigure(sql(sqlConfig(dialect, schema))),
+    });
   }, [dialect, schema]);
 
   // A document that changed underneath the editor -- switching tabs -- is
@@ -162,7 +239,10 @@ export function SqlEditor({ value, onChange, dialect, schema, onRun }: SqlEditor
     <div
       ref={host}
       data-testid="sql-editor"
-      className="min-h-40 overflow-auto rounded-md border border-[--color-border] bg-[--color-bg]"
+      // A real height rather than a minimum, so the editor has somewhere to
+      // fill. With min-height the box grows with the content and the empty
+      // area below a short query belongs to nothing.
+      className="h-56 overflow-hidden rounded-token border border-line"
     />
   );
 }
