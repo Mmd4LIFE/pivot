@@ -49,6 +49,16 @@ type loggedStream struct {
 	cacheStatus string
 	pending     [][]any
 
+	/*
+		release hands the governor's slot back.
+
+		Called from Close, which is sync.Once-guarded, so the slot is returned
+		exactly once however many times a caller closes. A caller who never
+		closes holds the slot until their query's timeout fires -- which is why
+		the organization-wide ceiling and this live in the same part.
+	*/
+	release func()
+
 	// exhausted distinguishes a stream that ended from one the caller walked
 	// away from. Only the first may be cached: a partial read stored whole
 	// would be served as a complete answer, with nothing on it to say it was
@@ -126,6 +136,10 @@ func (s *loggedStream) Close() error {
 
 		s.store(cause)
 		s.executor.finish(s.ctx, s.entry, s.started, s, cause)
+
+		if s.release != nil {
+			s.release()
+		}
 
 		// Nil on a cache hit, which opened nothing. Guarded rather than
 		// papered over with a no-op connector, because "there is no connector"

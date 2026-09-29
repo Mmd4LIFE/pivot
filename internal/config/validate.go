@@ -135,6 +135,48 @@ func (c *Config) Validate() error {
 		})
 	}
 
+	if c.Query.MaxPerUser < 0 {
+		errs = append(errs, FieldError{
+			Field: "query.maxPerUser",
+			Value: c.Query.MaxPerUser,
+			Want:  "a non-negative count, or 0 for the built-in default",
+		})
+	}
+
+	if c.Query.MaxPerConnection < 0 {
+		errs = append(errs, FieldError{
+			Field: "query.maxPerConnection",
+			Value: c.Query.MaxPerConnection,
+			Want:  "a non-negative count, or 0 for the built-in default",
+		})
+	}
+
+	// A per-user limit above the per-connection one is not an error the
+	// governor would notice -- the connection limit simply wins -- but it
+	// means the operator believes one person is bounded when they are not,
+	// which is the belief this whole part exists to make true.
+	if c.Query.MaxPerUser > 0 && c.Query.MaxPerConnection > 0 &&
+		c.Query.MaxPerUser > c.Query.MaxPerConnection {
+		errs = append(errs, FieldError{
+			Field: "query.maxPerUser",
+			Value: c.Query.MaxPerUser,
+			Want: fmt.Sprintf("at most query.maxPerConnection (%d), "+
+				"or one person could hold the whole connection",
+				c.Query.MaxPerConnection),
+		})
+	}
+
+	if c.Query.Cache.MaxEntryBytes > 0 && c.Query.Cache.MaxBytes > 0 &&
+		c.Query.Cache.MaxEntryBytes > c.Query.Cache.MaxBytes {
+		errs = append(errs, FieldError{
+			Field: "query.cache.maxEntryBytes",
+			Value: c.Query.Cache.MaxEntryBytes,
+			Want: fmt.Sprintf("at most query.cache.maxBytes (%d), "+
+				"or no result large enough to reach it could ever be stored",
+				c.Query.Cache.MaxBytes),
+		})
+	}
+
 	// An idle timeout beyond the absolute cap is not an error the server would
 	// ever notice — the cap simply wins — but it means the operator believes
 	// sessions last longer than they do, which is worth saying out loud.

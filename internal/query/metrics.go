@@ -139,3 +139,49 @@ func (c *Cache) observe() {
 		return
 	}
 }
+
+/*
+governorInstruments is what admission reports about itself.
+
+One counter and one histogram, and the counter's label says which of three
+things happened: the query was admitted, it was refused because a limit was
+full, or the caller stopped waiting. Those are operationally different facts
+and a single "rejected" count would merge the system being busy with people
+closing browser tabs.
+
+The wait histogram is the one that answers "should the limits be higher". A
+counter of refusals tells you the queue overflowed; the distribution of waits
+tells you how close to overflowing it is the rest of the time.
+*/
+type governorInstruments struct {
+	admissions metric.Int64Counter
+}
+
+// admissionKey labels an admission with admitted, refused_user,
+// refused_connection or abandoned.
+const admissionKey = attribute.Key("pivot.admission.outcome")
+
+// newGovernorInstruments builds the governor's instruments. Never fails, for
+// the reason [newCacheInstruments] gives.
+func newGovernorInstruments() *governorInstruments {
+	meter := otel.GetMeterProvider().Meter(observability.ScopeName)
+
+	admissions, err := meter.Int64Counter(
+		"pivot.query.admissions",
+		metric.WithDescription("Queries admitted, refused or abandoned at the governor"),
+		metric.WithUnit("{query}"),
+	)
+	if err != nil {
+		admissions = nil
+	}
+
+	return &governorInstruments{admissions: admissions}
+}
+
+func (i *governorInstruments) recordAdmission(ctx context.Context, outcome string) {
+	if i == nil || i.admissions == nil {
+		return
+	}
+
+	i.admissions.Add(ctx, 1, metric.WithAttributes(admissionKey.String(outcome)))
+}

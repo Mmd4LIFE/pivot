@@ -60,8 +60,8 @@ At the end of every part, in this order:
 
 | | |
 |---|---|
-| **Last completed** | Part 21 — The result cache |
-| **Next up** | **Part 22 — Governance and the query monitor** |
+| **Last completed** | Part 22-a — Governance: who gets to run |
+| **Next up** | **Part 22-b — The query monitor, and a kill that crosses processes** |
 | **Current phase** | Phase 1 — Connect & Query → v0.1 |
 | **Branch** | `main` |
 | **Blockers** | None |
@@ -172,6 +172,21 @@ this departs from ADR-0006 and why. Cached queries measure **p95 421µs against 
 budget**, and a result that outgrows its byte budget is streamed and never cached, so Part
 20-a's constant memory survives the cache existing.
 
+**One user cannot take a connection away from everybody else.**
+[`query.Governor`](internal/query/governor.go) admits queries, or makes them wait, or
+refuses them — a per-user limit that is the fairness property and a per-connection limit
+that protects the source. The user's slot is taken before the connection's, so a caller at
+their own limit waits without sitting on capacity they will not use. Admission sits *after*
+the cache, because a hit opens nothing. And "the pool already queues" is not a defense:
+`database/sql` hands a freed connection to a waiter picked with `rand.IntN`, so the
+longest-waiting caller has no better claim than the newest.
+
+**Every limit is a setting now.** Concurrency, the queue wait, an organization-wide timeout
+ceiling that can only shorten a connection's own, and the result cache's three budgets.
+`pivot admin limits` prints what is in force with the variable that sets each one, and
+`pivot admin list-connections --limits` prints the per-connection ones that live in the
+database where the config file cannot see them.
+
 **DuckDB exists and is not in the shipped binary.**
 [ADR-0010](docs/architecture/adr/0010-duckdb-is-an-opt-in-build.md) measured what ADR-0004's
 CGo clause actually costs — the binary goes 42.5 MB → 101.8 MB, stops being statically
@@ -239,7 +254,7 @@ few points high; leave margin above 80%.
 
 ```
 Phase 0  Foundations        [██████████████████████████] 31/31   COMPLETE
-Phase 1  Connect & Query    [███████████████████████   ] 12/18
+Phase 1  Connect & Query    [██████████████████        ] 13/19
 Phase 2+ ...                                            (expanded as we approach)
 ```
 
@@ -670,35 +685,64 @@ top of it. L2 (Valkey) and L3 (object storage) wait until there is something to 
 
 ---
 
-### - [ ] Part 22 — Governance and the query monitor
+### - [x] Part 22-a — Governance: who gets to run ✅ 2026-09-29
 
-**Deliverable:** an administrator can see what is running and stop it.
+**Deliverable:** one user cannot take a connection down for everybody else.
 
-**Build:** Concurrent query governance (per-user and per-connection queues), org-level
-timeouts, and the query monitor: running queries, kill, per-user usage.
+**Build:** Per-user and per-connection concurrency governance in the pipeline, org-level
+timeouts, and every limit settable and inspectable rather than compiled in.
 
 **Done when:**
-- One user cannot exhaust a connection's capacity for everybody else
-- An administrator can see a running query and kill it, and the kill reaches the source
-- The limits are visible in the product rather than only in a config file
-- **A kill issued on one instance reaches a query running on another.** 20-b's cancellation
-  travels down a `context.Context`, which exists only in the process that started the query;
-  two Pivots behind a load balancer means the administrator is usually not on that one
+- One user cannot exhaust a connection's capacity for everybody else, proven by running
+  more concurrent queries than the limit and showing the others still get served
+- A query that waits for a slot and a query that is refused are **different outcomes**, and
+  the caller can tell which happened
+- The limits are visible in the product rather than only in a config file — `pivot admin`
+  until Part 26 builds the screens
+- The result cache is sizeable by an operator: `DefaultMaxBytes`, `DefaultMaxEntryBytes`
+  and `DefaultTTL` in `internal/query/cache.go` stop being constants
 
-**Also now in scope:** the cache is not sizeable by an operator —
-`DefaultMaxBytes`, `DefaultMaxEntryBytes` and `DefaultTTL` are constants in
-`internal/query/cache.go`, and this part's own Done-when is that limits are visible in the
-product rather than only in a config file. A cache an operator cannot bound is one they
-have to trust inside a 512 MB container.
+**Notes:** **Part 22 was split.** Admission and termination are two different problems with
+two different hard parts — this one is a queue with fairness properties, and 22-b is a kill
+that has to cross a process boundary. Shipping them together would have buried the second
+decision inside the first.
+
+The pool cap is not governance. A connection with `max_open_conns` of 4 already blocks the
+fifth query, but it blocks it *in the driver*, invisibly, with no fairness and no way to
+tell a caller they are queued — so one user running four exports starves everybody, and
+nothing reports that it happened.
+
+**Refs:** `P1-QE-006`, `P1-QE-010`
+
+---
+
+### - [ ] Part 22-b — The query monitor, and a kill that crosses processes
+
+**Deliverable:** an administrator can see what is running and stop it, wherever it is running.
+
+**Build:** The query monitor — running queries, per-user usage, kill — and the mechanism
+that carries a kill to the instance actually holding the query.
+
+**Done when:**
+- An administrator can see a running query and kill it, and the kill reaches the source
+- **A kill issued on one instance reaches a query running on another**
+- A row left in state `running` by a process that died is distinguishable from a query
+  that is still going
 
 **Notes:** "See what is running" is already answered — 20-b writes a log row when a query
 starts, not when it ends, so `ListRunningQueries` is a query against the log rather than
-in-memory state that a restart loses. What is missing is the killing half across processes:
-the connectors have `Canceler` (Part 18-a) and the pipeline has the context, and neither
-crosses a process boundary. A row in state `running` whose process is gone is also how this
-part learns to distinguish "still running" from "abandoned", which nothing does yet.
+in-memory state a restart loses.
 
-**Refs:** `P1-QE-006`, `P1-QE-010`, `P1-ADM-003`
+**The killing half does not have one mechanism, and that is the finding.** `Canceler`
+(Part 18-a) is implemented **only by MySQL**, because it was added exactly where the driver
+failed to tell the server — PostgreSQL's did not need it. And SQLite and DuckDB are
+*embedded*: the query runs inside the Pivot process holding the file, so there is no server
+for another instance to kill through at all. A design that records the source's session id
+and kills from anywhere therefore covers one connector of four. What is portable is a kill
+*request* the owning instance acts on, which needs instances to have an identity — and
+nothing in Pivot has one today.
+
+**Refs:** `P1-QE-006`, `P1-ADM-003`
 
 ---
 
@@ -836,6 +880,7 @@ Phase 0's log is in
 
 | Date | Part | Shipped | Notes |
 |---|---|---|---|
+| 2026-09-29 | 22-a | `query.Governor` — per-user and per-connection admission — an organization-wide timeout ceiling, `config.QueryConfig` making every query limit a setting, `pivot admin limits`, and `pivot admin list-connections --limits` | **Part 22 was split**, and the reason is that its two halves share no code, no file and no test. Admission needed nothing that did not exist: the pipeline already has both identities in hand after planning, `loggedStream.Close` is already an exactly-once hook to release on. Termination needs a mechanism Pivot does not have, and 22-b is where that decision gets made rather than buried in this one. **"The pool already queues" is not a defense, and the measurement is what settles it.** A pool of four does block the fifth query — but when a connection frees, `database/sql` hands it to a waiter chosen with `rand.IntN` (`connRequests.TakeRandom`, sql.go:1554), so the longest-waiting caller has no better claim on it than the newest. That is the right trade for a driver managing a resource and the wrong one for a product deciding whose work matters. The pool is also invisible: a caller queued inside it cannot be told they are waiting. **The per-user limit is the whole fairness property**, and it is easy to ship a semaphore that enforces a total and does nothing about the case it was built for — one person running four exports. So the test is two callers: the analyst fills their own allowance and the administrator, who has run nothing, is served immediately. Verified in the failing direction by keying the per-user slot on the connection alone, at which point it says *alice ran a third query against a per-user limit of two*. **The acquisition order is the property, not an implementation detail.** The user's slot is taken first and the connection's second; the other way round, a caller already at their own limit would sit on source capacity while waiting for themselves, so one person queueing behind their own exports would block everybody — exactly what the per-user limit exists to prevent. **Admission sits after the cache**, because a hit opens nothing and asks the source for nothing; making it queue for capacity it will not use would be a limit that punishes the fast path. **Three outcomes, deliberately not one.** Admitted, refused because a limit is full, and the caller gave up — an operator deciding whether to raise a limit needs to tell "the system is full" from "browser tabs closed", and a single rejected count loses exactly that. **The timeout ceiling can only shorten.** The effective timeout is the smaller of the organization's and the connection's, so an operator can bound every query at once and cannot accidentally lengthen one that was deliberately made short; a sub-second ceiling clamps to one second rather than rounding to zero, which would have meant "no limit". **A setting that reaches nothing is worse than no setting**, so `NewGovernorFrom`/`NewCacheFrom` are the one place configuration becomes components and a test checks the numbers arrive — a value can otherwise be bound, validated, printed and enforce nothing, with every step passing its own test. `internal/config` cannot import `internal/query` (query depends on the store and the store depends on config), so the defaults are written twice and pinned together by a test in an external test package. **Review found a real gap in "visible in the product"**: `max_rows`, `query_timeout_seconds` and `max_open_conns` are stored per connection, are the limits a query most often meets, and no command displayed any of them — `pivot admin limits` reads configuration and cannot see them. `list-connections --limits` now does, printing a zero as the default it means rather than as "none allowed". |
 | 2026-09-28 | 21 | `internal/policy` — the caller fingerprint the cache key is derived from — an L1 result cache in `internal/query` bounded by bytes, `cache_status` made writable on both engines, migration 00011 constraining it, cache metrics, and [ADR-0012](docs/architecture/adr/0012-the-l1-cache-holds-rows.md) | **ADR-0006 could not be implemented as written, and the two places it could not are the part.** Its L1 tier stores "Arrow batches", which was written before Part 20-a existed and now means `arrow.RecordBatch` — **reference counted**, and a cached entry is shared by construction, so sharing one safely would be a discipline rather than a property. L1 stores decoded rows instead, which also keeps a hit and a miss on **one conversion path** so the two cannot drift about a decimal rendered as text or a truncation flag. And its key hashes "the resolved policy set", which does not exist before Phase 4 — the answer is `policy.Fingerprint`, one value with one job, resolving from permissions today and from RLS predicates later, with nothing above it changing. ADR-0012 records both; ADR-0006 gained an `Amended by:` line. **The headline property is proven by counting opens, not by reading the code**: an analyst and an administrator run the same SQL against the same connection and the source is opened **twice**. Verified in the failing direction by removing the fingerprint from the key, at which point the test says *an administrator was served a result cached for an analyst*. **The fingerprint fails closed everywhere.** A caller who cannot be resolved has no fingerprint, two unresolved fingerprints are deliberately **not equal to each other**, and a query with no fingerprint is neither cached nor served from cache — because treating "could not resolve" as "the empty policy set" makes every unresolvable caller collide with every other, and the store being unavailable is exactly when nobody is watching. Background work gets its own fingerprint rather than the empty one, since a caller holding no grants would otherwise share it. **A cache and Part 20-a's constant-memory streaming are in direct tension, and the rule is a byte budget.** Rows are teed aside while the entry is small and the copy is abandoned the moment it is not — abandoned, not truncated, because a trimmed entry is a partial answer served as a whole one with no flag on it. So dashboard cards are cached and exports stream exactly as before. **`cache_status` was not writable.** 20-b shipped the column and `FinishQueryLog` never named it, so writing a status would have compiled, stored nothing, and left every assertion passing — a silent no-op behind one of this part's own Done-whens. Both engines' statements gained it and the placeholders were renumbered together. Migration **00011** then constrains it to hit/miss/uncached, because `state` beside it has a CHECK and the asymmetry read as deliberate; SQLite needed the full table rebuild. **The part found a data race shipped since Phase 0.** `authz.Cache` incremented its hit and miss counters under a *read* lock — several goroutines hold one at once by definition — and no test had ever called `Check` concurrently, so the detector had nothing to detect. Part 21 puts that cache on every query. Counters are atomic now, and a concurrency test is permanent; the test stub had the same bug and was fixed with it. **p95 is measured, not asserted**: 200 samples, **p50 295µs, p95 421µs, max 752µs** against a 200 ms budget, with the source opened exactly once across the measurement so the number is of cache hits rather than of a fast local file. The query log cannot answer this question — its duration is whole milliseconds and it measures how long the caller took to read. **Invalidation is a generation counter per connection**, folded into the key and bumped from the existing change-event bus, so editing a connection makes everything derived from it unreachable with one increment and no scan. Two corrections from review before shipping: a cached stream handed callers the cache's own row slice, which makes one caller's misbehavior everybody's, and `MaxRows` of 0 and 100000 name the same cap but derived different keys. |
 | 2026-09-28 | 20-b | `query.Executor` — parse → authorize → plan → execute → stream — migration 00010 and the `query_log` table on both engines, `QueryLogRepo`, and two structural tests that make the single door a property | **The single door is the deliverable, and a test that reads the code would not have been one.** So the denial check counts *opens*: a denied caller causes zero connectors to be opened and leaves zero log entries, which is the claim ADR-0009 actually needs — a connector opened before the answer is a connection taken from somebody's warehouse and, on a warehouse that bills by the second, money. **Transitive dependency checks are worthless here** and it is worth saying why: once the HTTP layer has a query endpoint it will depend on `internal/query`, which depends on `internal/connectors`, so every import-graph check passes by construction. What is provable is textual — no file under `internal/api` names the connector package, and the set of packages that do is a declared list of three, each with its reason. Verified in both directions by planting an import in `internal/api`: both tests fail and name the package. **The permission is `native_query`, not `query`** — it has been in the model since Phase 0, documented as separate because row-level security is injected by the semantic compiler and raw SQL never passes through it. A system scope is let through, because the graph has no subject to ask about and the decision was made when the job was scheduled; the log records the absent user rather than inventing one. **The log is written in two phases**, a row when the query starts and the outcome when it ends. A single insert at the end is simpler and loses both things the log is for: a running query is invisible until it finishes, and a query that kills the process is never recorded at all. An abandoned row in state `running` is itself the evidence — which is also how Part 22 gets "what is running now" as a query against the log rather than in-memory state a restart loses. **The completing write is detached from the query's context** (`context.WithoutCancel`), because the most interesting outcome to record is a cancellation and that means the context which would have carried the write is already dead. Checked: a canceled query's row reads `canceled`, with a finish time. **The cancellation test's ordering *is* the test, and the first version of it was wrong.** It checked `pg_stat_activity` after waiting for the goroutine — and with a defect planted (the statement detached from the cancellable context) it still passed that check, because `pg_sleep(30)` ends on its own and by then the source is idle; it failed thirty seconds later on the log state instead. Moved the check before the wait, it fails in ten seconds saying "PostgreSQL is still running the query after the pipeline canceled it", which is the sentence somebody needs. **A query that cannot be logged does not run.** If the starting write fails the request is refused, because a query Pivot cannot account for is the one an operator most needs accounted for. A *finishing* write that fails is logged and swallowed — the query already succeeded or failed on its own terms, and replacing a real answer with a bookkeeping one would be worse. **sqlc diverged on `LIMIT`**: `int32` for PostgreSQL, `int64` for SQLite, so the two params structs would not have converted. Fixed with the `::bigint` cast the other list queries already carry, and the generated models were compared field by field before anything consumed them. **`SqlText` against `SQLText`** was the other portability tax: staticcheck wants the initialism, and the whole-struct conversions in `repo/adapter.go` need the name sqlc emits. `sqlc.yaml` already had a `rename:` block for exactly this (`avatar_url`, `ip`), so the fix was one line per engine rather than a `nolint`. **Bytes is an estimate and the column says so** — `bytes_estimated` is what a row costs in Pivot's memory after the driver decoded it, which is not what crossed the wire; an exact figure would cost a second pass over data the streaming path exists to avoid holding. `cache_status` is written as `uncached` now so Part 21 sets a column rather than adding one. **Part 22 gained a Done-when this part uncovered:** cancellation here rides a `context.Context`, which exists only in the process that started the query, so an administrator on the other instance behind a load balancer cannot reach it. Binary +0.05 MB. |
 | 2026-09-29 | 20-a | `Connector.Stream` on the interface and all four connectors, `internal/query` turning rows into Arrow record batches, two streaming conformance properties, and the memory measurement | **Split from Part 20**: a streaming format, a pipeline, authorization and a query log is four things, and the notes calling it \"the hardest infrastructure problem in the phase\" *and* saying everything after depends on the shape is an argument for doing the shape alone. **The measurement is the deliverable.** The Done-when insisted peak allocation be measured rather than asserted, because a test that reads ten million rows and checks it did not crash passes against a materializing implementation on a big enough machine. Result: **20,000 rows peak at 3.1 MB; 200,000 rows peak at 3.1 MB.** Ten times the rows, the same memory. **`Query` is now a loop over `Stream`** rather than a second implementation — the two would otherwise drift on exactly the things that are easy to get subtly different (what truncation means, whether a byte slice was copied) and the drift shows up as one path being right. **Two conformance properties**, so every connector is checked rather than one: a stream matches the materialized read column for column and row for row, and an **abandoned** stream releases the source. The second is the common case, not the exceptional one — it is what a closed browser tab looks like from here, and a connector that only releases on a full read holds a connection for every question nobody waited for. A twentieth defect proves the first can fail. **The conversion found a real bug in Part 19-a's type mapping.** SQLite's `INTEGER` is a variable-width storage class holding up to eight bytes and its `REAL` is always an eight-byte double, but the shared table's widths are PostgreSQL's — four and four. A SQLite id above two billion was mapping to an Arrow int32. It surfaced *loudly* only because the conversion **refuses** a value that will not fit rather than truncating it; a mapping that quietly truncated would have produced an id wrong by four billion with nothing to notice. Regression test included. **Every column is nullable in the Arrow schema** whatever the source claimed: an outer join, a view, or a driver that declines to say all produce a NULL in a column declared NOT NULL, and Arrow is within its rights to panic on that — inside a streaming export being the worst place to find out. **Decimal is rendered as text on purpose.** Arrow's decimal types need a precision and scale the catalog does not carry yet, and a decimal guessed into a float with the wrong scale loses exactly the digits `datatype.Decimal` exists to protect. **The cost estimate was wrong in the cheap direction**: the probe said +6.1 MB, what shipped is **+0.01 MB**, because the probe imported `arrow/ipc` (flatbuffers and four compression codecs) and the conversion needs none of it. Still statically linked, still cross-compiling to six targets. Lint caught four things worth having: `arrow.Record` is deprecated in favour of `RecordBatch`, `scanRow` was dead once `Query` became a loop, and two bounds checks gosec could not see from the call site. |

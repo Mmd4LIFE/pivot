@@ -19,9 +19,66 @@ type Config struct {
 	Auth     AuthConfig     `yaml:"auth"`
 	Log      LogConfig      `yaml:"log"`
 
+	Query QueryConfig `yaml:"query"`
+
 	Observability ObservabilityConfig `yaml:"observability"`
 	Setup         SetupConfig         `yaml:"setup"`
 	Secrets       SecretsConfig       `yaml:"secrets"`
+}
+
+/*
+QueryConfig bounds what querying may cost.
+
+Every field here is a limit, and they are settings rather than constants for
+one reason: an operator running Pivot in a 512 MB container and an operator
+running it beside a warehouse with a thousand slots are both right, and neither
+should have to rebuild the binary to say so.
+
+The defaults are the ones the code used when these were constants, so an
+instance that sets none of them behaves exactly as it did before.
+*/
+type QueryConfig struct {
+	// MaxPerUser caps how many queries one person may run against one
+	// connection. This is the limit that stops one caller taking a
+	// connection's whole capacity.
+	MaxPerUser int `yaml:"max_per_user"`
+
+	// MaxPerConnection caps how many queries anybody may run against one
+	// connection. This is the limit that protects the source.
+	MaxPerConnection int `yaml:"max_per_connection"`
+
+	// QueueWait is how long a query waits for a slot before it is refused.
+	QueueWait Duration `yaml:"queue_wait"`
+
+	// Timeout is an organization-wide ceiling on how long a query may run.
+	// The effective timeout is the smaller of this and the connection's own,
+	// so this can shorten a query and never lengthen one. Zero leaves each
+	// connection in charge.
+	Timeout Duration `yaml:"timeout"`
+
+	// Cache bounds the result cache.
+	Cache CacheConfig `yaml:"cache"`
+}
+
+// CacheConfig bounds the in-process result cache.
+//
+// Sizing it is the operator's call because only they know what else is in the
+// container. ADR-0012 notes the cliff this creates: a result above
+// MaxEntryBytes is not cached at all rather than partly, so raising that
+// number is how a dashboard card that grew stops being slow.
+type CacheConfig struct {
+	// Enabled turns the result cache on. Default true.
+	Enabled bool `yaml:"enabled"`
+
+	// MaxBytes is what the whole cache may hold.
+	MaxBytes int64 `yaml:"max_bytes"`
+
+	// MaxEntryBytes is what one result may hold.
+	MaxEntryBytes int64 `yaml:"max_entry_bytes"`
+
+	// TTL bounds how long a result is trusted without anything telling the
+	// cache it changed.
+	TTL Duration `yaml:"ttl"`
 }
 
 // SecretsConfig controls encryption of stored secrets.
@@ -277,6 +334,23 @@ func Default() *Config {
 			ShutdownTimeout:   Duration(30 * time.Second),
 			BaseURL:           "",
 			PreShutdownDelay:  0,
+		},
+		// Literals rather than references to internal/query's own defaults,
+		// because this package cannot import that one -- query depends on the
+		// store, and the store depends on this. The two are pinned together by
+		// TestTheQueryDefaultsMatchTheQueryPackage instead, which is the same
+		// guarantee with the dependency pointing the way it has to.
+		Query: QueryConfig{
+			MaxPerUser:       4,
+			MaxPerConnection: 16,
+			QueueWait:        Duration(10 * time.Second),
+			Timeout:          0,
+			Cache: CacheConfig{
+				Enabled:       true,
+				MaxBytes:      64 << 20,
+				MaxEntryBytes: 8 << 20,
+				TTL:           Duration(60 * time.Second),
+			},
 		},
 		Database: DatabaseConfig{
 			URL:             "pivot.db",

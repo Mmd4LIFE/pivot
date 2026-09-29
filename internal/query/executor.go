@@ -65,6 +65,18 @@ type Executor struct {
 	cache   *Cache
 	granter authz.Granter
 
+	/*
+		governor decides who gets to run. Nil means no admission control, which
+		is not a degraded mode: an instance with one user and one connection
+		has nothing to govern, and a queue in front of it would only add a
+		place for queries to wait.
+	*/
+	governor *Governor
+
+	// queryTimeout is an organization-wide ceiling on how long any query may
+	// run. Zero leaves each connection's own timeout in charge.
+	queryTimeout time.Duration
+
 	// open is [connectors.Open], swapped in tests. Unexported and with no
 	// setter outside this package: a caller that could substitute it could
 	// substitute the source, and this is the type whose whole job is that
@@ -103,6 +115,37 @@ func WithCache(cache *Cache, granter authz.Granter) Option {
 
 		e.cache = cache
 		e.granter = granter
+	}
+}
+
+/*
+WithGovernor turns admission control on.
+
+Separate from [WithCache] because they answer different questions and fail
+differently: the cache decides whether the source needs to be asked at all, and
+the governor decides whether this caller may ask it right now.
+*/
+func WithGovernor(g *Governor) Option {
+	return func(e *Executor) {
+		if g != nil {
+			e.governor = g
+		}
+	}
+}
+
+/*
+WithQueryTimeout sets an organization-wide ceiling on how long a query may run.
+
+A ceiling, not a setting: the effective timeout is the smaller of this and the
+connection's own, so an operator can bound every query without editing every
+connection and cannot accidentally *extend* one that was deliberately made
+short.
+*/
+func WithQueryTimeout(d time.Duration) Option {
+	return func(e *Executor) {
+		if d > 0 {
+			e.queryTimeout = d
+		}
 	}
 }
 
@@ -236,8 +279,51 @@ func (e *Executor) Execute(ctx context.Context, req Request) (*Execution, error)
 		e.cache.countUncached(ctx)
 	}
 
-	// 5 and 6. Execute and stream.
-	return e.execute(ctx, scope, plan, key, cacheable)
+	// 5. Admission, and it sits *after* the cache on purpose: a hit opens
+	// nothing and uses none of the source's capacity, so making it queue for
+	// capacity it will not use would be a queue that punishes the fast path.
+	release, err := e.admit(ctx, scope, plan)
+	if err != nil {
+		return nil, err
+	}
+
+	// 6 and 7. Execute and stream.
+	execution, err := e.execute(ctx, scope, plan, key, cacheable, release)
+	if err != nil {
+		release()
+
+		return nil, err
+	}
+
+	return execution, nil
+}
+
+/*
+admit takes a slot for this query, or explains why it may not run yet.
+
+A no-op when no governor is configured, returning a release that does nothing,
+so that everything downstream has exactly one shape to handle rather than a
+nil check at every exit.
+*/
+func (e *Executor) admit(
+	ctx context.Context, scope tenant.Scope, plan Plan,
+) (func(), error) {
+	if e.governor == nil {
+		return func() {}, nil
+	}
+
+	// Background work has no actor, so it is governed as one caller rather
+	// than as a different caller each time -- otherwise every scheduled job
+	// would get a fresh per-user allowance and the per-user limit would mean
+	// nothing for exactly the traffic that runs unattended.
+	actor := scope.ActorID().UUID
+
+	release, err := e.governor.Admit(ctx, scope.OrgID(), actor, plan.Connection.ID)
+	if err != nil {
+		return nil, fmt.Errorf("query: %w", err)
+	}
+
+	return release, nil
 }
 
 /*
@@ -380,10 +466,12 @@ func (e *Executor) plan(ctx context.Context, statement string, req Request) (Pla
 
 // execute opens the source, records the start and hands back the stream.
 func (e *Executor) execute(
-	ctx context.Context, scope tenant.Scope, plan Plan, key string, cacheable bool,
+	ctx context.Context, scope tenant.Scope, plan Plan,
+	key string, cacheable bool, release func(),
 ) (*Execution, error) {
 	cfg := configFor(plan.Connection)
 	cfg.MaxRows = plan.MaxRows
+	cfg.QueryTimeoutSeconds = e.effectiveTimeout(plan.Connection)
 
 	connector, err := e.open(cfg)
 	if err != nil {
@@ -434,6 +522,7 @@ func (e *Executor) execute(
 			cacheStatus: status,
 			cacheKey:    key,
 			caching:     cacheable,
+			release:     release,
 			// The context the query ran under, not the caller's next one: the
 			// completing write has to happen even when the reason it is
 			// happening is that this context was canceled.
@@ -506,6 +595,39 @@ func isCanceled(err error) bool {
 	}
 
 	return errors.Is(err, &connectors.Error{Reason: connectors.ReasonCanceled})
+}
+
+/*
+effectiveTimeout is the smaller of the organization's ceiling and the
+connection's own, in whole seconds.
+
+The smaller, always. An operator setting an instance-wide bound is saying "no
+query may run longer than this", and a ceiling that could be overridden upward
+by editing a connection would not be a bound at all. A connection that was
+deliberately given a *shorter* timeout keeps it.
+
+Whole seconds because that is what [connectors.Config] takes, and a ceiling
+rounded down is still a ceiling. A sub-second ceiling rounds to zero, which
+would mean "no limit" -- so it is clamped to one second instead, since an
+operator who asked for less than a second did not mean unlimited.
+*/
+func (e *Executor) effectiveTimeout(conn model.Connection) int {
+	ceiling := int(e.queryTimeout.Seconds())
+
+	if e.queryTimeout > 0 && ceiling == 0 {
+		ceiling = 1
+	}
+
+	own := int(conn.QueryTimeoutSeconds)
+
+	switch {
+	case ceiling == 0:
+		return own
+	case own == 0 || ceiling < own:
+		return ceiling
+	default:
+		return own
+	}
 }
 
 // configFor turns a stored connection into a connector configuration.
