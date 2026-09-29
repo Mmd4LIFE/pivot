@@ -20,6 +20,7 @@ import (
 	"github.com/Mmd4LIFE/pivot/internal/authz"
 	"github.com/Mmd4LIFE/pivot/internal/config"
 	"github.com/Mmd4LIFE/pivot/internal/oidc"
+	"github.com/Mmd4LIFE/pivot/internal/query"
 	"github.com/Mmd4LIFE/pivot/internal/secrets"
 	"github.com/Mmd4LIFE/pivot/internal/setup"
 	"github.com/Mmd4LIFE/pivot/internal/store"
@@ -255,6 +256,13 @@ func newAuthFixture(t *testing.T, db *store.DB, opts ...func(*api.RouterConfig))
 		// exist, so the drift test can see them.
 		OIDC: api.NewOIDCHandler(
 			repos, oidc.NewRegistry(), svc, api.DefaultCookie(), "", discardLogger()),
+
+		// And the query endpoint, for the same reason as the rest: the drift
+		// test can only see a route that is registered. The executor behind it
+		// has no connector factory it will ever reach here -- these tests
+		// check routing and gating, not querying.
+		Queries: api.NewQueryHandler(
+			query.NewExecutor(repos, checker), repos, discardLogger()),
 	}
 
 	// Options run last so a test can substitute a broken checker without the

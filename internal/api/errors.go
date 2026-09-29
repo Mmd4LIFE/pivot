@@ -65,6 +65,14 @@ const (
 	// Throttling.
 	CodeRateLimited Code = "PIVOT-RATE-001"
 
+	// Querying a connected source. Separate from the generic codes because a
+	// client shows each of these differently: a rejected statement is the
+	// person's to fix, a busy instance is worth retrying, and a source that
+	// failed is nobody in the browser's fault.
+	CodeQueryRejected Code = "PIVOT-QUERY-001"
+	CodeQueryFailed   Code = "PIVOT-QUERY-002"
+	CodeQueryBusy     Code = "PIVOT-QUERY-003"
+
 	// Server.
 	CodeInternal    Code = "PIVOT-SRV-001"
 	CodeUnavailable Code = "PIVOT-SRV-002"
@@ -97,6 +105,13 @@ var codes = map[Code]codeInfo{
 
 	CodeAlreadyInitialized: {http.StatusConflict, "This Pivot already has an administrator"},
 	CodeSetupTokenInvalid:  {http.StatusForbidden, "The setup token is missing or incorrect"},
+
+	CodeQueryRejected: {http.StatusBadRequest, "The statement could not be run"},
+	CodeQueryFailed:   {http.StatusBadGateway, "The source rejected or failed the query"},
+	CodeQueryBusy: {
+		http.StatusServiceUnavailable,
+		"Too many queries are already running; try again shortly",
+	},
 
 	CodeRateLimited: {http.StatusTooManyRequests, "Too many requests"},
 

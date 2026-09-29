@@ -829,6 +829,92 @@ paths:
         "429":
           $ref: "#/components/responses/TooManyRequests"
 
+  /api/v1/connections:
+    get:
+      tags: [query]
+      operationId: listQueryableConnections
+      summary: The sources this caller may query
+      description: |
+        An id, a slug, a name and a kind, and nothing else: an editor needs to
+        know which sources exist and what to call them, and every other field
+        is administration, which Part 26 owns.
+
+        Gated on `native_query`, the same permission as running a statement. A
+        list of the databases an organization connects to is not secret from
+        somebody who may query them, and is not for somebody who may not.
+
+        Disabled connections are omitted rather than returned greyed out: a
+        picker offering something that cannot work produces a confusing error
+        instead of a shorter list.
+      responses:
+        "200":
+          description: The queryable connections
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueryableConnections"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/queries:
+    post:
+      tags: [query]
+      operationId: runQuery
+      summary: Run SQL against a connected source
+      description: |
+        Runs a statement through the query pipeline and returns its rows.
+
+        Gated on `native_query`, not `query`. Row-level security is injected by
+        the semantic compiler and raw SQL never passes through it, so being
+        permitted to ask questions of the semantic layer is not being permitted
+        to write SELECT * against the table underneath it.
+
+        The result is materialized rather than streamed: the row cap bounds it,
+        so "the whole result" is bounded by a number an administrator set.
+        Export streams, and is Part 24.
+
+        `truncated` says the result met the row cap. A client that ignores it
+        shows a partial answer as a whole one.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunQueryRequest"
+      responses:
+        "200":
+          description: The rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueryResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          description: |
+            The source rejected or failed the query (`PIVOT-QUERY-002`). The
+            message is the source's own.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: |
+            Too many queries are already running (`PIVOT-QUERY-003`), or the
+            authorization store could not answer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   securitySchemes:
     sessionCookie:
@@ -844,6 +930,102 @@ components:
         browser. It is `HttpOnly`, so no client code reads or writes it.
 
   schemas:
+    QueryableConnection:
+      type: object
+      required: [id, slug, name, kind]
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        name:
+          type: string
+        kind:
+          type: string
+          example: postgres
+
+    QueryableConnections:
+      type: object
+      required: [connections]
+      properties:
+        connections:
+          type: array
+          items:
+            $ref: "#/components/schemas/QueryableConnection"
+
+    RunQueryRequest:
+      type: object
+      required: [connectionId, sql]
+      properties:
+        connectionId:
+          type: string
+          format: uuid
+          description: The source to run it against.
+        sql:
+          type: string
+          description: The statement. A compiled query replaces this in Phase 3.
+        maxRows:
+          type: integer
+          format: int64
+          description: |
+            Cap this result. Zero uses the connection's own limit, which is the
+            setting an administrator chose and the one to leave alone.
+
+    QueryColumn:
+      type: object
+      required: [name, type, sourceType]
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          description: The canonical kind, which a client formats on.
+          example: timestamp
+        sourceType:
+          type: string
+          description: |
+            What the source called it, kept verbatim. A client formats on
+            `type`; a person debugging wants this.
+          example: TIMESTAMPTZ
+
+    QueryResult:
+      type: object
+      required: [queryId, columns, rows, rowCount, truncated, cacheStatus, durationMs]
+      properties:
+        queryId:
+          type: string
+          format: uuid
+          description: |
+            The query log row, which is also the name to use when stopping it.
+        columns:
+          type: array
+          items:
+            $ref: "#/components/schemas/QueryColumn"
+        rows:
+          type: array
+          description: Row-major, one array per row, aligned with `columns`.
+          items:
+            type: array
+            items: {}
+        rowCount:
+          type: integer
+          format: int64
+        truncated:
+          type: boolean
+          description: |
+            The result met the row cap. Showing it without saying so turns a
+            signaled partial answer into a silent one.
+        cacheStatus:
+          type: string
+          enum: [hit, miss, uncached]
+          description: |
+            The same vocabulary the query log records, so what a browser shows
+            and what an operator reads cannot disagree.
+        durationMs:
+          type: integer
+          format: int64
+
     ErrorReport:
       type: object
       required: [message]

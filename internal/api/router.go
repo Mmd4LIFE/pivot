@@ -44,6 +44,11 @@ type RouterConfig struct {
 	// instance provisioned entirely from the CLI wants.
 	Setup *SetupHandler
 
+	// Queries runs SQL against a connected source. Nil registers no query
+	// surface, which is what a deployment serving only administration wants
+	// -- and what every test that does not need a pipeline wants.
+	Queries *QueryHandler
+
 	// Telemetry receives error reports from the browser. Nil registers no
 	// reporting endpoint, so the frontend's reports get a coded 404 and it
 	// stops trying -- which is what an API-only deployment wants.
@@ -232,6 +237,7 @@ func (r *Router) routes() {
 	r.authRoutes(authed)
 	r.roleRoutes(authed)
 	r.oidcRoutes(authed)
+	r.queryRoutes(authed)
 	r.telemetryRoutes()
 
 	// A catch-all so an unknown API path produces the standard error envelope
@@ -401,6 +407,38 @@ func (r *Router) setupRoutes() {
 
 	r.mux.Handle("POST "+APIPrefix+"/setup",
 		Chain(WithRateLimit(r.authLimiter, KeyByIPAndPath))(http.HandlerFunc(h.handleInitialize)))
+}
+
+/*
+queryRoutes registers the query surface.
+
+Gated on [authz.PermNativeQuery] rather than PermQuery, and the distinction is
+the one ADR-0009 turns on: row-level security is injected by the semantic
+compiler, and raw SQL never passes through it. Somebody permitted to ask
+questions of the semantic layer is not thereby permitted to write SELECT *
+against the table underneath it.
+
+The gate is here *as well as* in the pipeline. The pipeline's check is the one
+that counts -- it is what makes the guarantee structural rather than a
+convention every handler has to remember -- and this one fails the request
+before a body is even read, which is cheaper and gives the standard 403.
+*/
+func (r *Router) queryRoutes(authed Middleware) {
+	h := r.cfg.Queries
+	if h == nil {
+		return
+	}
+
+	mayQuery := Chain(authed, r.require(authz.PermNativeQuery))
+
+	r.mux.Handle("POST "+APIPrefix+"/queries", mayQuery(http.HandlerFunc(h.handleRun)))
+
+	// Which sources exist is gated on the same permission as running against
+	// one. A list of the databases an organization connects to is not secret
+	// from somebody who may query them, and is not something to hand to
+	// somebody who may not.
+	r.mux.Handle("GET "+APIPrefix+"/connections",
+		mayQuery(http.HandlerFunc(h.handleConnections)))
 }
 
 // telemetryRoutes registers the browser error endpoint.

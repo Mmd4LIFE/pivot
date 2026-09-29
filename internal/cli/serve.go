@@ -218,6 +218,8 @@ readiness change before the drain begins, so no request is dropped.`,
 				api.WithOIDC(api.NewOIDCHandler(
 					repos, registry, authSvc, cookie, cfg.Server.BaseURL, log)),
 				api.WithSPA(web.Handler()),
+				api.WithQueries(api.NewQueryHandler(
+					buildPipeline(cfg, repos, checker, log), repos, log)),
 				// Nil handler when metrics are off, which leaves /metrics
 				// unregistered rather than serving an empty page.
 				api.ServingMetrics(metrics, metricsHandler),
@@ -259,6 +261,50 @@ readiness change before the drain begins, so no request is dropped.`,
 			return srv.Run(ctx)
 		},
 	}
+}
+
+/*
+buildPipeline assembles the query pipeline this process serves with.
+
+The first production caller of everything built since Part 20-b. Until now the
+executor, the cache, the governor and the monitor were constructed only by
+tests, which is a strange place for load-bearing code to live.
+
+Every piece is optional by construction and the composition says which are on.
+A cache an operator turned off is a nil cache, not an empty one, so every query
+reports itself uncached rather than reporting a miss forever and looking
+broken.
+
+The granter comes from the same checker the middleware enforces with, because
+the cache keys on the caller's resolved policy set and a second resolver could
+disagree with the first -- which is the one disagreement ADR-0012 says must not
+be possible.
+*/
+func buildPipeline(
+	cfg *config.Config, repos *repo.Repositories, checker authz.Checker, log *slog.Logger,
+) *query.Executor {
+	opts := []query.Option{
+		query.WithLogger(log),
+		query.WithGovernor(query.NewGovernorFrom(cfg.Query)),
+		query.WithQueryTimeout(cfg.Query.Timeout.Duration()),
+		query.WithMonitor(QueryMonitor),
+		query.WithOwner(QueryOwner),
+	}
+
+	if cache := query.NewCacheFrom(cfg.Query.Cache); cache != nil {
+		cache.Watch(repos.Events())
+
+		if granter, ok := checker.(authz.Granter); ok {
+			opts = append(opts, query.WithCache(cache, granter))
+		} else {
+			// Without a granter nothing can be fingerprinted, and caching
+			// without one would mean callers who cannot be told apart sharing
+			// results. Off is the only safe reading.
+			log.Warn("the result cache is off: the checker cannot resolve policy sets")
+		}
+	}
+
+	return query.NewExecutor(repos, checker, opts...)
 }
 
 /*
