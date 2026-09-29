@@ -168,6 +168,24 @@ export function useWorkspace() {
    */
   const openWith = useCallback((tab: Omit<EditorTab, "id">) => {
     setWorkspace((current) => {
+      /*
+       * Reuse a tab that already holds this question rather than always
+       * appending one.
+       *
+       * The address bar carries the statement as it is typed, so a reload
+       * reads the page's own fragment back on mount. Appending unconditionally
+       * meant every refresh opened a second copy of the tab you were already
+       * in -- and the one after that a third.
+       *
+       * Matched on the statement and the source, not the title: a title is the
+       * one part of a question somebody renames.
+       */
+      const existing = current.tabs.find(
+        (open) => open.sql === tab.sql && open.connectionId === tab.connectionId,
+      );
+
+      if (existing) return { ...current, activeId: existing.id };
+
       counter += 1;
 
       const opened: EditorTab = { id: `tab-${counter}`, ...tab };
@@ -180,7 +198,49 @@ export function useWorkspace() {
     setWorkspace((current) => ({ ...current, activeId: id }));
   }, []);
 
-  return { workspace, active, update, open, close, select, openWith };
+  /*
+   * Rename a tab.
+   *
+   * An empty name falls back to the generated one rather than leaving a tab
+   * with no label -- a strip of unlabelled tabs is unusable, and clearing the
+   * field is what somebody does on the way to typing something else.
+   */
+  const rename = useCallback((id: string, title: string) => {
+    setWorkspace((current) => ({
+      ...current,
+      tabs: current.tabs.map((tab, index) =>
+        tab.id === id ? { ...tab, title: title.trim() || `Query ${index + 1}` } : tab,
+      ),
+    }));
+  }, []);
+
+  /*
+   * Move a tab one place left or right.
+   *
+   * Buttons rather than drag-and-drop, and that is the deliberate part: a
+   * reorder somebody can reach with a keyboard is worth more than one that
+   * looks better with a mouse, and drag-and-drop without a keyboard equivalent
+   * is a feature that excludes people. Drag can be added on top later; it
+   * cannot be retrofitted underneath.
+   */
+  const move = useCallback((id: string, direction: -1 | 1) => {
+    setWorkspace((current) => {
+      const from = current.tabs.findIndex((tab) => tab.id === id);
+      if (from < 0) return current;
+
+      const to = from + direction;
+      if (to < 0 || to >= current.tabs.length) return current;
+
+      const tabs = [...current.tabs];
+      const [moved] = tabs.splice(from, 1);
+
+      if (moved) tabs.splice(to, 0, moved);
+
+      return { ...current, tabs };
+    });
+  }, []);
+
+  return { workspace, active, update, open, close, select, openWith, rename, move };
 }
 
 /**

@@ -263,6 +263,58 @@ test("explains an instance with no sources", async () => {
  * containing a non-ASCII identifier -- and a marker one place to the left of
  * the problem is worse than no marker, because it is confidently wrong.
  */
+/*
+ * The toolbar.
+ *
+ * An icon-only toolbar is exactly the kind of thing that passes review by eye
+ * and fails for anybody not using it with a mouse and working vision. These
+ * tests assert the accessible names, because that is the property icons make
+ * easy to lose and impossible to notice losing.
+ */
+describe("the toolbar", () => {
+  test("names every action it draws as an icon", async () => {
+    signedIn();
+
+    mountEditor();
+
+    expect(await screen.findByRole("button", { name: "Run" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Format" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy link" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Browse tables" })).toBeInTheDocument();
+  });
+
+  // Navigation, so it has to be a link with a real href: middle-click opens
+  // the catalog beside a query somebody is midway through writing.
+  test("points the catalog at the source the tab is using", async () => {
+    signedIn();
+
+    mountEditor();
+
+    expect(await screen.findByRole("link", { name: "Browse tables" })).toHaveAttribute(
+      "href",
+      "/browse/c1",
+    );
+  });
+
+  /*
+   * The source picker is not in the row with Run.
+   *
+   * Which database a statement is about to hit is a decision made once;
+   * putting that control next to the one that fires the statement is how a
+   * mis-click runs something against the wrong database.
+   */
+  test("keeps the source picker out of the action row", async () => {
+    signedIn();
+
+    mountEditor();
+
+    const source = await screen.findByLabelText("Source");
+    const runButton = screen.getByRole("button", { name: "Run" });
+
+    expect(source.parentElement?.contains(runButton)).toBe(false);
+  });
+});
+
 describe("locating an error in the statement", () => {
   test("finds the line and column of a byte offset", () => {
     const sql = "SELECT 1\nFROM nope\nWHERE x";

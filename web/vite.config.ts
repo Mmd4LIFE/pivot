@@ -82,6 +82,18 @@ export default defineConfig({
            */
           if (/node_modules\/@tanstack\/(react-)?virtual(-core)?\//.test(id)) return undefined;
 
+          /*
+           * The SQL formatter and what it is built on.
+           *
+           * `nearley` and `argparse` are its dependencies, and they have to be
+           * named here too. Leaving them out is the same mistake that put
+           * `@tanstack/virtual-core` in the eager chunk while its wrapper sat
+           * in the lazy one: the exclusion buys nothing if the weight follows
+           * a different path into the bundle. Measured -- vendor grew 2.6 KB
+           * and the budget went to 199.0 of 200 before these two were added.
+           */
+          if (/node_modules\/(sql-formatter|nearley|argparse)\//.test(id)) return undefined;
+
           if (id.includes("node_modules/@tanstack/")) return "tanstack";
 
           return "vendor";

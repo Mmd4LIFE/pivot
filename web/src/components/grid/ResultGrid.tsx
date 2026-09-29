@@ -52,6 +52,15 @@ export interface ResultGridProps {
 const ROW_HEIGHT = 28;
 const ROW_NUMBER_WIDTH = 56;
 
+/*
+ * The type row's height, which the name row below it sticks beneath.
+ *
+ * Fixed rather than measured because `position: sticky` needs a number to
+ * offset by. Without it the name row scrolls away and data slides up behind
+ * the type row -- which looked like values appearing inside the header.
+ */
+const TYPE_ROW_HEIGHT = 20;
+
 type Sort = { col: number; direction: "asc" | "desc" } | null;
 
 export function ResultGrid({ columns, rows, height = 420 }: ResultGridProps) {
@@ -308,13 +317,13 @@ export function ResultGrid({ columns, rows, height = 420 }: ResultGridProps) {
             a column somebody wants the name; the type is there for the moment
             they are wondering why a comparison behaved oddly.
           */}
-          <thead className="sticky top-0 z-20">
+          <thead>
             <tr>
               <th
                 scope="col"
                 rowSpan={2}
-                style={{ width: ROW_NUMBER_WIDTH }}
-                className="sticky left-0 z-30 border-b border-r border-line bg-surface-sunken px-2 align-bottom text-end text-xs font-medium text-content-subtle"
+                style={{ width: ROW_NUMBER_WIDTH, top: 0 }}
+                className="sticky left-0 z-40 border-b border-r border-line bg-surface-sunken px-2 align-bottom text-end text-xs font-medium text-content-subtle"
               >
                 #
               </th>
@@ -323,8 +332,12 @@ export function ResultGrid({ columns, rows, height = 420 }: ResultGridProps) {
                 <th
                   key={column.name + index + "-type"}
                   aria-hidden="true"
-                  style={widths[column.name] ? { width: widths[column.name] } : undefined}
-                  className={`border-r border-line px-2 pt-1 text-start text-[10px] font-normal uppercase leading-none tracking-wide text-content-subtle ${
+                  style={{
+                    ...(widths[column.name] ? { width: widths[column.name] } : {}),
+                    top: 0,
+                    height: TYPE_ROW_HEIGHT,
+                  }}
+                  className={`sticky z-30 border-r border-line px-2 pt-1 text-start text-[10px] font-normal uppercase leading-none tracking-wide text-content-subtle ${
                     index >= selectedBounds.left && index <= selectedBounds.right
                       ? "bg-accent/25"
                       : "bg-surface-sunken"
@@ -390,7 +403,7 @@ export function ResultGrid({ columns, rows, height = 420 }: ResultGridProps) {
                 <tr key={item.key} aria-rowindex={item.index + 1} style={{ height: ROW_HEIGHT }}>
                   <th
                     scope="row"
-                    className={`sticky left-0 z-10 border-b border-r border-line px-2 text-end align-middle font-mono text-xs font-normal tabular-nums ${
+                    className={`sticky left-0 z-20 border-b border-r border-line px-2 text-end align-middle font-mono text-xs font-normal tabular-nums ${
                       isSelectedRow
                         ? "bg-accent/25 text-content"
                         : "bg-surface-sunken text-content-subtle"
@@ -483,8 +496,17 @@ function HeaderCell({
     <th
       scope="col"
       aria-sort={sorted === "asc" ? "ascending" : sorted === "desc" ? "descending" : "none"}
-      style={width ? { width, minWidth: width, maxWidth: width } : undefined}
-      className={`group relative border-b border-r border-line px-0 py-0 text-start align-middle ${
+      /*
+        Sticky beneath the type row, so both halves of the header stay put.
+        Applied to the cell rather than to <thead>, which is not a sticky
+        container in every engine -- with it on the thead alone the name row
+        scrolled away and data appeared to slide up inside the header.
+      */
+      style={{
+        ...(width ? { width, minWidth: width, maxWidth: width } : {}),
+        top: TYPE_ROW_HEIGHT,
+      }}
+      className={`group sticky z-30 border-b border-r border-line px-0 py-0 text-start align-middle ${
         selected ? "bg-accent/25" : "bg-surface-sunken"
       }`}
     >
