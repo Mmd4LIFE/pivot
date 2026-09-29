@@ -10,6 +10,7 @@ import { PageHeader } from "../components/shell/AppShell";
 import { Button } from "../ui/Button";
 import { Card, CardBody } from "../ui/Card";
 import { EmptyState } from "../ui/EmptyState";
+import { Field } from "../ui/Field";
 import { Input } from "../ui/Input";
 import { Skeleton } from "../ui/Skeleton";
 
@@ -79,13 +80,20 @@ function BrowseConnectionPage() {
           ← {t("browse.allSources")}
         </Link>
 
-        <Input
-          aria-label={t("browse.filter")}
-          placeholder={t("browse.filter")}
-          value={filter}
-          onChange={(event) => setFilter(event.target.value)}
-          className="max-w-xs"
-        />
+        {/*
+          Wrapped in a Field, because Input requires one: it reads the id, the
+          description and the invalid state from that context and throws
+          without it. TypeScript cannot see a runtime context requirement, so
+          this page rendered a blank screen and an error boundary -- which is
+          what the route test now catches.
+        */}
+        <Field label={t("browse.filter")} className="max-w-xs">
+          <Input
+            placeholder={t("browse.filter")}
+            value={filter}
+            onChange={(event) => setFilter(event.target.value)}
+          />
+        </Field>
       </div>
 
       {schema.isPending ? <Skeleton className="h-32 w-full" /> : null}

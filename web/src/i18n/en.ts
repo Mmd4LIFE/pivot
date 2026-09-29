@@ -225,6 +225,9 @@ export const en = {
     source: "Source",
     statement: "SQL statement",
     run: "Run",
+    share: "Copy link",
+    linkCopied: "Link copied",
+    linkTooLong: "This query is too long to share as a link.",
     running: "Running…",
 
     rows: "{{count}} row",

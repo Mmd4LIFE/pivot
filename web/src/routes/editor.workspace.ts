@@ -159,11 +159,28 @@ export function useWorkspace() {
     });
   }, []);
 
+  /*
+   * Open a tab somebody arrived with -- from a shared link, or from Browse.
+   *
+   * A new tab rather than a replacement: whatever was already being written is
+   * somebody's work, and a link that silently overwrote it would be the last
+   * link they clicked.
+   */
+  const openWith = useCallback((tab: Omit<EditorTab, "id">) => {
+    setWorkspace((current) => {
+      counter += 1;
+
+      const opened: EditorTab = { id: `tab-${counter}`, ...tab };
+
+      return { tabs: [...current.tabs, opened], activeId: opened.id };
+    });
+  }, []);
+
   const select = useCallback((id: string) => {
     setWorkspace((current) => ({ ...current, activeId: id }));
   }, []);
 
-  return { workspace, active, update, open, close, select };
+  return { workspace, active, update, open, close, select, openWith };
 }
 
 /**

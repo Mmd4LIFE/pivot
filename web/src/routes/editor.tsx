@@ -1,8 +1,9 @@
 import { createRoute } from "@tanstack/react-router";
-import { Suspense, lazy, useMemo, type FormEvent } from "react";
+import { Suspense, lazy, useEffect, useMemo, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Route as authenticatedRoute } from "./authenticated";
+import { MAX_LINK_LENGTH, decodeQuestion, questionLink } from "./editor.link";
 import { useWorkspace, type EditorTab } from "./editor.workspace";
 import { ApiError, type ConnectionSchema, type QueryResult } from "../api/client";
 import { useConnectionSchema, useQueryableConnections, useRunQuery } from "../api/queries";
@@ -68,7 +69,29 @@ function Editor() {
   const connections = useQueryableConnections();
   const run = useRunQuery();
 
-  const { workspace, active, update, open, close, select } = useWorkspace();
+  const { workspace, active, update, open, close, select, openWith } = useWorkspace();
+
+  /*
+   * A question that arrived in the URL.
+   *
+   * Opened as a new tab rather than replacing what somebody was writing: a
+   * link is somebody else's question, and landing on it must not cost you
+   * yours. The fragment is cleared afterwards so a reload does not open it a
+   * second time, and so the address bar stops showing a link to something the
+   * page has moved on from.
+   */
+  useEffect(() => {
+    const shared = decodeQuestion(window.location.hash);
+    if (!shared) return;
+
+    openWith({
+      title: shared.title || "Shared query",
+      sql: shared.sql,
+      connectionId: shared.connectionId,
+    });
+
+    window.history.replaceState(null, "", window.location.pathname);
+  }, [openWith]);
 
   const available = connections.data?.connections ?? [];
 
@@ -158,6 +181,8 @@ function Editor() {
               <Button type="submit" disabled={run.isPending || !active.sql.trim()}>
                 {run.isPending ? t("editor.running") : t("editor.run")}
               </Button>
+
+              <ShareButton sql={active.sql} connectionId={selected} title={active.title} />
 
               {run.data ? <ResultSummary result={run.data} /> : null}
 
@@ -374,4 +399,65 @@ function completionSchema(
   }
 
   return out;
+}
+
+/**
+ * Copy a link to this question.
+ *
+ * The link carries the source and the statement in the URL *fragment*, which
+ * browsers never send to a server -- so the SQL stays out of access logs,
+ * proxy logs and the Referer header of every subsequent request. A statement
+ * can name tables, columns and filter values that are themselves sensitive.
+ *
+ * It carries the question and not the answer: whoever opens it still has to be
+ * signed in, still needs the permission, and still needs access to that
+ * connection. Sharing a link is not sharing data, and the button says so.
+ */
+function ShareButton({
+  sql,
+  connectionId,
+  title,
+}: {
+  sql: string;
+  connectionId: string;
+  title: string;
+}) {
+  const { t } = useTranslation();
+  const [state, setState] = useState<"idle" | "copied" | "tooLong">("idle");
+
+  const link = questionLink({ connectionId, sql, title }, window.location.origin);
+  const disabled = !connectionId || sql.trim() === "";
+
+  function share() {
+    if (link.length > MAX_LINK_LENGTH) {
+      setState("tooLong");
+
+      return;
+    }
+
+    void navigator.clipboard
+      ?.writeText(link)
+      .then(() => setState("copied"))
+      .catch(() => setState("idle"));
+  }
+
+  useEffect(() => {
+    if (state !== "copied") return undefined;
+
+    const timer = window.setTimeout(() => setState("idle"), 2000);
+
+    return () => window.clearTimeout(timer);
+  }, [state]);
+
+  return (
+    <span className="flex items-center gap-2">
+      <Button type="button" variant="ghost" size="sm" disabled={disabled} onClick={share}>
+        {state === "copied" ? t("editor.linkCopied") : t("editor.share")}
+      </Button>
+
+      {state === "tooLong" ? (
+        <span className="text-xs text-content-muted">{t("editor.linkTooLong")}</span>
+      ) : null}
+    </span>
+  );
 }
