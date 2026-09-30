@@ -910,7 +910,7 @@ paths:
 
         The result is materialized rather than streamed: the row cap bounds it,
         so "the whole result" is bounded by a number an administrator set.
-        Export streams, and is Part 24.
+        Export streams — see `POST /api/v1/exports`.
 
         `truncated` says the result met the row cap. A client that ignores it
         shows a partial answer as a whole one.
@@ -939,6 +939,73 @@ paths:
           description: |
             The source rejected or failed the query (`PIVOT-QUERY-002`). The
             message is the source's own.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: |
+            Too many queries are already running (`PIVOT-QUERY-003`), or the
+            authorization store could not answer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/exports:
+    post:
+      tags: [query]
+      operationId: exportQuery
+      summary: Stream a query result as a downloadable file
+      description: |
+        Runs a statement through the same pipeline as `POST /api/v1/queries`
+        and streams the rows as CSV, TSV or JSON.
+
+        Gated on `native_query`. The body starts before the last row arrives:
+        nothing is assembled in memory beyond a small buffer, which is what
+        makes a multi-million-row export a constant-memory operation on the
+        server.
+
+        Excel and Parquet are Part 24-b; a request for either is refused with
+        the formats that do exist named in the message.
+
+        Once the stream has started, a source failure can only truncate the
+        file — the status line is already gone.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExportRequest"
+      responses:
+        "200":
+          description: |
+            The file. `Content-Disposition` names it `result.<ext>`;
+            `Cache-Control` is `no-store`.
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+            text/tab-separated-values:
+              schema:
+                type: string
+                format: binary
+            application/json:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "502":
+          description: |
+            The source rejected or failed the query (`PIVOT-QUERY-002`).
           content:
             application/json:
               schema:
@@ -1035,6 +1102,26 @@ components:
           description: |
             Cap this result. Zero uses the connection's own limit, which is the
             setting an administrator chose and the one to leave alone.
+
+    ExportRequest:
+      type: object
+      required: [connectionId, sql, format]
+      properties:
+        connectionId:
+          type: string
+          format: uuid
+        sql:
+          type: string
+        format:
+          type: string
+          enum: [csv, tsv, json]
+          description: |
+            The file shape. `xlsx` and `parquet` arrive in Part 24-b.
+        maxRows:
+          type: integer
+          format: int64
+          description: |
+            Cap this result. Zero uses the connection's own limit.
 
     QueryColumn:
       type: object

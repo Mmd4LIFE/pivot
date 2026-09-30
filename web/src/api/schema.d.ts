@@ -557,10 +557,226 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The sources this caller may query
+         * @description An id, a slug, a name and a kind, and nothing else: an editor needs to
+         *     know which sources exist and what to call them, and every other field
+         *     is administration, which Part 26 owns.
+         *
+         *     Gated on `native_query`, the same permission as running a statement. A
+         *     list of the databases an organization connects to is not secret from
+         *     somebody who may query them, and is not for somebody who may not.
+         *
+         *     Disabled connections are omitted rather than returned greyed out: a
+         *     picker offering something that cannot work produces a confusing error
+         *     instead of a shorter list.
+         */
+        get: operations["listQueryableConnections"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/connections/{id}/schema": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What Pivot knows a connection contains
+         * @description The tables and columns the last catalog sync saw, for autocomplete.
+         *
+         *     Read from the catalog rather than from the source. Completion fires on
+         *     every keystroke, and introspecting a warehouse that often would be an
+         *     outage with a text cursor in front of it.
+         *
+         *     The cost of that is staleness, which `synced` is honest about: a
+         *     connection nobody has synced has no schema to offer, and reporting an
+         *     empty list as "no tables" would describe an empty database rather than
+         *     an unread one. Tables a sync marked gone are omitted.
+         */
+        get: operations["getConnectionSchema"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/queries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run SQL against a connected source
+         * @description Runs a statement through the query pipeline and returns its rows.
+         *
+         *     Gated on `native_query`, not `query`. Row-level security is injected by
+         *     the semantic compiler and raw SQL never passes through it, so being
+         *     permitted to ask questions of the semantic layer is not being permitted
+         *     to write SELECT * against the table underneath it.
+         *
+         *     The result is materialized rather than streamed: the row cap bounds it,
+         *     so "the whole result" is bounded by a number an administrator set.
+         *     Export streams — see `POST /api/v1/exports`.
+         *
+         *     `truncated` says the result met the row cap. A client that ignores it
+         *     shows a partial answer as a whole one.
+         */
+        post: operations["runQuery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/exports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stream a query result as a downloadable file
+         * @description Runs a statement through the same pipeline as `POST /api/v1/queries`
+         *     and streams the rows as CSV, TSV or JSON.
+         *
+         *     Gated on `native_query`. The body starts before the last row arrives:
+         *     nothing is assembled in memory beyond a small buffer, which is what
+         *     makes a multi-million-row export a constant-memory operation on the
+         *     server.
+         *
+         *     Excel and Parquet are Part 24-b; a request for either is refused with
+         *     the formats that do exist named in the message.
+         *
+         *     Once the stream has started, a source failure can only truncate the
+         *     file — the status line is already gone.
+         */
+        post: operations["exportQuery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        QueryableConnection: {
+            /** Format: uuid */
+            id: string;
+            slug: string;
+            name: string;
+            /** @example postgres */
+            kind: string;
+        };
+        QueryableConnections: {
+            connections: components["schemas"]["QueryableConnection"][];
+        };
+        SchemaTable: {
+            schema: string;
+            name: string;
+            columns: string[];
+        };
+        ConnectionSchema: {
+            tables: components["schemas"]["SchemaTable"][];
+            /**
+             * @description Whether anything has been cataloged. False means nobody has run a
+             *     sync, not that the database is empty.
+             */
+            synced: boolean;
+        };
+        RunQueryRequest: {
+            /**
+             * Format: uuid
+             * @description The source to run it against.
+             */
+            connectionId: string;
+            /** @description The statement. A compiled query replaces this in Phase 3. */
+            sql: string;
+            /**
+             * Format: int64
+             * @description Cap this result. Zero uses the connection's own limit, which is the
+             *     setting an administrator chose and the one to leave alone.
+             */
+            maxRows?: number;
+        };
+        ExportRequest: {
+            /** Format: uuid */
+            connectionId: string;
+            sql: string;
+            /**
+             * @description The file shape. `xlsx` and `parquet` arrive in Part 24-b.
+             * @enum {string}
+             */
+            format: "csv" | "tsv" | "json";
+            /**
+             * Format: int64
+             * @description Cap this result. Zero uses the connection's own limit.
+             */
+            maxRows?: number;
+        };
+        QueryColumn: {
+            name: string;
+            /**
+             * @description The canonical kind, which a client formats on.
+             * @example timestamp
+             */
+            type: string;
+            /**
+             * @description What the source called it, kept verbatim. A client formats on
+             *     `type`; a person debugging wants this.
+             * @example TIMESTAMPTZ
+             */
+            sourceType: string;
+        };
+        QueryResult: {
+            /**
+             * Format: uuid
+             * @description The query log row, which is also the name to use when stopping it.
+             */
+            queryId: string;
+            columns: components["schemas"]["QueryColumn"][];
+            /** @description Row-major, one array per row, aligned with `columns`. */
+            rows: unknown[][];
+            /** Format: int64 */
+            rowCount: number;
+            /**
+             * @description The result met the row cap. Showing it without saying so turns a
+             *     signaled partial answer into a silent one.
+             */
+            truncated: boolean;
+            /**
+             * @description The same vocabulary the query log records, so what a browser shows
+             *     and what an operator reads cannot disagree.
+             * @enum {string}
+             */
+            cacheStatus: "hit" | "miss" | "uncached";
+            /** Format: int64 */
+            durationMs: number;
+        };
         /**
          * @description Every field is client-supplied and none of it is trusted: strings are
          *     stripped of control characters and truncated before they reach a log,
@@ -1687,6 +1903,159 @@ export interface operations {
             };
             422: components["responses"]["UnprocessableEntity"];
             429: components["responses"]["TooManyRequests"];
+        };
+    };
+    listQueryableConnections: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The queryable connections */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueryableConnections"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getConnectionSchema: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The cataloged schema */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionSchema"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    runQuery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunQueryRequest"];
+            };
+        };
+        responses: {
+            /** @description The rows */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueryResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /**
+             * @description The source rejected or failed the query (`PIVOT-QUERY-002`). The
+             *     message is the source's own.
+             */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /**
+             * @description Too many queries are already running (`PIVOT-QUERY-003`), or the
+             *     authorization store could not answer.
+             */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    exportQuery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExportRequest"];
+            };
+        };
+        responses: {
+            /**
+             * @description The file. `Content-Disposition` names it `result.<ext>`;
+             *     `Cache-Control` is `no-store`.
+             */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                    "text/tab-separated-values": string;
+                    "application/json": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+            /** @description The source rejected or failed the query (`PIVOT-QUERY-002`). */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /**
+             * @description Too many queries are already running (`PIVOT-QUERY-003`), or the
+             *     authorization store could not answer.
+             */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
 }

@@ -280,6 +280,7 @@ describe("the toolbar", () => {
     expect(await screen.findByRole("button", { name: "Run" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Format" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Copy link" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Download" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Browse tables" })).toBeInTheDocument();
   });
 

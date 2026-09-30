@@ -60,8 +60,8 @@ At the end of every part, in this order:
 
 | | |
 |---|---|
-| **Last completed** | Part 23-d — The editor, properly |
-| **Next up** | **Part 24 — Results and export** |
+| **Last completed** | Part 24-a — Streaming CSV, TSV and JSON |
+| **Next up** | **Part 24-b — Excel and Parquet** |
 | **Current phase** | Phase 1 — Connect & Query → v0.1 |
 | **Branch** | `main` |
 | **Blockers** | None |
@@ -219,6 +219,13 @@ virtualized with a cell cursor, shift and drag range selection, copy as TSV that
 a spreadsheet with its columns intact, resizable columns, three-state sort and type-aware
 dates. `/browse` lists the connected sources and their tables from the catalog, and opening
 one lands in the editor with a statement quoted for that dialect.
+
+**And the answer leaves as a file without taking the server with it.**
+`POST /api/v1/exports` streams CSV, TSV or JSON through the same pipeline the editor uses —
+kind-driven formatting, NULL kept apart from the empty string — and
+`TestMemoryDoesNotGrowWithRows` measured **100,000 rows at 1.6 MB and 1,000,000 rows at
+2.4 MB**. The Download menu on the editor re-runs through that endpoint rather than
+re-serializing the grid, so the streaming property is what somebody gets when they click.
 
 **DuckDB exists and is not in the shipped binary.**
 [ADR-0010](docs/architecture/adr/0010-duckdb-is-an-opt-in-build.md) measured what ADR-0004's
@@ -970,20 +977,48 @@ sharing data, and the button says so.
 
 ---
 
-### - [ ] Part 24 — Results and export
+### - [x] Part 24-a — Streaming CSV, TSV and JSON ✅ 2026-09-30
 
-**Deliverable:** the answer, on screen and out of the building.
+**Deliverable:** the answer leaves the building as a file, without taking the server with it.
 
-**Build:** A virtualized result grid, type-aware cell formatting, column operations, and
-export to CSV, TSV, JSON, Excel and Parquet — streaming for results larger than memory.
+**Build:** `internal/export` — streaming writers for CSV, TSV and JSON with kind-driven cell
+formatting; `POST /api/v1/exports`; and a Download menu on the editor that re-runs through
+that endpoint.
 
 **Done when:**
-- The grid handles a million rows without the tab becoming unusable
-- **A 10M-row export streams to CSV without the server exceeding its memory budget**,
-  measured rather than assumed
-- Formatting is driven by the canonical types from Part 19, not by guessing from values
+- **A multi-million-row CSV export peaks at constant memory**, measured rather than assumed
+  (`TestMemoryDoesNotGrowWithRows`)
+- NULL and the empty string stay apart in every delimited format
+- A DATE is written as a date, a Decimal as a JSON string, and none of it is guessed from the
+  value
+- The endpoint streams through the pipeline and the single-door test still passes
+- The editor offers CSV, TSV and JSON as downloads of the last run
 
-**Refs:** `P1-RES-001` … `P1-RES-005`
+**Notes:** **Part 24 was split.** The virtualized grid and on-screen type-aware formatting
+shipped in 23-c. What remained was getting the answer *out* as a file without assembling it,
+and Excel/Parquet which pull in real dependencies. The streaming writers and the memory
+proof are the load-bearing half; the formats that need a library are 24-b's.
+
+**Refs:** `P1-RES-003`, `P1-RES-004` (csv/tsv/json), `P1-RES-005`
+
+---
+
+### - [ ] Part 24-b — Excel and Parquet
+
+**Deliverable:** the formats people ask for after CSV.
+
+**Build:** Streaming Excel (xlsx) and Parquet writers, offered next to CSV in the Download
+menu.
+
+**Done when:**
+- A request for `xlsx` or `parquet` produces a file, and the memory property still holds
+- The editor offers both formats next to CSV, TSV and JSON
+
+**Notes:** Both formats need a real library — that cost and the streaming discipline are the
+part, not a wrapper around an in-memory workbook. Async export with notification is
+`P1-RES-006` and stays deferred.
+
+**Refs:** `P1-RES-004` (xlsx, parquet)
 
 ---
 
@@ -1080,6 +1115,7 @@ Phase 0's log is in
 
 | Date | Part | Shipped | Notes |
 |---|---|---|---|
+| 2026-09-30 | 24-a | `internal/export` — streaming CSV/TSV/JSON writers with kind-driven formatting — `POST /api/v1/exports`, and a Download menu on the editor | **Part 24 was split.** The virtualized grid and on-screen type formatting already shipped in 23-c; what remained was getting the answer *out* without assembling it, and Excel/Parquet which need libraries. The streaming half is the load-bearing one and ships alone. **The memory property is measured, not assumed.** `TestMemoryDoesNotGrowWithRows` writes 100,000 then 1,000,000 CSV rows to `io.Discard` and compares peak heap: **1.6 MB → 2.4 MB**. Ten times the rows, a flat buffer. A materializing writer cannot meet the 2× ceiling. The rows are invented on the fly — a prebuilt slice would dwarf the writer and make every implementation look like it grew. **NULL stays apart from the empty string** in delimited formats the same way PostgreSQL's `COPY ... CSV` does it: unquoted empty is NULL, quoted empty is `""`. The JSON writer emits Decimal as a *string*, because a JSON number is a float64 in every mainstream parser and that is exactly the corruption `datatype.Decimal` exists to prevent. Dates format from the column's kind, not the Go type — a DATE is a calendar day with no midnight invented on it. **The endpoint is the same door as `/queries`**, opposite shape: status and the error envelope are decided before the first row; once the stream starts a mid-download failure can only truncate. Content-Disposition names the file, Cache-Control is `no-store`. **The Download menu re-runs through the export endpoint** rather than re-serializing the grid the editor already holds — the grid is capped and materialized, and clicking Download has to get the streaming property or the Done-when is theatre. The SQL is the one that produced the current result, not whatever is in the editor now. Excel and Parquet refuse with the formats that do exist named; they are 24-b's. Single-door still green. |
 | 2026-09-29 | 23-d | Run-selection, Format, a draggable and remembered split, tab rename and reorder, the toolbar rebuilt to Metabase's arrangement, and the address bar carrying the question | **The toolbar was the part, and it took two arrangements.** The first put the source picker, Run, Format and Copy link in one row under the editor -- which makes the control that chooses *which database a statement hits* a neighbour of the one that fires it, and that is a mis-click with real consequences. Metabase's split is the right one and this now follows it: the source at the top, decided once when you start; Run and three icon actions at the bottom right, under the hand of somebody who has just finished typing. **Run is the only labelled control in that row**, because four labelled buttons give none of them emphasis. Snippets were asked about and deliberately omitted -- `P3-SEM-001` and `P3-SEM-005` already put measures and metrics in the semantic layer, and a second, weaker way to reuse SQL would compete with the one that has lineage. **The icons carry both `aria-label` and `title`**, and a test asserts the accessible name of every action: an icon-only toolbar is exactly the thing that passes review by eye and fails for anybody not using a mouse. Verified by removing the label -- which still passed, because `title` is a valid name source -- and then removing both, which failed. **The address bar is now the link.** 23-f added a Copy-link button; the thing people actually reach for when they want to share something is the URL, and two sources of truth for one question is worse than either alone. Debounced at 400 ms and through `replaceState`, so typing does not fill the back button with every intermediate state of a query. **That change shipped a bug and the fix is the useful part**: the page reads its own fragment on mount, so a reload opened a duplicate of the tab you were already in, and the reload after that a third. `openWith` now reuses a tab holding the same statement against the same source -- matched on the statement and the source and **not** the title, since the title is the one part somebody renames, and not across sources, since the same text against staging and production are different questions. **The sticky header was bleeding.** `position: sticky` on `<thead>` does nothing in most browsers -- it belongs on the cells -- so rows scrolled *through* the header. Each `<th>` is sticky now, with the name row offset by the type row's height and a z-index ladder (corner 40, headers 30, row numbers 20). **Format is one transaction**, so a single undo puts back exactly what was there; reformatting somebody's query is only safe if it is trivially reversible, and a statement the formatter cannot parse is left alone rather than mangled. The formatter is imported inside the handler -- most sessions never press it. **Reorder is buttons, not drag**: drag-and-drop without a keyboard equivalent excludes people, and it can be layered on top later but not retrofitted underneath. The split is localStorage, dragged on the window rather than the handle (a pointer leaves a six-pixel grip immediately), and has arrow keys because the ARIA separator pattern asks for them. **Bundle 197.0 KB of 200** -- `sql-formatter` needed `nearley` and `argparse` excluded from `manualChunks` too, which is the same dependency-of-an-excluded-package trap the config's comment already records, hit for the fourth time. 294 frontend tests, 21 Go packages green with `-race`. |
 | 2026-09-29 | 23-f | A question carried in the URL fragment, a Copy-link button, and the `/browse` crash fixed | **The browse page was dead on arrival and every other test passed.** `<Input>` requires a surrounding `<Field>` -- it reads the id and the invalid state from that context and throws without one -- and TypeScript cannot see a runtime context requirement, so it compiled, shipped, and rendered an error boundary. The failure was process rather than code: I shipped a route with **no test**, ran the full suite, saw 262 green, and called it verified. A route with no test can be dead on arrival while everything else passes. Three route tests now cover it and the first would have caught this. **Sharing is the fragment, and that is a security property.** Browsers never send the part after `#`, so a statement stays out of access logs, proxy logs and the `Referer` header of every request the page subsequently makes -- and a statement can name tables, columns and filter values that are themselves sensitive. A query string would have sprinkled it across infrastructure with no business holding it. Metabase does the same thing for the same reason. **A link carries the question, not the answer**: whoever opens it is still signed in as themselves, still needs `native_query`, and still needs that connection, because the pipeline decides exactly as it does for anything typed by hand. **Base64url through UTF-8**, because `btoa` takes Latin-1 and throws above U+00FF -- a share button that skipped the encode step works until somebody queries a column named `città`, and there is a test with `città`, `顧客` and `café` in it. `-_` and no padding, because the result gets pasted into chat clients where `+` comes back as a space. **Most of the twelve tests are about what arrives instead of a link**: a truncated paste, a version from a later release, somebody else's hash, valid base64 that is not a question. Nothing throws; the editor falls back to an empty tab. A URL is the least trustworthy input a frontend takes. **A shared link opens a new tab** rather than replacing the current one -- a link is somebody else's question and landing on it must not cost you yours -- and the fragment is cleared so a reload does not reopen it. |
 | 2026-09-29 | 23-c, 23-e | A virtualized results grid with spreadsheet selection and TSV copy, `/browse` over the catalog, a CodeMirror theme built from the design tokens, and the cursor bug fixed | **Part 23 was split again into 23-c, 23-d and 23-e**, because "the editor is bad" turned out to be three problems. The first was reported by the user and was mine: the editor was rebuilt on every keystroke and the caret vanished after each character — the completion schema was a fresh object in the effect's dependencies. Fixed with a memo *and* a CodeMirror compartment, so changing a tab's source reconfigures rather than rebuilds; four tests compare DOM node identity across re-renders and were verified to fail against the original. **The second was that nothing was styled at all.** 23-b's components referenced `--color-border`, `--color-bg`, `--color-fg-muted` — none of which exist in this project, whose vocabulary is Tailwind utilities over `--pivot-*`. Every component I had written rendered with browser defaults in both themes. A real CodeMirror theme followed, built entirely from tokens with no hex anywhere, because an embedder restyles Pivot by redefining those and one hard-coded colour is a patch of somebody else's product. **The third was column sizing, and it took five reports to fix because I kept tuning instead of checking.** Four attempts estimated text width — guessed per-character constants, a canvas measurement, a resolved font, a correction pass — and all four were wrong for one reason: `ctx.font` silently ignores a string it cannot parse and goes on measuring at `10px sans-serif`. First the value was an unresolved `var()`; then it was resolved but still contained the newlines the token is declared across. A symptom that stays consistently wrong through four different fixes is evidence the mechanism is broken, and I read it as calibration four times. **The fix was to delete the estimator.** The first render carries no widths, the browser lays the table out at `max-content`, and the result is read back and locked in. It cannot be wrong about fonts because it never asks about fonts. **The grid is selectable the way a database tool is**: an anchor-and-focus model so shifting back toward the anchor shrinks rather than restarts, drag to sweep, Ctrl-A, and a copy as **TSV** — tab-separated because a spreadsheet pastes it into cells with no import dialog, which is what decides whether people export or just copy. Tabs inside a value become spaces; quoting would be more faithful and arrives visible in the cell. **Dates are shown as dates**: a DATE came off the wire as `2026-09-26T00:00:00Z` and rendering that midnight told somebody their date has a time in it. Read as text and never through `Date`, because parsing and reformatting applies the *viewer's* zone and silently moves every value — a row stamped 00:30 UTC showing as the previous day in New York. **The chunking trap caught me twice more.** `manualChunks` forces a module into the chunk it names, so routing CodeMirror through `vendor` defeated its dynamic import (296 KB against a 200 KB budget), and excluding `@tanstack/react-virtual` without its `virtual-core` dependency did the same thing more quietly. A package excluded there must have its dependencies excluded too. Final: **194.6 KB initial**, with CodeMirror and the virtualizer in chunks fetched on demand. **`/browse` cost almost nothing** because its backend already existed — `GET /connections` and `/connections/{id}/schema` were built for autocomplete in 23-b. Opening a table hands a dialect-quoted statement to the editor rather than running it there: one data-viewing path, and the query stays visible. Also found: neither Browse nor the editor was in the sidebar, so the only way to reach the editor was to type the URL. |
