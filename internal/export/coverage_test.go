@@ -156,9 +156,9 @@ func TestContentTypesForEveryFormat(t *testing.T) {
 	t.Parallel()
 
 	cases := map[export.Format]string{
-		export.CSV:  "text/csv; charset=utf-8",
-		export.TSV:  "text/tab-separated-values; charset=utf-8",
-		export.JSON: "application/json; charset=utf-8",
+		export.CSV:            "text/csv; charset=utf-8",
+		export.TSV:            "text/tab-separated-values; charset=utf-8",
+		export.JSON:           "application/json; charset=utf-8",
 		export.Format("nope"): "application/octet-stream",
 	}
 
