@@ -24,22 +24,28 @@ would be wrong while still looking fine.
 func TestParseFormat(t *testing.T) {
 	t.Parallel()
 
-	cases := map[string]export.Format{
-		"csv":  export.CSV,
-		"CSV":  export.CSV,
-		" tsv": export.TSV,
-		"json": export.JSON,
+	// A slice rather than a map: one case deliberately carries leading
+	// whitespace to check TrimSpace, and gocritic treats that as a suspicious
+	// map key.
+	cases := []struct {
+		name string
+		want export.Format
+	}{
+		{"csv", export.CSV},
+		{"CSV", export.CSV},
+		{" tsv", export.TSV},
+		{"json", export.JSON},
 	}
 
-	for name, want := range cases {
-		got, err := export.ParseFormat(name)
+	for _, tc := range cases {
+		got, err := export.ParseFormat(tc.name)
 		if err != nil {
-			t.Errorf("ParseFormat(%q): %v", name, err)
+			t.Errorf("ParseFormat(%q): %v", tc.name, err)
 			continue
 		}
 
-		if got != want {
-			t.Errorf("ParseFormat(%q) = %q, want %q", name, got, want)
+		if got != tc.want {
+			t.Errorf("ParseFormat(%q) = %q, want %q", tc.name, got, tc.want)
 		}
 	}
 

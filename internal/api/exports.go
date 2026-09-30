@@ -69,7 +69,7 @@ func (h *QueryHandler) handleExport(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", format.ContentType())
 	w.Header().Set("Content-Disposition",
-		fmt.Sprintf(`attachment; filename="%s"`, filename))
+		fmt.Sprintf("attachment; filename=%q", filename))
 	// A download is not a document a CDN should keep: the SQL that produced it
 	// may read different rows a second later, and caching one person's answer
 	// as another person's file is how that happens quietly.
