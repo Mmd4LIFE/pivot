@@ -235,6 +235,13 @@ export const en = {
     linkTooLong: "This query is too long to share as a link.",
     running: "Running…",
 
+    export: "Download",
+    exportCsv: "CSV",
+    exportTsv: "TSV",
+    exportJson: "JSON",
+    exportFailed: "The download failed",
+    exporting: "Downloading…",
+
     rows: "{{count}} row",
     rows_other: "{{count}} rows",
     tookMs: "{{ms}} ms",

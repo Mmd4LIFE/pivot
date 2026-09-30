@@ -224,7 +224,8 @@ for an editor showing a page of rows and the wrong one for an export. The row
 cap is what keeps that honest -- a result cannot exceed the connection's limit,
 so "the whole result" is bounded by a number an administrator set.
 
-Part 24 builds export, which is where streaming to the client belongs.
+Part 24-a builds export ([QueryHandler.handleExport]), which is where
+streaming to the client belongs.
 */
 func (h *QueryHandler) handleRun(w http.ResponseWriter, r *http.Request) {
 	var req runQueryRequest

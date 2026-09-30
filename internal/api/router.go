@@ -433,6 +433,11 @@ func (r *Router) queryRoutes(authed Middleware) {
 
 	r.mux.Handle("POST "+APIPrefix+"/queries", mayQuery(http.HandlerFunc(h.handleRun)))
 
+	// The same permission and the same door, streaming rather than
+	// materializing. Export is how a result larger than the editor's page
+	// leaves the building without taking the server's memory with it.
+	r.mux.Handle("POST "+APIPrefix+"/exports", mayQuery(http.HandlerFunc(h.handleExport)))
+
 	// Which sources exist is gated on the same permission as running against
 	// one. A list of the databases an organization connects to is not secret
 	// from somebody who may query them, and is not something to hand to

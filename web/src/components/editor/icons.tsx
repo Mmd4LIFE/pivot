@@ -78,3 +78,14 @@ export function Check(props: SVGProps<SVGSVGElement>) {
     </Icon>
   );
 }
+
+/** Download. An arrow into a tray — the verb for "get this off the server". */
+export function Download(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M10 3v10" />
+      <path d="M6.5 9.5 10 13l3.5-3.5" />
+      <path d="M4 16.5h12" />
+    </Icon>
+  );
+}

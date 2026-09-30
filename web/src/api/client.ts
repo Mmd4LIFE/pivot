@@ -327,6 +327,16 @@ export const api = {
       body: { connectionId, sql },
     }),
 
+  /**
+   * Stream a result as a file and offer it as a download.
+   *
+   * Not routed through [request]: that always reads the body as JSON, and an
+   * export is a file. The session cookie still goes — credentials are
+   * same-origin — so there is no token to put in a query string.
+   */
+  exportQuery: (connectionId: string, sql: string, format: ExportFormat) =>
+    downloadExport(connectionId, sql, format),
+
   setupStatus: (signal?: AbortSignal) =>
     request<SetupStatus>("/setup/status", signal ? { signal } : {}),
 
@@ -335,3 +345,67 @@ export const api = {
   setup: (body: SetupRequest) =>
     request<SessionEnvelope>("/setup", { method: "POST", body }),
 };
+
+/** The formats Part 24-a writes. Excel and Parquet arrive in 24-b. */
+export type ExportFormat = "csv" | "tsv" | "json";
+
+async function downloadExport(
+  connectionId: string,
+  sql: string,
+  format: ExportFormat,
+): Promise<void> {
+  let response: Response;
+
+  try {
+    response = await fetch(API_PREFIX + "/exports", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        Accept: "*/*",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ connectionId, sql, format }),
+    });
+  } catch (cause) {
+    if (cause instanceof DOMException && cause.name === "AbortError") throw cause;
+    throw new NetworkError(cause);
+  }
+
+  if (!response.ok) {
+    const text = await response.text();
+    const parsed: unknown = text ? safeParse(text) : undefined;
+    const envelope =
+      isRecord(parsed) && isRecord(parsed.error) ? (parsed.error as Partial<ApiErrorBody>) : {};
+
+    throw new ApiError(response.status, envelope, traceIdOf(response));
+  }
+
+  const blob = await response.blob();
+  const filename =
+    filenameFromDisposition(response.headers.get("Content-Disposition")) ?? `result.${format}`;
+
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.rel = "noopener";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * The filename from a Content-Disposition header, or undefined.
+ *
+ * Only the quoted `filename="…"` form is read. The server writes that shape;
+ * anything else is treated as absent rather than guessed at.
+ */
+function filenameFromDisposition(header: string | null): string | undefined {
+  if (!header) return undefined;
+
+  const match = /filename="([^"]+)"/i.exec(header);
+
+  return match?.[1];
+}

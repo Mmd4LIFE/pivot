@@ -16,7 +16,7 @@ import { Route as authenticatedRoute } from "./authenticated";
 import { MAX_LINK_LENGTH, decodeQuestion, encodeQuestion, questionLink } from "./editor.link";
 import { useSplit } from "./editor.split";
 import { useWorkspace, type EditorTab } from "./editor.workspace";
-import { ApiError, type ConnectionSchema, type QueryResult } from "../api/client";
+import { api, ApiError, type ConnectionSchema, type ExportFormat, type QueryResult } from "../api/client";
 import * as Glyph from "../components/editor/icons";
 import { useConnectionSchema, useQueryableConnections, useRunQuery } from "../api/queries";
 import { PageHeader } from "../components/shell/AppShell";
@@ -24,6 +24,12 @@ import { Alert } from "../ui/Alert";
 import { Badge } from "../ui/Badge";
 import { Button } from "../ui/Button";
 import { Card, CardBody } from "../ui/Card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../ui/DropdownMenu";
 import { EmptyState } from "../ui/EmptyState";
 import { Skeleton } from "../ui/Skeleton";
 
@@ -340,6 +346,12 @@ function Editor() {
                 </IconButton>
 
                 <ShareButton sql={active.sql} connectionId={selected} title={active.title} />
+
+                <ExportMenu
+                  connectionId={run.variables?.connectionId ?? selected}
+                  sql={run.variables?.sql ?? ""}
+                  disabled={!run.data || !run.variables}
+                />
 
                 <Button
                   type="submit"
@@ -729,6 +741,80 @@ function ShareButton({
       >
         {state === "copied" ? <Glyph.Check /> : <Glyph.Link />}
       </IconButton>
+    </span>
+  );
+}
+
+/**
+ * Download the last run as a file.
+ *
+ * Re-runs through `POST /api/v1/exports` rather than re-serializing the rows
+ * the editor already holds. The grid is capped and materialized; the export
+ * endpoint streams, and that is the property Part 24-a exists to keep. The
+ * SQL is the one that produced the current result — not whatever is in the
+ * editor now — so editing after a run does not silently export a different
+ * question.
+ */
+function ExportMenu({
+  connectionId,
+  sql,
+  disabled,
+}: {
+  connectionId: string;
+  sql: string;
+  disabled: boolean;
+}) {
+  const { t } = useTranslation();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function download(format: ExportFormat) {
+    setBusy(true);
+    setError(null);
+
+    try {
+      await api.exportQuery(connectionId, sql, format);
+    } catch (cause) {
+      const message =
+        cause instanceof ApiError ? cause.message : t("editor.exportFailed");
+
+      setError(message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const formats: { format: ExportFormat; label: string }[] = [
+    { format: "csv", label: t("editor.exportCsv") },
+    { format: "tsv", label: t("editor.exportTsv") },
+    { format: "json", label: t("editor.exportJson") },
+  ];
+
+  return (
+    <span className="flex items-center gap-2">
+      {error ? <span className="text-xs text-danger">{error}</span> : null}
+
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild disabled={disabled || busy}>
+          <button
+            type="button"
+            className={ICON_BUTTON}
+            aria-label={busy ? t("editor.exporting") : t("editor.export")}
+            title={busy ? t("editor.exporting") : t("editor.export")}
+            disabled={disabled || busy}
+          >
+            <Glyph.Download />
+          </button>
+        </DropdownMenuTrigger>
+
+        <DropdownMenuContent align="end">
+          {formats.map(({ format, label }) => (
+            <DropdownMenuItem key={format} onSelect={() => void download(format)}>
+              {label}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </span>
   );
 }
